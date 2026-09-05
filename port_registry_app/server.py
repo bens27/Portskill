@@ -1241,13 +1241,21 @@ def console_css() -> str:
         ".pr-ps-serve-chip{max-width:min(42ch,100%)}"
         ".pr-serve-copy,.pr-serve-url-details{flex:0 0 auto}"
         ".pr-serve-url-details{font-size:11px}"
-        ".pr-serve-url-details summary{cursor:pointer;color:var(--cobalt);list-style:none}"
+        ".pr-serve-url-details summary{cursor:pointer;color:var(--cobalt);list-style:none;display:inline-flex;align-items:center;gap:6px}"
         ".pr-serve-url-details summary::-webkit-details-marker{display:none}"
         ".pr-serve-url-details code{display:block;margin-top:4px;padding:6px 8px;background:#fafbf9;border:1px solid var(--line);border-radius:6px;word-break:break-all;white-space:pre-wrap;max-width:min(42ch,100%)}"
         ".pr-mcp-system-details{margin:8px 0 0;border:1px solid var(--line);border-radius:8px;background:#fafbf9;padding:0}"
-        ".pr-mcp-system-details>summary{cursor:pointer;padding:10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;list-style:none}"
+        ".pr-mcp-system-details>summary{cursor:pointer;padding:10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;list-style:none;display:flex;align-items:center;gap:8px;user-select:none}"
         ".pr-mcp-system-details>summary::-webkit-details-marker{display:none}"
         ".pr-mcp-system-details[open]>summary{border-bottom:1px solid var(--line)}"
+        ".pr-disclose>summary,.pr-mcp-system-details>summary,.pr-serve-url-details>summary,.pr-subpanel>summary,.pr-history>summary{position:relative}"
+        ".pr-disclose>summary::before,.pr-mcp-system-details>summary::before,.pr-serve-url-details>summary::before,.pr-subpanel>summary::before,.pr-history>summary::before{content:\"\";display:inline-block;width:0;height:0;flex:0 0 auto;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:7px solid var(--cobalt);margin-right:2px;transition:transform .15s ease;transform-origin:4px 50%}"
+        ".pr-disclose[open]>summary::before,.pr-mcp-system-details[open]>summary::before,.pr-serve-url-details[open]>summary::before,.pr-subpanel[open]>summary::before,.pr-history[open]>summary::before{transform:rotate(90deg)}"
+        ".pr-mcp-system-details>summary .pr-disclose-hint{margin-left:auto;font-size:11px;font-weight:500;text-transform:none;letter-spacing:0;color:var(--cobalt);opacity:.85}"
+        ".pr-mcp-system-details[open]>summary .pr-disclose-hint{opacity:.55}"
+        ".pr-mcp-system-details>summary .pr-disclose-hint::after{content:\" tools\"}"
+        ".pr-mcp-system-details[open]>summary .pr-disclose-hint{font-size:0}"
+        ".pr-mcp-system-details[open]>summary .pr-disclose-hint::after{content:\"Hide\";font-size:11px;opacity:.55}"
         ".pr-mcp-system-details .pr-mcp-list{padding:8px;max-height:none}"
         ".pr-mcp-composer input[type=text],.pr-mcp-composer select{min-width:0;flex:1 1 10rem;max-width:100%}"
         ".pr-mcp-uc-name,.pr-mcp-uc-desc{min-width:0!important}"
@@ -1360,6 +1368,8 @@ def console_css() -> str:
         ".pr-card-pencil:hover{border-color:#8ea0ff;color:#8ea0ff}"
         "}"
         ".pr-compat-locked{opacity:.85}"
+        ".pr-subpanel>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px}"
+        ".pr-subpanel>summary::-webkit-details-marker{display:none}"
         ".pr-presets-soon .pr-preset-row button,.pr-presets-soon .pr-toolbar{display:none}"
     )
 
@@ -2036,7 +2046,7 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
     if system_rows:
         system_body = (
             f'<details class="pr-mcp-system-details" id="pr-mcp-system-details">'
-            f'<summary>System tools <span class="tag">{len(system_rows)}</span></summary>'
+            f'<summary>System tools <span class="tag">{len(system_rows)}</span><span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
             f'<ul class="pr-mcp-list">{"".join(system_rows)}</ul>'
             f"</details>"
         )
