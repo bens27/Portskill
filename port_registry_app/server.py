@@ -1236,7 +1236,7 @@ def console_css() -> str:
         ".pr-toolbar .pr-btn{flex:0 0 auto;padding:8px 12px}"
         ".pr-toolbar label{font-size:12px;color:var(--muted)}"
         ".pr-toolbar input[type=text],.pr-toolbar input[type=file]{font-size:12px}"
-        ".pr-subpanel{margin-top:16px;padding:14px 16px;border:1px solid var(--line);"
+        ".pr-subpanel{margin-top:16px;padding:0;border:1px solid var(--line);"
         "border-radius:8px;background:#fafbf9}"
         ".pr-subpanel h3{margin:0 0 10px;font-size:13px;text-transform:uppercase;"
         "letter-spacing:.08em;color:var(--muted)}"
@@ -1428,8 +1428,20 @@ def console_css() -> str:
         ".pr-card-pencil:hover{border-color:#8ea0ff;color:#8ea0ff}"
         "}"
         ".pr-compat-locked{opacity:.85}"
-        ".pr-subpanel>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px}"
+        ".pr-subpanel>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;"
+        "padding:14px 16px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;"
+        "color:var(--muted);font-weight:600;user-select:none}"
         ".pr-subpanel>summary::-webkit-details-marker{display:none}"
+        ".pr-subpanel[open]>summary{border-bottom:1px solid var(--line)}"
+        ".pr-subpanel>summary .pr-disclose-hint{margin-left:auto;font-size:11px;font-weight:500;"
+        "text-transform:none;letter-spacing:0;color:var(--cobalt);opacity:.85}"
+        ".pr-subpanel[open]>summary .pr-disclose-hint{font-size:0}"
+        ".pr-subpanel[open]>summary .pr-disclose-hint::after{content:\"Hide\";font-size:11px;opacity:.55}"
+        ".pr-subpanel .pr-settings-row{padding:14px 16px}"
+        ".pr-serve-url-details>summary .pr-disclose-hint{margin-left:4px;font-size:11px;font-weight:500;"
+        "color:var(--cobalt);opacity:.85}"
+        ".pr-serve-url-details[open]>summary .pr-disclose-hint{font-size:0}"
+        ".pr-serve-url-details[open]>summary .pr-disclose-hint::after{content:\"Hide\";font-size:11px;opacity:.55}"
         ".pr-presets-soon .pr-preset-row button,.pr-presets-soon .pr-toolbar{display:none}"
     )
 
@@ -1451,8 +1463,8 @@ def settings_panel_html(view: dict) -> str:
         options.append(f'<option value="{esc(name)}"{sel}>{esc(name)}</option>')
     # Remotes remain HOLD — do not render a Coming soon stub.
     return (
-        '<div class="pr-subpanel" id="pr-settings">'
-        "<h3>Settings</h3>"
+        '<details class="pr-subpanel" id="pr-settings">'
+        '<summary>Settings <span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
         '<div class="pr-settings-row">'
         f'<label><input type="checkbox" id="pr-auto-apply-launch" {checked}> Auto-apply on launch</label>'
         f'<label>Preset <select id="pr-auto-apply-preset">{"".join(options)}</select></label>'
@@ -1462,7 +1474,7 @@ def settings_panel_html(view: dict) -> str:
         "Require compatibility — on</label>"
         '<button type="button" class="pr-btn" data-pr-action="settings-save">Save settings</button>'
         "</div>"
-        "</div>"
+        "</details>"
     )
 
 
@@ -1672,7 +1684,8 @@ def portskill_serve_chip_html(ps: dict | None) -> str:
         )
         details = (
             f'<details class="pr-serve-url-details" id="pr-serve-url-details">'
-            f'<summary>Serve URL</summary><code id="pr-serve-url-full">{esc(url)}</code></details>'
+            f'<summary>Serve URL <span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
+            f'<code id="pr-serve-url-full">{esc(url)}</code></details>'
         )
     return (
         f'<span class="pr-ps-serve-wrap" id="pr-ps-serve-wrap">'
@@ -3409,7 +3422,7 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
           det=document.createElement('details');
           det.className='pr-serve-url-details';
           det.id='pr-serve-url-details';
-          det.innerHTML='<summary>Serve URL</summary><code id="pr-serve-url-full"></code>';
+          det.innerHTML='<summary>Serve URL <span class="pr-disclose-hint" aria-hidden="true">Show</span></summary><code id="pr-serve-url-full"></code>';
           wrap.appendChild(det);
         }}
         var full=document.getElementById('pr-serve-url-full');
@@ -3442,12 +3455,10 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
     }}
   }});
   (function(){{
-    /* Disclosures: default-collapsed (System tools + repo sections). */
-    var d=document.getElementById('pr-mcp-system-details');
-    if(d){{ d.open=false; }}
-    var hd=document.getElementById('pr-handoff-details');
-    if(hd){{ hd.open=false; }}
-    document.querySelectorAll('details.pr-project').forEach(function(el){{ el.open=false; }});
+    /* Disclosures: default-collapsed (System tools, repo, Settings, Serve URL, handoff). */
+    document.querySelectorAll(
+      'details.pr-project, details.pr-mcp-system-details, details.pr-subpanel, details.pr-serve-url-details, details.pr-disclose'
+    ).forEach(function(el){{ el.open=false; }});
   }})();
   function applyTailscaleStatus(body){{
     if(!body)return;

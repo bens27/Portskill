@@ -68,6 +68,32 @@ class CollapsedMarkupTests(unittest.TestCase):
             self.assertFalse(_has_open_attr(tag), f"repo details not collapsed: {tag}")
             self.assertIn("pr-project", tag)
 
+        settings = _details_tags(markup, "pr-subpanel")
+        self.assertTrue(settings, "details.pr-subpanel (Settings) missing from rendered HTML")
+        for tag in settings:
+            self.assertFalse(_has_open_attr(tag), f"Settings details not collapsed: {tag}")
+            self.assertIn("pr-subpanel", tag)
+        self.assertIn('id="pr-settings"', html)
+        self.assertIn("pr-disclose-hint", html)
+
+    def test_serve_url_details_start_collapsed_with_chevron_hint(self) -> None:
+        from port_registry_app.server import portskill_serve_chip_html
+
+        html = portskill_serve_chip_html(
+            {
+                "chip": "Serving",
+                "state": "serving",
+                "serve_url": "https://example.ts.net",
+                "message": "ok",
+            }
+        )
+        tags = _details_tags(html, "pr-serve-url-details")
+        self.assertTrue(tags, "Serve URL details missing when serving")
+        for tag in tags:
+            self.assertFalse(_has_open_attr(tag), f"Serve URL details not collapsed: {tag}")
+        self.assertIn("pr-disclose-hint", html)
+        self.assertIn("Serve URL", html)
+
     def test_loopback_has_no_bind_banner(self) -> None:
         import port_registry_app.server as srv
         from tests.helpers import IsolatedConfig
@@ -128,6 +154,23 @@ class AdHocCodesignScriptTests(unittest.TestCase):
         self.assertIn("not notarized", text.lower())
         syn = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)
         self.assertEqual(syn.returncode, 0, syn.stderr or syn.stdout)
+
+
+class PlaybookTests(unittest.TestCase):
+    def test_playbook_has_two_friend_paths_and_gatekeeper_honesty(self) -> None:
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[1]
+        text = (root / "PLAYBOOK.md").read_text(encoding="utf-8")
+        self.assertIn("right-click", text.lower())
+        self.assertIn("install-mac.sh", text)
+        self.assertIn("com.apple.quarantine", text)
+        self.assertIn("SECURITY.md", text)
+        self.assertIn("HOLD", text)
+        self.assertIn("does **not** claim App Store Connect", text)
+        self.assertIn("not** an app store or notarized", text.lower())
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.assertIn("PLAYBOOK.md", readme)
 
 
 if __name__ == "__main__":

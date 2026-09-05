@@ -22,6 +22,8 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versioning f
 - Loopback footgun warning: `doctor` `message` + UI banner/chip when `--host` is not `127.0.0.1` / `::1` / `localhost`. Default bind unchanged.
 - `scripts/cli.sh`, `scripts/doctor.sh`, `scripts/run.sh` — PYTHONPATH wrappers for a cold clone.
 - Expanded stdlib tests: version identity, doctor offline, MCP tool toggles, listen.json sticky, collapsed Compose/System Tools markup.
+- Friend-share **[PLAYBOOK.md](PLAYBOOK.md)** (AirDrop/zip right-click Open vs clone + `install-mac.sh`). Linked from the README cold path. Remotes HOLD; no ASC/notarize claim.
+- Disclosure chevrons: Settings is a start-collapsed details (same cobalt arrowhead + Show/Hide as System tools / repo). Serve URL gets the same Show hint. JS forces all of those closed on load.
 
 ## [0.1.0] — 2026-09-05
 
