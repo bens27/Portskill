@@ -1144,7 +1144,9 @@ def _listen_enrichment() -> dict:
     info = _LISTEN_RUNTIME
     if not isinstance(info, dict) or not info.get("mcp_url"):
         # Fall back to on-disk listen.json (agents / menubar / post-restart)
-        path = pathlib.Path(os.path.expanduser("~/.config/port-registry/listen.json"))
+        from .cli import listen_path as _listen_path
+
+        path = _listen_path()
         if path.is_file():
             try:
                 disk = json.loads(path.read_text(encoding="utf-8"))
@@ -1171,9 +1173,9 @@ def _listen_enrichment() -> dict:
         if key in info and info[key] is not None:
             out[key] = info[key]
     if "listen_path" not in out:
-        out["listen_path"] = str(
-            pathlib.Path(os.path.expanduser("~/.config/port-registry/listen.json"))
-        )
+        from .cli import listen_path as _listen_path
+
+        out["listen_path"] = str(_listen_path())
     if "setup" not in out:
         out["setup"] = {
             "cursor_mcp_http_hint": (

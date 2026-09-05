@@ -18,11 +18,11 @@ Do **not** Funnel or publicly expose the Portskill listen port while testing a r
 
 ## What we do **not** claim yet
 
-- **No notarized friend build unless `scripts/notarize-mac.sh` actually succeeded** with a Developer ID and Apple credentials. `build-app.sh` / `install-mac.sh` do **not** notarize. Until a given `.app` is signed + notarized + stapled, expect Gatekeeper prompts.
+- **No notarized friend build unless `scripts/notarize-mac.sh` actually succeeded** with a Developer ID and Apple credentials. `build-app.sh` / `install-mac.sh` do **not** notarize. On a Mac, `build-app.sh` **ad-hoc codesigns** (`codesign --sign -`) when no Developer ID / `PORTSKILL_SIGN_IDENTITY` is available — that is not Apple notarization. Until a given `.app` is signed + notarized + stapled, expect Gatekeeper prompts.
 - **Gatekeeper workaround for trusted local builds:** `scripts/install-mac.sh` runs `xattr -dr com.apple.quarantine` on the installed app. Friends who skip the installer can right-click → Open once. This is not the same as Apple notarization.
 - **Notarization path (maintainer):** `scripts/notarize-mac.sh` codesigns `dist/Portskill.app` (`PORTSKILL_SIGN_IDENTITY` or auto-detect Developer ID Application), submits a zip/dmg via `xcrun notarytool` using App Store Connect API key env (`APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_API_KEY_PATH` → `AuthKey_XXX.p8`), and staples. Apple ID / app-specific password is not used. The script fails closed if those vars are missing. Do not commit the `.p8`. **This file does not claim notarization succeeded.**
 - **No code-signing identity guarantee** in CI receipts for this private cut.
-- **No authentication / allowlist** on the HTTP UI or HTTP MCP listener. Widening `--host` (e.g. `0.0.0.0`) is an explicit footgun.
+- **No authentication / allowlist** on the HTTP UI or HTTP MCP listener. Widening `--host` (e.g. `0.0.0.0`) is an explicit footgun — `doctor` and the UI surface a warning; default bind stays loopback.
 - **Remotes** (multi-machine registry) remain HOLD — not a security surface in this cut.
 
 ## Safe defaults

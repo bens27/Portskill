@@ -25,10 +25,11 @@ python3 -c "import json,pathlib; print(json.load(open(pathlib.Path.home()/'.conf
 
 Friend builds are **not** App Store / notarized unless someone ran `./scripts/notarize-mac.sh` with a Developer ID and Apple credentials. Until then:
 
+- `./scripts/build-app.sh` **ad-hoc codesigns** `dist/Portskill.app` on a Mac when no Developer ID / `PORTSKILL_SIGN_IDENTITY` is present (`codesign --force --deep --sign -`). Ad-hoc ≠ notarized.
 - Prefer `./scripts/install-mac.sh` after a **trusted local build** — it strips `com.apple.quarantine`.
-- Or **right-click Portskill → Open** the first time (then Open again in the Gatekeeper sheet).
+- Or **right-click Portskill → Open** the first time (then Open again in the Gatekeeper sheet). That remains the zip fallback.
 
-Do not assume a downloaded zip is notarized just because this repo has a notarize script.
+Do not assume a downloaded zip is notarized just because this repo has a notarize script. Linux CI never fails the build for missing `codesign` (signing is Darwin-only).
 
 ### Notarization (maintainer, optional)
 
@@ -50,17 +51,17 @@ The script **fails closed** if those are missing and only prints success after `
 
 ## Agent / module path (secondary)
 
-For agents and Linux CI — not the friend install:
+For agents and Linux CI — not the friend install. Wrappers set `PYTHONPATH` so a cold clone does not need `PYTHONPATH=.`.
 
 ```bash
 git clone https://github.com/bens27/Portskill.git
 cd Portskill
-PYTHONPATH=. python3 -m port_registry_app --no-open
+./scripts/run.sh --no-open
 # Read live URLs (port is sticky; do not assume :8765):
 python3 -c "import json,pathlib; print(json.load(open(pathlib.Path.home()/'.config/port-registry/listen.json')))"
 # Open ui_url in a browser → claim/allocate a port range → use MCP tools/list
-PYTHONPATH=. python3 -m port_registry_app.cli doctor   # version + listen + reachability
-PYTHONPATH=. python3 tests/smoke_test.py               # offline smoke
+./scripts/doctor.sh                 # version + listen + reachability + bind-host warn
+./scripts/smoke_test.sh             # only documented smoke / test entry
 ```
 
 Optional: `pip install -e .` then `portskill` / `portskill-cli`.
@@ -110,14 +111,13 @@ Printed on launch (example shape; port varies):
 
 ## Smoke test & CI
 
-Non-destructive check (import + CLI + version consistency + optional HTTP if server already up):
+**Only documented entry:** `./scripts/smoke_test.sh` (sets `PYTHONPATH` and cwd). Do not run `python3 tests/smoke_test.py` by itself on a cold clone.
 
 ```bash
 ./scripts/smoke_test.sh
-# or: PYTHONPATH=. python3 tests/smoke_test.py
 ```
 
-Exit 0 on pass. GitHub Actions runs the same smoke on every push to `main` (`.github/workflows/ci.yml`) — Linux offline, no Mac `.app` required.
+Runs the friend smoke plus the expanded stdlib suite under `tests/test_*.py`. Exit 0 on pass. GitHub Actions runs the same script on every push/PR to `main` (`.github/workflows/ci.yml`) — Linux offline, no Mac `.app` required.
 
 ## UI highlights
 
@@ -134,7 +134,7 @@ See **[SECURITY.md](SECURITY.md)** for reporting, Gatekeeper / notarization stat
 
 - Default bind is `127.0.0.1`.
 - The same **unauthenticated** listener serves the UI, `GET /api/state`, and mutating `POST /mcp` (including `set_tailnet` with `funnel`).
-- `--host` can widen exposure with **no allowlist** — do not use `0.0.0.0` casually.
+- `--host` can widen exposure with **no allowlist** — do not use `0.0.0.0` casually. Binding off loopback shows a UI banner/chip and a `doctor` `message` warning. Remotes remain HOLD.
 - Prefer **stdio MCP** for agents (`--mcp-stdio` / `examples/mcp.stdio.json`). HTTP MCP is **local-trust dogfood only**.
 - Never Tailscale Funnel the Portskill listen/UI port without explicit Ben OK. Funnel on *user* services is a separate deliberate choice.
 - Remote machines remain **HOLD** (not implemented; no Settings stub).
@@ -161,25 +161,25 @@ Tools: `allocate`, `activate`, `start`, `stop`, `release`, `status`, `doctor`, `
 
 ## CLI
 
+Wrappers set `PYTHONPATH` (`./scripts/cli.sh`, `./scripts/doctor.sh`). After `pip install -e .`, use `portskill-cli …` the same way.
+
 ```bash
-PYTHONPATH=. python3 -m port_registry_app.cli status
-PYTHONPATH=. python3 -m port_registry_app.cli doctor
-PYTHONPATH=. python3 -m port_registry_app.cli allocate --count 1 --tailnet none --project .
-PYTHONPATH=. python3 -m port_registry_app.cli start --range-id <id> --project . --tailnet none
-PYTHONPATH=. python3 -m port_registry_app.cli stop --range-id <id> --project .
-PYTHONPATH=. python3 -m port_registry_app.cli release --range-id <id> --project .
+./scripts/cli.sh status
+./scripts/doctor.sh
+./scripts/cli.sh allocate --count 1 --tailnet none --project .
+./scripts/cli.sh start --range-id <id> --project . --tailnet none
+./scripts/cli.sh stop --range-id <id> --project .
+./scripts/cli.sh release --range-id <id> --project .
 
 # Defaults / environments
-PYTHONPATH=. python3 -m port_registry_app.cli set-default --range-id <id> --state on --project .
-PYTHONPATH=. python3 -m port_registry_app.cli apply-defaults
-PYTHONPATH=. python3 -m port_registry_app.cli deactivate
-PYTHONPATH=. python3 -m port_registry_app.cli deactivate --also-release
-PYTHONPATH=. python3 -m port_registry_app.cli compat check --preset ui-work --preset api-stack
-PYTHONPATH=. python3 -m port_registry_app.cli preset list
-PYTHONPATH=. python3 -m port_registry_app.cli settings get
+./scripts/cli.sh set-default --range-id <id> --state on --project .
+./scripts/cli.sh apply-defaults
+./scripts/cli.sh deactivate
+./scripts/cli.sh deactivate --also-release
+./scripts/cli.sh compat check --preset ui-work --preset api-stack
+./scripts/cli.sh preset list
+./scripts/cli.sh settings get
 ```
-
-After `pip install -e .`, use `portskill-cli …` the same way.
 
 ## Light UI
 
@@ -238,12 +238,12 @@ portskill-cli stop --non-default
 ```text
 port_registry_app/     # UI + MCP + CLI (compat module name)
 dist/Portskill.app/    # primary double-click bundle (after build-app.sh)
-scripts/               # install-mac, notarize-mac, build-app, install-keepalive, smoke_test, …
+scripts/               # install-mac, notarize-mac, build-app, cli, doctor, run, smoke_test, …
 macos/                 # Swift menu/Dock sources + launchd plist
 examples/              # MCP stdio + environment samples
 ui/                    # portable preview + WIRING
 skill/SKILL.md         # optional agent sidecar
-tests/smoke_test.py    # stdlib smoke (also scripts/smoke_test.sh)
+tests/                 # smoke_test.py + test_*.py (run via ./scripts/smoke_test.sh only)
 .github/workflows/ci.yml
 SECURITY.md / CHANGELOG.md
 pyproject.toml         # name: portskill  version: 0.1.0

@@ -5,6 +5,15 @@
 #
 # Output: <package>/dist/Portskill.app
 # Also refreshes: <package>/macos/Portskill.app (launcher + icons; python embedded in dist)
+#
+# Codesign (Darwin only — never fail the build on Linux CI for missing codesign):
+#   1. PORTSKILL_SIGN_IDENTITY if set
+#   2. First "Developer ID Application" identity in the keychain
+#   3. Ad-hoc (`codesign --force --deep --sign -`) so Gatekeeper is less angry
+#      for local friend installs
+# Ad-hoc ≠ notarized. install-mac.sh still strips quarantine; right-click Open
+# remains the zip / Gatekeeper fallback. Notarize stays PARKED
+# (see scripts/notarize-mac.sh) — this script never asks for ASC creds.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -130,6 +139,48 @@ for f in MenuIcon.png diana.k@example.org AppIcon.icns AppIcon.png; do
     cp "${CONTENTS}/Resources/${f}" "${MACOS_APP}/Contents/Resources/" 2>/dev/null || true
   fi
 done
+
+# --- codesign (Darwin only; never fail the build for missing tools) -----------
+# Prefer Developer ID / PORTSKILL_SIGN_IDENTITY. Otherwise ad-hoc sign so a
+# trusted local friend build is less likely to trip Gatekeeper. Ad-hoc is not
+# notarization. install-mac.sh still strips com.apple.quarantine; right-click
+# Open is the remaining zip fallback.
+sign_dist_app() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo "codesign: skipped (not Darwin — Linux CI / non-Mac build is unsigned)"
+    return 0
+  fi
+  if ! command -v codesign >/dev/null 2>&1; then
+    echo "WARN: codesign not found; leaving unsigned" >&2
+    return 0
+  fi
+  local identity=""
+  if [[ -n "${PORTSKILL_SIGN_IDENTITY:-}" ]]; then
+    identity="${PORTSKILL_SIGN_IDENTITY}"
+  elif command -v security >/dev/null 2>&1; then
+    identity="$(security find-identity -v -p codesigning 2>/dev/null \
+      | awk -F'"' '/Developer ID Application/ { print $2; exit }' || true)"
+  fi
+  if [[ -n "${identity}" ]]; then
+    echo "codesign: Developer ID / PORTSKILL_SIGN_IDENTITY (${identity}) — not notarized"
+    if codesign --force --deep --sign "${identity}" "${DIST_APP}"; then
+      echo "Signed: ${DIST_APP}"
+    else
+      echo "WARN: Developer ID codesign failed; leaving as-is (build continues)" >&2
+    fi
+    return 0
+  fi
+  echo "codesign: no Developer ID — ad-hoc (not notarized)"
+  if codesign --force --deep --sign - "${DIST_APP}"; then
+    echo "Ad-hoc signed ${DIST_APP}"
+    echo "Ad-hoc ≠ notarized. install-mac.sh still strips quarantine;"
+    echo "right-click Open remains the zip / Gatekeeper fallback."
+  else
+    echo "WARN: ad-hoc codesign failed; leaving unsigned (build continues)" >&2
+  fi
+}
+
+sign_dist_app
 
 SIZE="$(du -sh "${DIST_APP}" | awk '{print $1}')"
 echo

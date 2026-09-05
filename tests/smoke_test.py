@@ -88,7 +88,15 @@ def main() -> int:
         fail("disclosure chevron markup missing")
     ok("friend UI: no Coming soon chrome; Settings + Actions + disclosures present")
 
-    for script in ("scripts/install-mac.sh", "scripts/notarize-mac.sh"):
+    for script in (
+        "scripts/install-mac.sh",
+        "scripts/notarize-mac.sh",
+        "scripts/build-app.sh",
+        "scripts/smoke_test.sh",
+        "scripts/doctor.sh",
+        "scripts/cli.sh",
+        "scripts/run.sh",
+    ):
         path = ROOT / script
         if not path.is_file():
             fail(f"missing {script}")
