@@ -80,6 +80,10 @@ def main() -> int:
         fail("friend UI still renders Workspaces/Remotes/Presets Coming soon markup")
     if "System tools" not in html:
         fail("System tools disclosure missing from rendered UI")
+    if "Session Handoff" not in html or 'id="pr-handoff-details"' not in html:
+        fail("Session Handoff section missing from rendered UI")
+    if "Coming soon" in html.split("Session Handoff", 1)[-1][:800]:
+        fail("Session Handoff section advertises Coming soon")
     if "Export Workspace" not in html:
         fail("Export Workspace missing from rendered UI")
     if "Require compatibility" not in html or 'id="pr-require-compat"' not in html:

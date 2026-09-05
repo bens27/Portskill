@@ -24,6 +24,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, unquote
 
 from . import __version__
+from .handoff import (
+    install_help_text,
+    run_package_sh,
+    status_payload,
+)
 from .mcp import (
     SERVER_NAME,
     SERVER_VERSION,
@@ -552,6 +557,8 @@ def load_registry() -> dict:
             "mcp_tools": {},
             "mcp_user_commands": {},
             "serve_portskill_on_tailscale": True,
+            "handoff_enabled": False,
+            "handoff_kit": None,
         },
         "machines": default_machines(),
     }
@@ -615,6 +622,16 @@ def load_registry() -> dict:
     else:
         serve_ps = bool(serve_ps)
     mcp_user_commands = normalize_mcp_user_commands(settings.get("mcp_user_commands", {}))
+    handoff_enabled = settings.get("handoff_enabled", False)
+    if isinstance(handoff_enabled, str):
+        handoff_enabled = handoff_enabled.strip().lower() in ("1", "true", "yes", "on")
+    else:
+        handoff_enabled = bool(handoff_enabled)
+    handoff_kit = settings.get("handoff_kit")
+    if isinstance(handoff_kit, str) and handoff_kit.strip():
+        handoff_kit = handoff_kit.strip()
+    else:
+        handoff_kit = None
     data["settings"] = {
         "auto_apply_preset": preset,
         "auto_apply_on_launch": flag,
@@ -625,6 +642,8 @@ def load_registry() -> dict:
         "mcp_tools": mcp_tools,
         "mcp_user_commands": mcp_user_commands,
         "serve_portskill_on_tailscale": serve_ps,
+        "handoff_enabled": handoff_enabled,
+        "handoff_kit": handoff_kit,
     }
     data["machines"] = normalize_machines(data.get("machines"))
     return data
@@ -887,6 +906,8 @@ def build_view(raw: dict) -> dict:
             "mcpTools": dict(settings.get("mcp_tools") or {}),
             "mcpUserCommands": dict(settings.get("mcp_user_commands") or {}),
             "servePortskillOnTailscale": bool(settings.get("serve_portskill_on_tailscale")),
+            "handoffEnabled": bool(settings.get("handoff_enabled")),
+            "handoffKit": settings.get("handoff_kit"),
         },
         "workspaceDraft": {
             "editMode": edit_mode,
@@ -1285,6 +1306,14 @@ def console_css() -> str:
         ".pr-mcp-system-details[open]>summary .pr-disclose-hint{font-size:0}"
         ".pr-mcp-system-details[open]>summary .pr-disclose-hint::after{content:\"Hide\";font-size:11px;opacity:.55}"
         ".pr-mcp-system-details .pr-mcp-list{padding:8px;max-height:none}"
+        ".pr-handoff-details>summary .pr-disclose-hint::after{content:\"\"}"
+        ".pr-handoff-body{padding:12px;display:flex;flex-direction:column;gap:10px;font-size:13px}"
+        ".pr-handoff-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}"
+        ".pr-handoff-matrix{width:100%;border-collapse:collapse;font-size:12px}"
+        ".pr-handoff-matrix th,.pr-handoff-matrix td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}"
+        ".pr-handoff-help{white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;background:#fafbf9;border:1px solid var(--line);border-radius:6px;padding:8px 10px;overflow:auto;max-height:220px}"
+        ".pr-handoff-kit{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;word-break:break-all}"
+        ".pr-handoff-err{color:#b42318}"
         ".pr-mcp-composer input[type=text],.pr-mcp-composer select{min-width:0;flex:1 1 10rem;max-width:100%}"
         ".pr-mcp-uc-name,.pr-mcp-uc-desc{min-width:0!important}"
         "@media(max-width:900px){"
@@ -2066,6 +2095,107 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
     )
 
 
+def handoff_panel_html(view: dict | None = None) -> str:
+    """First-class Session Handoff product section (collapsed). Not Coming soon."""
+    settings = (view or {}).get("settings") or {}
+    raw_settings = {
+        "handoff_enabled": bool(settings.get("handoffEnabled")),
+        "handoff_kit": settings.get("handoffKit"),
+    }
+    status = status_payload(settings=raw_settings)
+    enabled = bool(status.get("handoff_enabled"))
+    present = bool(status.get("ok"))
+    checked = "checked" if enabled else ""
+    aria = "true" if enabled else "false"
+    kit_path = esc(status.get("kit_path") or "")
+    source = esc(status.get("kit_source") or "vendored")
+    skill_ok = "yes" if status.get("installed") else "no"
+    err = status.get("error")
+    err_html = (
+        f'<p class="pr-handoff-err" id="pr-handoff-error">{esc(err)}</p>'
+        if err
+        else ""
+    )
+    count = status.get("open_count")
+    if status.get("open_count_ok"):
+        count_html = f"{count} open"
+    elif status.get("open_count_error"):
+        count_html = f"ledger: {esc(str(status.get('open_count_error')))}"
+    else:
+        count_html = "ledger unavailable"
+    rows = []
+    for item in status.get("install_matrix") or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("installed"):
+            state = "installed"
+        elif item.get("packaged"):
+            state = "packaged"
+        elif item.get("detectable"):
+            state = "not found"
+        else:
+            state = "see install help"
+        note = item.get("note") or item.get("how") or ""
+        rows.append(
+            "<tr>"
+            f"<td>{esc(item.get('label') or item.get('id') or '')}</td>"
+            f"<td>{esc(state)}</td>"
+            f"<td>{esc(note)}</td>"
+            "</tr>"
+        )
+    matrix = (
+        '<table class="pr-handoff-matrix">'
+        "<thead><tr><th>Surface</th><th>Status</th><th>Install</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+        if rows
+        else '<p class="empty">Install matrix unavailable.</p>'
+    )
+    help_text = esc(install_help_text(raw_settings))
+    kit_line = (
+        f'<code class="pr-handoff-kit" id="pr-handoff-kit-path">{kit_path}</code>'
+        f' <span class="tag">{source}</span>'
+    )
+    if present:
+        kit_status = "Kit present — vendored Session Handoff product (no extra checkout required)."
+    else:
+        kit_status = "Point at a Session Handoff kit checkout (or restore vendor/session-handoff-kit)."
+    override = esc(settings.get("handoffKit") or "")
+    return (
+        f'<div class="panel pr-panel pr-handoff" id="pr-handoff">'
+        f'<details class="pr-mcp-system-details pr-handoff-details" id="pr-handoff-details">'
+        f'<summary>Session Handoff <span class="tag">{esc("on" if enabled else "off")}</span>'
+        f'<span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
+        f'<div class="pr-handoff-body">'
+        f'<p>{esc(kit_status)}</p>'
+        f'<div class="pr-handoff-row">'
+        f'<label class="pr-switch" title="Persist settings.handoff_enabled">'
+        f'<span class="pr-switch-label">Enable / add</span>'
+        f'<input type="checkbox" role="switch" aria-checked="{aria}" {checked}'
+        f' data-pr-switch="handoff-set-enabled" data-pr-action="handoff-set-enabled">'
+        f'<span class="pr-switch-track" aria-hidden="true"><span class="pr-switch-thumb"></span></span>'
+        f"</label>"
+        f'<span class="tag">skill readable: {esc(skill_ok)}</span>'
+        f'<span class="tag" id="pr-handoff-open-count">{count_html}</span>'
+        f"</div>"
+        f'<div class="pr-handoff-row"><span>Kit path</span> {kit_line}</div>'
+        f'<form class="pr-handoff-row" id="pr-handoff-kit-form" style="margin:0">'
+        f'<input type="text" id="pr-handoff-kit-input" placeholder="optional kit override (PORTSKILL_HANDOFF_KIT)" '
+        f'value="{override}" style="flex:1;min-width:16rem">'
+        f'<button type="submit" class="pr-btn" data-pr-action="handoff-set-kit">Set kit path</button>'
+        f"</form>"
+        f"{err_html}"
+        f"<h4>Install matrix</h4>{matrix}"
+        f'<div class="pr-handoff-row">'
+        f'<button type="button" class="pr-btn" data-pr-action="handoff-package" '
+        f'title="Run scripts/package.sh in the kit (writes dist/*.plugin and dist/*.skill)">Run package.sh</button>'
+        f'<span class="tag">Cowork plugin + chat skill artifacts</span>'
+        f"</div>"
+        f"<h4>Install help</h4>"
+        f'<pre class="pr-handoff-help" id="pr-handoff-help">{help_text}</pre>'
+        f"</div></details></div>"
+    )
+
+
 def defaults_section_html(view: dict) -> str:
     """Compile Default On services for a top-of-page Defaults section."""
     rows = []
@@ -2151,6 +2281,7 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
   </div>"""
     defaults_block = defaults_section_html(view)
     mcp_block = mcp_tools_panel_html(view)
+    handoff_block = handoff_panel_html(view)
     presets_block = presets_panel_html(view)
     settings_block = settings_panel_html(view)
     env_rail = env_rail_html(view)
@@ -2206,6 +2337,7 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
       {stats_block}
       {defaults_block}
       {mcp_block}
+      {handoff_block}
       {presets_block}
       {settings_block}
       <div class="panel pr-panel">{body}</div>
@@ -2385,6 +2517,9 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
       payload.name=input.getAttribute('data-name');
       payload.enabled=!!input.checked;
     }}
+    if(action==='handoff-set-enabled'){{
+      payload.enabled=!!input.checked;
+    }}
     if(action==='serve-portskill'){{
       payload.enabled=!!input.checked;
     }}
@@ -2398,6 +2533,7 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
         if(action==='set-tailnet' && payload.mode==='serve'){{ input.checked=false; }}
         if(action==='set-tailnet' && payload.mode==='none'){{ input.checked=true; }}
         if(action==='mcp-tool-set'){{ input.checked = !payload.enabled; }}
+        if(action==='handoff-set-enabled'){{ input.checked = !payload.enabled; }}
         if(action==='serve-portskill'){{ input.checked = !payload.enabled; }}
       }} else if(action==='serve-portskill'){{
         applyPortskillServeStatus(result.body||{{}});
@@ -2798,6 +2934,16 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
       postAction({{action:'import-environment',path:path}})
         .then(function(result){{handleResult(result,null);}})
         .catch(function(){{alert('Import failed');}});
+    }});
+  }}
+  var kitForm=document.getElementById('pr-handoff-kit-form');
+  if(kitForm){{
+    kitForm.addEventListener('submit',function(event){{
+      event.preventDefault();
+      var path=(document.getElementById('pr-handoff-kit-input').value||'').trim();
+      postAction({{action:'handoff-set-kit', path:path||'none'}})
+        .then(function(result){{handleResult(result,null);}})
+        .catch(function(){{alert('Set kit path failed');}});
     }});
   }}
 
@@ -3255,6 +3401,8 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
     /* Disclosures: default-collapsed (System tools + repo sections). */
     var d=document.getElementById('pr-mcp-system-details');
     if(d){{ d.open=false; }}
+    var hd=document.getElementById('pr-handoff-details');
+    if(hd){{ hd.open=false; }}
     document.querySelectorAll('details.pr-project').forEach(function(el){{ el.open=false; }});
   }})();
   function applyTailscaleStatus(body){{
@@ -3668,6 +3816,38 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         ]
         code, payload, stdout = run_cli(argv)
         return _cli_result(code, payload, stdout)
+
+    if action == "handoff-set-enabled":
+        enabled = body.get("enabled")
+        if isinstance(enabled, str):
+            enabled = enabled.strip().lower() in ("1", "true", "yes", "on")
+        elif enabled is None:
+            return 400, {"ok": False, "message": "expected enabled bool"}
+        else:
+            enabled = bool(enabled)
+        argv = ["settings", "set", "--handoff-enabled", "on" if enabled else "off"]
+        code, payload, stdout = run_cli(argv)
+        return _cli_result(code, payload, stdout)
+
+    if action == "handoff-set-kit":
+        path = body.get("path")
+        if path is None:
+            path = ""
+        if not isinstance(path, str):
+            return 400, {"ok": False, "message": "expected path"}
+        token = path.strip() or "none"
+        argv = ["settings", "set", "--handoff-kit", token]
+        code, payload, stdout = run_cli(argv)
+        return _cli_result(code, payload, stdout)
+
+    if action == "handoff-package":
+        settings = load_registry().get("settings") or {}
+        result = run_package_sh(settings)
+        if result.get("ok"):
+            out = dict(result)
+            out["ok"] = True
+            return 0, out
+        return 422, result
 
     if action == "set-tailnet":
         project = body.get("project")

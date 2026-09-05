@@ -56,6 +56,12 @@ class CollapsedMarkupTests(unittest.TestCase):
             self.assertFalse(_has_open_attr(tag), f"System tools details not collapsed: {tag}")
             self.assertIn("pr-mcp-system-details", tag)
 
+        handoff = _details_tags(markup, "pr-handoff-details")
+        self.assertTrue(handoff, "pr-handoff-details missing from rendered HTML")
+        for tag in handoff:
+            self.assertFalse(_has_open_attr(tag), f"Session Handoff details not collapsed: {tag}")
+            self.assertIn("pr-handoff-details", tag)
+
         projects = _details_tags(markup, "pr-project")
         self.assertTrue(projects, "details.pr-project missing from rendered HTML")
         for tag in projects:

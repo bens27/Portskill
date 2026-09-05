@@ -20,10 +20,11 @@ class IsolatedConfig:
         self._prev: dict[str, str | None] = {}
 
     def __enter__(self) -> IsolatedConfig:
-        for key in ("PORT_REGISTRY_PATH", "PORTSKILL_LISTEN_PATH"):
+        for key in ("PORT_REGISTRY_PATH", "PORTSKILL_LISTEN_PATH", "PORTSKILL_HANDOFF_KIT"):
             self._prev[key] = os.environ.get(key)
         os.environ["PORT_REGISTRY_PATH"] = str(self.registry_path)
         os.environ.pop("PORTSKILL_LISTEN_PATH", None)
+        os.environ.pop("PORTSKILL_HANDOFF_KIT", None)
         return self
 
     def __exit__(self, *exc: object) -> None:

@@ -176,6 +176,8 @@ def default_settings():
         "mcp_tools": {},  # tool_name -> bool; missing key = enabled
         "mcp_user_commands": {},  # name -> {name, description, steps[{tool,arguments,mode}]}
         "serve_portskill_on_tailscale": True,  # default ON — Serve Portskill listen port (never Funnel)
+        "handoff_enabled": False,  # Session Handoff section opt-in
+        "handoff_kit": None,  # optional override; default is vendored kit
     }
 
 
@@ -268,6 +270,23 @@ def normalize_settings(settings):
     normalized["mcp_user_commands"] = normalize_mcp_user_commands(
         settings.get("mcp_user_commands", {})
     )
+    handoff_flag = settings.get("handoff_enabled", False)
+    if isinstance(handoff_flag, bool):
+        normalized["handoff_enabled"] = handoff_flag
+    elif isinstance(handoff_flag, str):
+        normalized["handoff_enabled"] = handoff_flag.strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+    else:
+        normalized["handoff_enabled"] = bool(handoff_flag)
+    kit = settings.get("handoff_kit")
+    if isinstance(kit, str) and kit.strip():
+        normalized["handoff_kit"] = kit.strip()
+    else:
+        normalized["handoff_kit"] = None
     return normalized
 
 
@@ -3815,6 +3834,19 @@ def cmd_settings_set(args):
                 tools.pop(name, None)
                 settings["mcp_tools"] = tools
             changed = True
+        if getattr(args, "handoff_enabled", None) is not None:
+            token = str(args.handoff_enabled).strip().lower()
+            if token not in ("on", "off"):
+                fail("invalid_args", "--handoff-enabled must be on|off")
+            settings["handoff_enabled"] = token == "on"
+            changed = True
+        if getattr(args, "handoff_kit", None) is not None:
+            token = str(args.handoff_kit).strip()
+            if token.lower() in ("none", "off", "null", ""):
+                settings["handoff_kit"] = None
+            else:
+                settings["handoff_kit"] = token
+            changed = True
         mcp_tools_json = getattr(args, "mcp_tools_json", None)
         if mcp_tools_json is not None:
             raw = str(mcp_tools_json).strip()
@@ -5706,6 +5738,17 @@ def parser():
         "--mcp-user-command-delete",
         default=None,
         help="Delete a user MCP command by name",
+    )
+    settings_set.add_argument(
+        "--handoff-enabled",
+        choices=["on", "off"],
+        default=None,
+        help="Enable or hide the Session Handoff product section",
+    )
+    settings_set.add_argument(
+        "--handoff-kit",
+        default=None,
+        help="Optional Session Handoff kit path override (or none to use vendored kit)",
     )
     settings_set.set_defaults(func=cmd_settings)
 
