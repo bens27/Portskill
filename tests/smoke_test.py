@@ -80,6 +80,14 @@ def main() -> int:
         fail("friend UI still renders Workspaces/Remotes/Presets Coming soon markup")
     if "System tools" not in html:
         fail("System tools disclosure missing from rendered UI")
+    if "Session Handoff" not in html or 'id="pr-handoff-details"' not in html:
+        fail("Session Handoff section missing from rendered UI")
+    if "Coming soon" in html.split("Session Handoff", 1)[-1][:800]:
+        fail("Session Handoff section advertises Coming soon")
+    if "Add / manage" not in html or 'data-pr-action="handoff-copy"' not in html:
+        fail("Session Handoff install matrix missing add/manage actions")
+    if 'data-pr-action="handoff-codex-install"' not in html:
+        fail("Session Handoff matrix missing Codex install.sh action")
     if "Export Workspace" not in html:
         fail("Export Workspace missing from rendered UI")
     if "Require compatibility" not in html or 'id="pr-require-compat"' not in html:
@@ -164,9 +172,19 @@ def main() -> int:
             if not payload.get("listen_path"):
                 fail("doctor missing listen_path")
             names = {c.get("name") for c in (payload.get("checks") or []) if isinstance(c, dict)}
-            for need in ("version", "listen", "ui_reachability", "mcp_reachability", "registry"):
+            for need in (
+                "version",
+                "listen",
+                "ui_reachability",
+                "mcp_reachability",
+                "registry",
+                "handoff_kit",
+            ):
                 if need not in names:
                     fail(f"doctor missing check {need!r}")
+            hk = payload.get("handoff_kit")
+            if not isinstance(hk, dict) or not hk.get("present"):
+                fail(f"doctor handoff_kit not present: {hk!r}")
         ok(f"cli {cmd} status={payload.get('status')!r}")
 
     # 3) If server already up, GET ui_url and mcp_url from listen.json

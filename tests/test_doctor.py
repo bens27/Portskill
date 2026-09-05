@@ -39,10 +39,26 @@ class DoctorOfflineTests(unittest.TestCase):
         self.assertEqual(payload.get("status"), "ok")
         self.assertIsNone(payload.get("reason"))
         names = {c.get("name") for c in payload.get("checks") or [] if isinstance(c, dict)}
-        for need in ("version", "listen", "ui_reachability", "mcp_reachability", "registry", "bind_host"):
+        for need in (
+            "version",
+            "listen",
+            "ui_reachability",
+            "mcp_reachability",
+            "registry",
+            "bind_host",
+            "handoff_kit",
+        ):
             self.assertIn(need, names)
         self.assertTrue(payload.get("loopback"))
         self.assertIsNone(payload.get("message"))
+        hk = payload.get("handoff_kit") or {}
+        self.assertTrue(hk.get("present"), hk)
+        self.assertEqual(hk.get("source"), "vendored")
+        self.assertFalse(hk.get("configured"))
+        self.assertIn("vendor/session-handoff-kit", hk.get("path") or "")
+        handoff_check = next(c for c in payload["checks"] if c.get("name") == "handoff_kit")
+        self.assertTrue(handoff_check.get("ok"))
+        self.assertIn("configured=no", handoff_check.get("detail") or "")
 
     def test_scripts_doctor_sh_exit_zero(self) -> None:
         with IsolatedConfig() as iso:
@@ -84,6 +100,33 @@ class DoctorOfflineTests(unittest.TestCase):
         self.assertTrue(bind_check.get("ok"))
         self.assertTrue(bind_check.get("warning"))
         self.assertIn("not loopback", bind_check.get("detail") or "")
+
+    def test_invalid_kit_override_fails_closed(self) -> None:
+        with IsolatedConfig() as iso:
+            bad = iso.root / "not-a-kit"
+            bad.mkdir()
+            code, payload = _doctor({
+                "PORT_REGISTRY_PATH": str(iso.registry_path),
+                "PORTSKILL_HANDOFF_KIT": str(bad),
+            })
+        self.assertEqual(code, 2)
+        self.assertEqual(payload.get("status"), "error")
+        hk = payload.get("handoff_kit") or {}
+        self.assertFalse(hk.get("present"))
+        self.assertTrue(hk.get("configured"))
+        self.assertEqual(hk.get("source"), "override")
+        handoff_check = next(c for c in payload["checks"] if c.get("name") == "handoff_kit")
+        self.assertFalse(handoff_check.get("ok"))
+
+    def test_enabled_reports_configured(self) -> None:
+        with IsolatedConfig() as iso:
+            iso.write_registry({"settings": {"handoff_enabled": True}})
+            code, payload = _doctor({"PORT_REGISTRY_PATH": str(iso.registry_path)})
+        self.assertEqual(code, 0)
+        hk = payload.get("handoff_kit") or {}
+        self.assertTrue(hk.get("present"))
+        self.assertTrue(hk.get("configured"))
+        self.assertTrue(hk.get("enabled"))
 
 
 if __name__ == "__main__":

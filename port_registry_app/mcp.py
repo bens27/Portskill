@@ -10,6 +10,7 @@ import sys
 from typing import Any
 
 from . import __version__
+from .handoff import HANDOFF_TOOL_DEFS, HANDOFF_TOOL_NAMES, call_handoff_tool
 
 SERVER_NAME = "portskill"
 SERVER_VERSION = __version__
@@ -433,6 +434,7 @@ TOOL_DEFS = [
             },
         },
     },
+    *HANDOFF_TOOL_DEFS,
 ]
 
 
@@ -932,6 +934,8 @@ def call_user_command(name: str, cmd: dict) -> dict:
 def call_tool(name: str, arguments: dict) -> dict:
     """Return MCP tools/call result payload (result object, not full JSON-RPC)."""
     args = arguments or {}
+    if name in HANDOFF_TOOL_NAMES:
+        return call_handoff_tool(name, args, _load_settings_from_registry())
     # Multi-port import: invoke discover import once per port with optional per-port notes
     if name == "ports_import":
         ports = args.get("ports")
@@ -1049,7 +1053,11 @@ def mcp_handle(message: dict) -> dict | None:
                 "instructions": (
                     "Portskill MCP: tools allocate/activate/start/stop/release/status/doctor/environment_export/environment_import/set_default/apply_defaults/deactivate/compat_check/preset_save/preset_list/preset_apply/preset_delete/settings_get/settings_set/set_tailnet/tailscale_status/tailscale_login/history_list/history_restore/history_reset/ports_discover/ports_import "
                     "wrap the Portskill CLI against ~/.config/port-registry/registry.json "
-                    "(or PORT_REGISTRY_PATH). User commands (x-portskill-kind:user-command) chain "
+                    "(or PORT_REGISTRY_PATH). Session Handoff tools use flat names "
+                    "handoff_status/handoff_skill/handoff_template/handoff_list/handoff_resolve/"
+                    "handoff_new_path/handoff_resume/handoff_supersede/handoff_install_help "
+                    "(not nested session-handoff/*) and wrap the vendored kit ledger "
+                    "(vendor/session-handoff-kit). User commands (x-portskill-kind:user-command) chain "
                     "enabled system tools (series/parallel; no nesting). On needs_input (Tailnet), "
                     "re-call with tailnet=serve|funnel|none. Prefer stop over release when a process "
                     "may still be running."

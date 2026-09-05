@@ -60,7 +60,7 @@ cd Portskill
 # Read live URLs (port is sticky; do not assume :8765):
 python3 -c "import json,pathlib; print(json.load(open(pathlib.Path.home()/'.config/port-registry/listen.json')))"
 # Open ui_url in a browser → claim/allocate a port range → use MCP tools/list
-./scripts/doctor.sh                 # version + listen + reachability + bind-host warn
+./scripts/doctor.sh                 # version + listen + reachability + bind-host warn + handoff kit
 ./scripts/smoke_test.sh             # only documented smoke / test entry
 ```
 
@@ -157,7 +157,7 @@ See **[SECURITY.md](SECURITY.md)** for reporting, Gatekeeper / notarization stat
 
 **HTTP MCP (local-trust only):** same loopback listener as the UI — unauthenticated. Prefer stdio for agent install. If dogfooding HTTP: run the app, then `POST` JSON-RPC to the `mcp_url` from `listen.json` (also `GET /mcp` discovery). Do not expose this port on LAN/`0.0.0.0` or Funnel it.
 
-Tools: `allocate`, `activate`, `start`, `stop`, `release`, `status`, `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults`, `deactivate`, `compat_check`, `preset_save`, `preset_list`, `preset_apply`, `preset_delete`, `settings_get`, `settings_set`. (`exit_house` remains as a deactivate alias.)
+Tools: `allocate`, `activate`, `start`, `stop`, `release`, `status`, `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults`, `deactivate`, `compat_check`, `preset_save`, `preset_list`, `preset_apply`, `preset_delete`, `settings_get`, `settings_set`. (`exit_house` remains as a deactivate alias.) Session Handoff (vendored kit, default on in `tools/list`): **flat** names `handoff_status`, `handoff_skill`, `handoff_template`, `handoff_list`, `handoff_resolve`, `handoff_new_path`, `handoff_resume`, `handoff_supersede`, `handoff_install_help` — not nested `session-handoff/*`. The kit’s nested `skills/session-handoff/` layout is vendor packaging only. Ledger writes go only through `vendor/session-handoff-kit/codex/hooks/handoff_ledger.py`.
 
 ## CLI
 
@@ -225,6 +225,7 @@ Each range stores additive `default_state` (`"off"` | `"on"`, missing ⇒ off).
 - Import backs up to `~/.config/port-registry/backups/workspace-YYYYMMDD-HHMMSS.json` first.
 - Per-range **Default** and **Tailscale Serve** switches; Browser Login required before Serve on.
 - Settings: auto-apply / auto-deactivate + locked **Require compatibility**. Remotes HOLD (no stub).
+- **Session Handoff** (collapsed, next to MCP tools): enable/add, vendored kit status, install-matrix **Add / manage** per surface (Claude Code copy `/plugin` commands; Cowork + chat `package.sh`; Codex `install.sh`; Chrome copy Load-unpacked path). Not Coming soon. `doctor` reports kit present/configured. Kit is `vendor/session-handoff-kit/` (optional `PORTSKILL_HANDOFF_KIT` / `settings.handoff_kit` override).
 
 ```bash
 portskill-cli tailscale login
@@ -244,6 +245,7 @@ examples/              # MCP stdio + environment samples
 ui/                    # portable preview + WIRING
 skill/SKILL.md         # optional agent sidecar
 tests/                 # smoke_test.py + test_*.py (run via ./scripts/smoke_test.sh only)
+vendor/session-handoff-kit/  # Session Handoff product (tracked source, no submodule)
 .github/workflows/ci.yml
 SECURITY.md / CHANGELOG.md
 pyproject.toml         # name: portskill  version: 0.1.0
