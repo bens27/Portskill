@@ -1082,7 +1082,7 @@ def console_css() -> str:
         ".nav{display:grid;gap:4px;padding:14px 10px}"
         ".nav a{color:#c9cdd6;text-decoration:none;padding:8px 10px;border-radius:7px}"
         ".nav a.active{background:var(--cobalt);color:white}"
-        ".main{flex:1;min-width:0}"
+        ".main{flex:1;min-width:0;overflow-x:hidden}""body{overflow-x:hidden}"".content,.pr-panel,.pr-range,.pr-mcp-tool,.pr-mcp-composer,.pr-settings-row,.pr-topbar-right,.pr-defaults-item{min-width:0}"
         ".topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 28px;border-bottom:1px solid var(--line);background:#fafbf9;position:sticky;top:0;z-index:20}"
         ".pr-topbar-right{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-left:auto}"
         ".pr-topbar-right .pr-btn{flex:0 0 auto;padding:6px 10px;font-size:12px}"
@@ -1176,7 +1176,7 @@ def console_css() -> str:
         ".pr-machine-row{display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--line);font-size:12px}"
         ".pr-machine-row:first-of-type{border-top:none}"
         ".pr-range-meta{margin-top:8px;color:var(--muted);font-size:12px}"
-        ".pr-range-actions{display:flex;gap:8px;margin-top:10px}"
+        ".pr-range-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;min-width:0}"
         ".pr-btn{flex:1;border:1px solid var(--line);background:white;border-radius:6px;"
         "padding:6px 8px;font-size:12px;cursor:pointer;color:var(--ink)}"
         ".pr-btn:hover:not(:disabled){border-color:var(--cobalt);color:var(--cobalt)}"
@@ -1231,8 +1231,75 @@ def console_css() -> str:
         ".pr-empty-env{padding:28px 18px;text-align:center;color:var(--muted)}"
         ".pr-empty-env h3{margin:0 0 8px;color:var(--ink)}"
         ".sidebar{display:flex;flex-direction:column}"
-        "@media(max-width:760px){.app{display:block}.sidebar{width:auto}"
-        ".stats{grid-template-columns:repeat(2,minmax(0,1fr))}}"
+        ".pr-topbar-brand{display:none;font-weight:800;letter-spacing:.12em;color:var(--ink);font-size:13px;margin-right:8px}"
+        ".pr-topbar-left{display:flex;align-items:center;gap:10px;min-width:0;flex:1}"
+        ".pr-topbar-left .crumb{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+        ".pr-compose-jump{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);background:#fff;border-radius:6px;padding:6px 10px;font-size:12px;color:var(--cobalt);text-decoration:none;white-space:nowrap}"
+        ".pr-compose-jump:hover{border-color:var(--cobalt)}"
+        ".pr-mcp-jump-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px}"
+        ".pr-ps-serve-wrap{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0;max-width:100%}"
+        ".pr-ps-serve-chip{max-width:min(42ch,100%)}"
+        ".pr-serve-copy,.pr-serve-url-details{flex:0 0 auto}"
+        ".pr-serve-url-details{font-size:11px}"
+        ".pr-serve-url-details summary{cursor:pointer;color:var(--cobalt);list-style:none}"
+        ".pr-serve-url-details summary::-webkit-details-marker{display:none}"
+        ".pr-serve-url-details code{display:block;margin-top:4px;padding:6px 8px;background:#fafbf9;border:1px solid var(--line);border-radius:6px;word-break:break-all;white-space:pre-wrap;max-width:min(42ch,100%)}"
+        ".pr-mcp-system-details{margin:8px 0 0;border:1px solid var(--line);border-radius:8px;background:#fafbf9;padding:0}"
+        ".pr-mcp-system-details>summary{cursor:pointer;padding:10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;list-style:none}"
+        ".pr-mcp-system-details>summary::-webkit-details-marker{display:none}"
+        ".pr-mcp-system-details[open]>summary{border-bottom:1px solid var(--line)}"
+        ".pr-mcp-system-details .pr-mcp-list{padding:8px;max-height:none}"
+        ".pr-mcp-composer input[type=text],.pr-mcp-composer select{min-width:0;flex:1 1 10rem;max-width:100%}"
+        ".pr-mcp-uc-name,.pr-mcp-uc-desc{min-width:0!important}"
+        "@media(max-width:900px){"
+        ".app{display:block}"
+        ".sidebar{display:none!important}"
+        ".pr-topbar-brand{display:inline-block}"
+        ".topbar{padding:10px 16px;gap:10px;flex-wrap:wrap;align-items:flex-start}"
+        ".pr-topbar-right{width:100%;margin-left:0;gap:8px}"
+        ".pr-topbar-right .pr-switch-label{font-size:0;line-height:0}"
+        ".pr-topbar-right .pr-switch-label::after{content:'Serve';font-size:12px;line-height:1.4;color:var(--ink)}"
+        ".pr-ts-chip{font-size:10px}"
+        "#pr-ts-login-slot,#pr-ts-logout-slot{display:none}"
+        ".pr-ps-serve-chip .pr-serve-url-text{display:none}"
+        ".pr-ps-serve-chip.is-on::before{content:'Serving'}"
+        ".content{padding:18px 16px}"
+        ".stats{grid-template-columns:repeat(3,minmax(0,1fr))}"
+        ".pr-mcp-tool{grid-template-columns:1fr;align-items:start}"
+        ".pr-mcp-toggle{justify-self:start}"
+        ".pr-mcp-tool-actions{justify-self:start}"
+        ".pr-range-actions{flex-direction:column}"
+        ".pr-range-actions .pr-btn{width:100%;flex:1 1 auto}"
+        ".pr-settings-row{flex-direction:column;align-items:stretch}"
+        ".pr-settings-row .pr-btn{width:100%}"
+        ".pr-ranges{grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr))}"
+        ".pr-mcp-uc-args-row{grid-template-columns:1fr}"
+        "}"
+        "@media(max-width:480px){"
+        ".content{padding:16px}"
+        ".stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}"
+        ".stats .stat:nth-child(5){grid-column:1/-1}"
+        ".view-head h2{font-size:22px}"
+        ".topbar{padding:8px 12px}"
+        ".pr-btn,.pr-defaults-jump,.pr-compose-jump,.pr-serve-copy,"
+        ".pr-topbar-right .pr-btn,.pr-mcp-composer .pr-btn,"
+        ".pr-range-actions .pr-btn,.pr-settings-row .pr-btn,"
+        ".pr-card-edit-bar .pr-btn,.pr-mcp-tool-actions .pr-btn{"
+        "min-height:44px;min-width:44px;padding:10px 12px;font-size:13px}"
+        ".pr-defaults-jump{display:inline-flex;align-items:center;justify-content:center;padding:10px 12px;border:1px solid var(--line);border-radius:6px;margin-left:0}"
+        ".pr-card-pencil{width:44px;height:44px;top:6px;right:6px}"
+        ".pr-switch{min-height:44px;padding:6px 0}"
+        ".pr-switch-track{width:44px;height:26px}"
+        ".pr-switch-thumb{width:22px;height:22px;top:2px;left:2px}"
+        ".pr-switch input:checked+.pr-switch-track .pr-switch-thumb{transform:translateX(18px)}"
+        ".pr-ps-serve-chip{min-height:44px;display:inline-flex;align-items:center;padding:8px 12px;max-width:100%;font-size:12px}"
+        ".pr-serve-url-details summary{min-height:44px;display:inline-flex;align-items:center;padding:0 8px}"
+        ".pr-mcp-composer-row{align-items:stretch}"
+        ".pr-mcp-composer input[type=text],.pr-mcp-composer select,.pr-mcp-composer input[type=number],.pr-mcp-composer textarea{"
+        "font-size:16px;padding:10px 12px;width:100%;flex:1 1 100%}"
+        ".pr-mcp-composer-row .pr-btn{flex:1 1 auto}"
+        ".pr-ts-chip{min-height:44px;display:inline-flex;align-items:center}"
+        "}"
         ".pr-hist-modified{display:inline-flex;align-items:center;gap:8px;margin-left:10px;vertical-align:middle}.pr-badge-modified{background:#b97303;color:#fff;font-weight:700;font-size:11px;letter-spacing:.04em;text-transform:uppercase;padding:3px 8px;border-radius:999px}.pr-history{margin:12px 0 18px;border:1px solid var(--line);border-radius:8px;background:var(--panel);overflow:hidden}.pr-history summary{cursor:pointer;padding:10px 14px;font-weight:600;list-style:none;display:flex;align-items:center;justify-content:space-between;user-select:none}.pr-history summary::-webkit-details-marker{display:none}.pr-history-body{border-top:1px solid var(--line);max-height:240px;overflow:auto;padding:6px}.pr-history-item{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:0;background:transparent;color:inherit;padding:8px 10px;border-radius:6px;cursor:pointer;font:inherit}.pr-history-item:hover{background:rgba(39,67,214,.08)}.pr-history-item.active{background:rgba(39,67,214,.14);font-weight:600}.pr-history-item .pr-hist-idx{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--muted);min-width:1.5em}.pr-history-item .pr-hist-at{margin-left:auto;font-size:11px;color:var(--muted)}"
         ".pr-env-soon{padding:14px 16px;border-top:1px solid rgba(255,255,255,.08)}"
         ".pr-env-soon-title{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#c9cdd6;font-weight:700;margin:0 0 8px}"
@@ -1556,15 +1623,34 @@ def portskill_serve_chip_html(ps: dict | None) -> str:
         label = f"Serve: {chip}"
         klass = "pr-ps-serve-chip"
         title = ps.get("message") or label
+    short_plain = "Serving" if state == "serving" and url else (
+        "missing" if state == "binary_missing" else (
+            "needs login" if state == "needs_login" else (
+                "no listen" if state == "no_listen" else (chip or "Off")
+            )
+        )
+    )
     inner = esc(label)
+    copy_btn = ""
+    details = ""
     if state == "serving" and url:
         inner = (
-            f'<a class="pr-port-link" href="{esc(url)}" target="_blank" rel="noopener" '
+            f'<a class="pr-port-link pr-serve-url-text" href="{esc(url)}" target="_blank" rel="noopener" '
             f'style="color:inherit">{esc(url)}</a>'
         )
+        copy_btn = (
+            f'<button type="button" class="pr-btn pr-serve-copy" id="pr-serve-copy" '
+            f'data-serve-url="{esc(url)}" title="Copy Serve URL" aria-label="Copy Serve URL">Copy URL</button>'
+        )
+        details = (
+            f'<details class="pr-serve-url-details" id="pr-serve-url-details">'
+            f'<summary>Serve URL</summary><code id="pr-serve-url-full">{esc(url)}</code></details>'
+        )
     return (
+        f'<span class="pr-ps-serve-wrap" id="pr-ps-serve-wrap">'
         f'<span class="{klass}" id="pr-ps-serve-chip" title="{esc(title)}" '
-        f'data-state="{esc(state)}">{inner}</span>'
+        f'data-state="{esc(state)}" data-short="{esc(short_plain)}">{inner}</span>'
+        f"{copy_btn}{details}</span>"
     )
 
 
@@ -1923,8 +2009,8 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         '<p class="pr-mcp-meta" style="margin:0">v1 limits: max 12 steps; only existing system tools; '
         "no nested chains. Parallel steps in a consecutive group run concurrently; series groups run in order.</p>"
         '<div class="pr-mcp-composer-row">'
-        '<input type="text" id="pr-mcp-uc-name" placeholder="command-name" pattern="[A-Za-z0-9_-]+" style="min-width:10rem">'
-        '<input type="text" id="pr-mcp-uc-desc" placeholder="description" style="flex:1;min-width:12rem">'
+        '<input type="text" id="pr-mcp-uc-name" class="pr-mcp-uc-name" placeholder="command-name" pattern="[A-Za-z0-9_-]+">'
+        '<input type="text" id="pr-mcp-uc-desc" class="pr-mcp-uc-desc" placeholder="description" style="flex:1">'
         "</div>"
         '<div class="pr-mcp-composer-row">'
         f'<select id="pr-mcp-uc-tool">{options}</select>'
@@ -1947,33 +2033,39 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         "</div>"
     )
 
-    system_body = (
-        f'<div class="pr-mcp-section">System tools</div>'
-        f'<ul class="pr-mcp-list">{"".join(system_rows)}</ul>'
-        if system_rows
-        else '<div class="empty">No MCP tools registered.</div>'
-    )
+    if system_rows:
+        system_body = (
+            f'<details class="pr-mcp-system-details" id="pr-mcp-system-details" open>'
+            f'<summary>System tools <span class="tag">{len(system_rows)}</span></summary>'
+            f'<ul class="pr-mcp-list">{"".join(system_rows)}</ul>'
+            f"</details>"
+        )
+    else:
+        system_body = '<div class="empty">No MCP tools registered.</div>'
     user_body = (
         f'<div class="pr-mcp-section">User commands</div>'
         + (
             f'<ul class="pr-mcp-list">{"".join(user_rows)}</ul>'
             if user_rows
-            else '<div class="empty">No user commands yet — compose one below.</div>'
+            else '<div class="empty">No user commands yet — compose one above.</div>'
         )
-        + composer
     )
     count = len(system_rows) + len(user_rows)
     return (
         f'<div class="panel pr-panel pr-mcp" id="pr-mcp-tools">'
         f'<div class="pr-mcp-head"><h3>MCP tools</h3>'
         f'<span class="tag">{esc(SERVER_NAME)} · v{esc(SERVER_VERSION)} · {enabled_count}/{count} enabled</span></div>'
+        f'<div class="pr-mcp-jump-row">'
+        f'<a class="pr-compose-jump" href="#pr-mcp-user-composer">Compose</a>'
+        f'<span class="tag">user command composer</span></div>'
         f'<p class="pr-mcp-meta">Live surface from <code>tools/list</code> — same as '
         f'<a class="pr-port-link" href="{esc(mcp_url)}" target="_blank" rel="noopener"><code>{esc(mcp_url)}</code></a> '
         f'and stdio <code>{esc(stdio)}</code>. '
         f'Toggles filter live <code>tools/list</code> + <code>tools/call</code> (disabled tools stay listed here so you can re-enable). '
         f'User commands are marked <code>x-portskill-kind: user-command</code> and respect the same enable map.</p>'
-        f"{system_body}"
+        f"{composer}"
         f"{user_body}"
+        f"{system_body}"
         f"</div>"
     )
 
@@ -2090,7 +2182,11 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
   </aside>
   <main class="main">
     <header class="topbar" data-iterate="topbar">
-      <div class="crumb">Workspace · <b>all services</b></div>
+      <div class="pr-topbar-left">
+        <div class="pr-topbar-brand" aria-label="Portskill">PORTSKILL</div>
+        <div class="crumb">Workspace · <b>all services</b></div>
+        <a class="pr-compose-jump" href="#pr-mcp-user-composer" title="Jump to Compose">Compose</a>
+      </div>
       {topbar_right}
     </header>
     <section class="content">
@@ -3062,11 +3158,19 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
   function applyPortskillServeStatus(body){{
     if(!body)return;
     var chip=document.getElementById('pr-ps-serve-chip');
+    var wrap=document.getElementById('pr-ps-serve-wrap');
     var state=body.state|| (body.enabled||body.active ? 'serving' : 'off');
     var url=body.serve_url||'';
     var label=body.chip||'Off';
+    var shortPlain='Off';
+    if(state==='serving' && url) shortPlain='Serving';
+    else if(state==='binary_missing') shortPlain='missing';
+    else if(state==='needs_login') shortPlain='needs login';
+    else if(state==='no_listen') shortPlain='no listen';
+    else shortPlain=label;
     if(chip){{
       chip.setAttribute('data-state', state);
+      chip.setAttribute('data-short', shortPlain);
       var klass='pr-ps-serve-chip';
       if(state==='serving')klass+=' is-on';
       else if(state==='binary_missing')klass+=' is-missing';
@@ -3074,13 +3178,44 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
       chip.className=klass;
       chip.title=body.message||label;
       if(state==='serving' && url){{
-        chip.innerHTML='<a class="pr-port-link" href="'+url+'" target="_blank" rel="noopener" style="color:inherit">'+url+'</a>';
+        chip.innerHTML='<a class="pr-port-link pr-serve-url-text" href="'+url+'" target="_blank" rel="noopener" style="color:inherit">'+url+'</a>';
       }} else if(state==='binary_missing'){{
         chip.textContent='Serve: binary missing';
       }} else if(state==='needs_login'){{
         chip.textContent='Serve: needs login';
+      }} else if(state==='no_listen'){{
+        chip.textContent='Serve: no listen port';
       }} else {{
         chip.textContent='Serve: '+label;
+      }}
+    }}
+    if(wrap){{
+      var copy=document.getElementById('pr-serve-copy');
+      var det=document.getElementById('pr-serve-url-details');
+      if(state==='serving' && url){{
+        if(!copy){{
+          copy=document.createElement('button');
+          copy.type='button';
+          copy.className='pr-btn pr-serve-copy';
+          copy.id='pr-serve-copy';
+          copy.textContent='Copy URL';
+          wrap.appendChild(copy);
+        }}
+        copy.setAttribute('data-serve-url', url);
+        copy.setAttribute('title', 'Copy Serve URL');
+        copy.setAttribute('aria-label', 'Copy Serve URL');
+        if(!det){{
+          det=document.createElement('details');
+          det.className='pr-serve-url-details';
+          det.id='pr-serve-url-details';
+          det.innerHTML='<summary>Serve URL</summary><code id="pr-serve-url-full"></code>';
+          wrap.appendChild(det);
+        }}
+        var full=document.getElementById('pr-serve-url-full');
+        if(full) full.textContent=url;
+      }} else {{
+        if(copy) copy.remove();
+        if(det) det.remove();
       }}
     }}
     var tog=document.querySelector('[data-pr-action="serve-portskill"]');
@@ -3090,6 +3225,27 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
       tog.checked=!!body.enabled;
     }}
   }}
+  document.addEventListener('click', function(ev){{
+    var btn=ev.target && ev.target.closest && ev.target.closest('#pr-serve-copy, .pr-serve-copy');
+    if(!btn) return;
+    var u=btn.getAttribute('data-serve-url')||'';
+    if(!u) return;
+    ev.preventDefault();
+    function ok(){{ var t=btn.textContent; btn.textContent='Copied'; setTimeout(function(){{ btn.textContent=t; }}, 1200); }}
+    if(navigator.clipboard && navigator.clipboard.writeText){{
+      navigator.clipboard.writeText(u).then(ok).catch(function(){{
+        prompt('Copy Serve URL', u);
+      }});
+    }} else {{
+      prompt('Copy Serve URL', u);
+    }}
+  }});
+  (function(){{
+    var d=document.getElementById('pr-mcp-system-details');
+    if(d && window.matchMedia && window.matchMedia('(max-width:480px)').matches){{
+      d.open=false;
+    }}
+  }})();
   function applyTailscaleStatus(body){{
     if(!body)return;
     var chip=document.getElementById('pr-ts-chip');
