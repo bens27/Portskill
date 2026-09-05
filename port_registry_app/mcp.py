@@ -1053,9 +1053,10 @@ def mcp_handle(message: dict) -> dict | None:
                 "instructions": (
                     "Portskill MCP: tools allocate/activate/start/stop/release/status/doctor/environment_export/environment_import/set_default/apply_defaults/deactivate/compat_check/preset_save/preset_list/preset_apply/preset_delete/settings_get/settings_set/set_tailnet/tailscale_status/tailscale_login/history_list/history_restore/history_reset/ports_discover/ports_import "
                     "wrap the Portskill CLI against ~/.config/port-registry/registry.json "
-                    "(or PORT_REGISTRY_PATH). Session Handoff tools handoff_status/handoff_skill/"
-                    "handoff_template/handoff_list/handoff_resolve/handoff_new_path/handoff_resume/"
-                    "handoff_supersede/handoff_install_help wrap the vendored kit ledger "
+                    "(or PORT_REGISTRY_PATH). Session Handoff tools use flat names "
+                    "handoff_status/handoff_skill/handoff_template/handoff_list/handoff_resolve/"
+                    "handoff_new_path/handoff_resume/handoff_supersede/handoff_install_help "
+                    "(not nested session-handoff/*) and wrap the vendored kit ledger "
                     "(vendor/session-handoff-kit). User commands (x-portskill-kind:user-command) chain "
                     "enabled system tools (series/parallel; no nesting). On needs_input (Tailnet), "
                     "re-call with tailnet=serve|funnel|none. Prefer stop over release when a process "

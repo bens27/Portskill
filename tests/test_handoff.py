@@ -66,6 +66,9 @@ class HandoffMarkupTests(unittest.TestCase):
         self.assertIn("Package skill", html)
         self.assertIn("Copy extension path", html)
         self.assertIn("Portskill cannot run /plugin", html)
+        self.assertIn("handoff_status", html)
+        self.assertIn("not nested", html)
+        self.assertIn("session-handoff/*", html)
 
 
 class HandoffMcpTests(unittest.TestCase):
@@ -81,6 +84,14 @@ class HandoffMcpTests(unittest.TestCase):
         rpc_names = [t["name"] for t in resp["result"]["tools"]]
         for name in HANDOFF_TOOLS:
             self.assertIn(name, rpc_names)
+        for name in names:
+            self.assertFalse(name.startswith("session-handoff/"), name)
+
+    def test_vendored_md_pins_kit_sha(self) -> None:
+        text = (ROOT / "vendor" / "session-handoff-kit" / "VENDORED.md").read_text(encoding="utf-8")
+        self.assertIn("7587834", text)
+        self.assertIn("/Users/bens/Development/handoff-manager/", text)
+        self.assertIn("Session Handoff Kit", text)
 
     def test_tools_list_omits_when_toggled_off(self) -> None:
         from port_registry_app.mcp import enabled_tool_defs, mcp_handle

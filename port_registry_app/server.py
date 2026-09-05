@@ -2090,6 +2090,7 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         f'<a class="pr-port-link" href="{esc(mcp_url)}" target="_blank" rel="noopener"><code>{esc(mcp_url)}</code></a> '
         f'and stdio <code>{esc(stdio)}</code>. '
         f'Toggles filter live <code>tools/list</code> + <code>tools/call</code> (disabled tools stay listed here so you can re-enable). '
+        f'Session Handoff tools are flat names (<code>handoff_status</code>, <code>handoff_list</code>, …) — not nested <code>session-handoff/*</code>. '
         f'User commands are marked <code>x-portskill-kind: user-command</code> and respect the same enable map.</p>'
         f"{composer}"
         f"{user_body}"
