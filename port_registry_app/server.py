@@ -2035,7 +2035,7 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
 
     if system_rows:
         system_body = (
-            f'<details class="pr-mcp-system-details" id="pr-mcp-system-details" open>'
+            f'<details class="pr-mcp-system-details" id="pr-mcp-system-details">'
             f'<summary>System tools <span class="tag">{len(system_rows)}</span></summary>'
             f'<ul class="pr-mcp-list">{"".join(system_rows)}</ul>'
             f"</details>"
@@ -2177,13 +2177,13 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
 <body>
 <div class="app">
   <aside class="sidebar" data-iterate="sidebar">
-    <div class="brand" data-iterate="sidebar-brand"><h1>PORTSKILL</h1><div class="tag">port registry</div></div>
+    <div class="brand" data-iterate="sidebar-brand"><h1>Portskill</h1><div class="tag">port registry</div></div>
     {env_rail}
   </aside>
   <main class="main">
     <header class="topbar" data-iterate="topbar">
       <div class="pr-topbar-left">
-        <div class="pr-topbar-brand" aria-label="Portskill">PORTSKILL</div>
+        <div class="pr-topbar-brand" aria-label="Portskill">Portskill</div>
         <div class="crumb">Workspace · <b>all services</b></div>
         <a class="pr-compose-jump" href="#pr-mcp-user-composer" title="Jump to Compose">Compose</a>
       </div>
@@ -3241,10 +3241,9 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
     }}
   }});
   (function(){{
+    /* System tools: default-closed on all viewports (desktop + narrow). */
     var d=document.getElementById('pr-mcp-system-details');
-    if(d && window.matchMedia && window.matchMedia('(max-width:480px)').matches){{
-      d.open=false;
-    }}
+    if(d){{ d.open=false; }}
   }})();
   function applyTailscaleStatus(body){{
     if(!body)return;

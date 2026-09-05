@@ -4,23 +4,44 @@
 
 > Module path remains `port_registry_app` (compat). Product name is **Portskill**.
 
-## Run (one entrypoint story)
+## Cold path (install → open → claim → MCP)
 
-Pick **one** of these — all start the same UI + MCP HTTP server:
+From a git clone (no house lore required):
+
+```bash
+git clone https://github.com/bens27/Portskill.git
+cd Portskill
+PYTHONPATH=. python3 -m port_registry_app --no-open
+# Read live URLs (port is sticky; do not assume :8765):
+python3 -c "import json,pathlib; print(json.load(open(pathlib.Path.home()/'.config/port-registry/listen.json')))"
+# Open ui_url in a browser → claim/allocate a port range → use MCP tools/list
+PYTHONPATH=. python3 -m port_registry_app.cli doctor   # version + listen + reachability
+PYTHONPATH=. python3 tests/smoke_test.py               # offline smoke
+```
+
+Optional: `pip install -e .` then `portskill` / `portskill-cli`.
+
+### Faces of one product
+
+| Face | What it is | How you run it |
+|------|------------|----------------|
+| **App / UI** | HTML console on the sticky listen port | `python3 -m port_registry_app` or `dist/Portskill.app` |
+| **MCP** | Same process: stdio or `POST /mcp` JSON-RPC | `--mcp-stdio` or `mcp_url` from `listen.json` |
+| **CLI / skill** | Stdlib CLI (+ optional `skill/SKILL.md` sidecar) | `python3 -m port_registry_app.cli …` / `portskill-cli` |
+
+One version string everywhere: `pyproject.toml` ↔ package `__version__` ↔ UI MCP panel ↔ MCP `initialize` ↔ `doctor`.
+
+## Run (other entrypoints)
+
+Pick **one** — all start the same UI + MCP HTTP server:
 
 1. **Double-click** `dist/Portskill.app` (primary Mac install; build with `./scripts/build-app.sh`)
-2. **Module launch** from this package directory:
-   ```bash
-   PYTHONPATH=. python3 -m port_registry_app
-   # --no-open skips browser; --no-auto-apply skips launch preset apply
-   ```
+2. **Module launch** (see Cold path above)
 3. **Keepalive** (LaunchAgent + Dock/menubar; survives Terminal close / login):
    ```bash
    ./scripts/install-keepalive.sh install
    ./scripts/install-keepalive.sh status
    ```
-
-Optional after `pip install -e .`: console scripts `portskill` / `portskill-cli` (stdlib at runtime).
 
 ### Sticky listen port (not hard-coded 8765)
 
@@ -30,7 +51,7 @@ On launch the server chooses a bind port in this order:
 2. Existing Portskill dogfood claim in the registry
 3. Fresh allocate from the pool
 
-After bind it rewrites `listen.json` with live URLs. **Read that file** for the current UI/MCP addresses — do not assume `:8765`. Historical default was `127.0.0.1:8765` only when nothing sticky/claimed.
+After bind it rewrites `listen.json` with live URLs. **Read that file** for the current UI/MCP addresses — do not assume `:8765`.
 
 Printed on launch (example shape; port varies):
 
@@ -39,31 +60,33 @@ Printed on launch (example shape; port varies):
 - **listen.json:** `~/.config/port-registry/listen.json`
 - **Registry:** `PORT_REGISTRY_PATH` or `~/.config/port-registry/registry.json`
 
-```bash
-# Discover current URLs
-python3 -c "import json,pathlib; print(json.load(open(pathlib.Path.home()/'.config/port-registry/listen.json')))"
-```
+### Soft-restart / sticky listen rollback
 
-## Smoke test
+`./scripts/install-keepalive.sh stop` then `start` (or restart the module server) keeps the sticky port when still bindable. If the old port cannot bind, Portskill allocates a new one and rewrites `listen.json` — refresh MCP clients that pinned the previous URL. Corrupt `listen.json` / `registry.json` fail closed (never wiped silently).
 
-Non-destructive check (import + CLI + optional HTTP if server already up):
+## Smoke test & CI
+
+Non-destructive check (import + CLI + version consistency + optional HTTP if server already up):
 
 ```bash
 ./scripts/smoke_test.sh
 # or: PYTHONPATH=. python3 tests/smoke_test.py
 ```
 
-Exit 0 on pass.
+Exit 0 on pass. GitHub Actions runs the same smoke on every push to `main` (`.github/workflows/ci.yml`) — Linux offline, no Mac `.app` required.
 
 ## UI highlights
 
+- **Compose** is first-class (topbar jump + MCP panel composer).
+- **System tools** disclosure is **default-closed** on desktop and narrow viewports.
 - **Workspaces · Coming soon** — runtime is one workspace (all services). Multi-workspace switching held; CLI/MCP presets still work.
 - **Defaults** — per-range Default On/Off; toolbar **Start Default Services** / activate via `apply-defaults`; deactivate keeps reserved unless `--also-release`.
 - **⚙ Actions** panel — workspace bulk actions (start/stop default/all, export/import workspace).
 - **Remotes · Coming soon** — Settings stub only; HOLD (no machine add/remove this cut).
 
-
 ## Local trust / security
+
+See **[SECURITY.md](SECURITY.md)** for reporting and what we do not promise (unsigned app, no notarization, Tailscale trust boundary).
 
 - Default bind is `127.0.0.1`.
 - The same **unauthenticated** listener serves the UI, `GET /api/state`, and mutating `POST /mcp` (including `set_tailnet` with `funnel`).
@@ -116,7 +139,7 @@ After `pip install -e .`, use `portskill-cli …` the same way.
 
 ## Light UI
 
-Default app launch serves the Portskill console (sidebar **PORTSKILL**, range cards, **Start / Stop / Release**, **Default On/Off**, **⚙ Actions**, compatibility warnings, export/import, presets + settings). Static sample: `ui/port-registry-preview.html`. Host wiring: `ui/WIRING.md`.
+Default app launch serves the Portskill console (sidebar **Portskill**, range cards, **Start / Stop / Release**, **Default On/Off**, **⚙ Actions**, compatibility warnings, export/import, presets + settings). Static sample: `ui/port-registry-preview.html`. Host wiring: `ui/WIRING.md`.
 
 ### Iterate Mode (optional)
 
@@ -177,12 +200,14 @@ examples/              # MCP stdio + environment samples
 ui/                    # portable preview + WIRING
 skill/SKILL.md         # optional agent sidecar
 tests/smoke_test.py    # stdlib smoke (also scripts/smoke_test.sh)
-pyproject.toml         # name: portskill
+.github/workflows/ci.yml
+SECURITY.md / CHANGELOG.md
+pyproject.toml         # name: portskill  version: 0.1.0
 ```
 
 ## Legacy (optional — kept, not primary)
 
-These still work during transition; prefer the Run section above.
+These still work during transition; prefer the Cold path / Run sections above.
 
 | Path | Role |
 |------|------|
@@ -202,3 +227,4 @@ These still work during transition; prefer the Run section above.
 - `release` refuses with `process_still_running` if pid/pgid is live; use `stop` or `deactivate`.
 - Exit-code-3 needs-input protocol + Tailnet modes: `skill/SKILL.md`.
 - Does **not** rewrite book-port Roster console; no Home/Fly; no Electron.
+- Changelog: [CHANGELOG.md](CHANGELOG.md).

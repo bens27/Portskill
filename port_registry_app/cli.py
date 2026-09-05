@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import argparse
+from . import __version__
 from . import discover_ports as discover_ports_mod
 import copy
 import datetime
@@ -14,6 +15,8 @@ import signal
 import subprocess
 import time
 import uuid
+import urllib.error
+import urllib.request
 import webbrowser
 
 
@@ -4713,17 +4716,27 @@ def cmd_tailscale(args):
 
 
 def cmd_doctor(args):
+    """Health check for install + live UI/MCP. Fail-closed on hard faults (exit 2)."""
     checks = []
     path = registry_path()
     registry_ok = False
     if not path.exists():
-        checks.append({"name": "registry", "ok": False, "detail": f"missing: {path}"})
+        # Cold install: absent registry is OK (created on first write).
+        checks.append({
+            "name": "registry",
+            "ok": True,
+            "detail": f"absent (cold): {path} — created on first allocate/serve",
+        })
     else:
         try:
             raw = path.read_text(encoding="utf-8")
             data = json.loads(raw) if raw.strip() else {}
             if not isinstance(data, dict):
-                checks.append({"name": "registry", "ok": False, "detail": f"corrupt_registry: not an object at {path}"})
+                checks.append({
+                    "name": "registry",
+                    "ok": False,
+                    "detail": f"corrupt_registry: not an object at {path}",
+                })
             else:
                 registry_ok = True
                 checks.append({"name": "registry", "ok": True, "detail": str(path)})
@@ -4731,32 +4744,134 @@ def cmd_doctor(args):
             checks.append({
                 "name": "registry",
                 "ok": False,
-                "detail": f"corrupt_registry at {path}: {exc.msg} (line {exc.lineno} col {exc.colno}); refusing to wipe",
+                "detail": (
+                    f"corrupt_registry at {path}: {exc.msg} "
+                    f"(line {exc.lineno} col {exc.colno}); refusing to wipe"
+                ),
             })
         except OSError as exc:
             checks.append({"name": "registry", "ok": False, "detail": f"unreadable: {path}: {exc}"})
+
+    checks.append({
+        "name": "version",
+        "ok": True,
+        "detail": f"portskill {__version__}",
+    })
+
+    listen_file = pathlib.Path(os.path.expanduser("~/.config/port-registry/listen.json"))
+    listen_payload = None
+    ui_url = None
+    mcp_url = None
+    listening = False
+    if not listen_file.is_file():
+        checks.append({
+            "name": "listen",
+            "ok": True,
+            "detail": f"absent: {listen_file} (server writes sticky listen after bind)",
+        })
+    else:
+        try:
+            listen_payload = json.loads(listen_file.read_text(encoding="utf-8"))
+            if not isinstance(listen_payload, dict):
+                checks.append({
+                    "name": "listen",
+                    "ok": False,
+                    "detail": f"corrupt listen.json (not an object): {listen_file}",
+                })
+                listen_payload = None
+            else:
+                listening = bool(listen_payload.get("listening"))
+                ui_url = listen_payload.get("ui_url")
+                mcp_url = listen_payload.get("mcp_url")
+                port = listen_payload.get("port")
+                checks.append({
+                    "name": "listen",
+                    "ok": True,
+                    "detail": (
+                        f"{listen_file} listening={listening} port={port} "
+                        f"ui_url={ui_url} mcp_url={mcp_url}"
+                    ),
+                })
+        except json.JSONDecodeError as exc:
+            checks.append({
+                "name": "listen",
+                "ok": False,
+                "detail": f"corrupt listen.json at {listen_file}: {exc.msg}; refusing to wipe",
+            })
+        except OSError as exc:
+            checks.append({"name": "listen", "ok": False, "detail": f"unreadable: {listen_file}: {exc}"})
+
+    def _probe(name: str, url: object) -> None:
+        if not listening:
+            checks.append({
+                "name": name,
+                "ok": True,
+                "detail": "skipped (not listening)",
+            })
+            return
+        if not isinstance(url, str) or not url.strip():
+            checks.append({
+                "name": name,
+                "ok": False,
+                "detail": f"listening=true but {name} URL missing in listen.json",
+            })
+            return
+        try:
+            with urllib.request.urlopen(url, timeout=3) as resp:
+                code = int(getattr(resp, "status", None) or resp.getcode())
+            if code != 200:
+                checks.append({
+                    "name": name,
+                    "ok": False,
+                    "detail": f"GET {url} -> HTTP {code}",
+                })
+            else:
+                checks.append({
+                    "name": name,
+                    "ok": True,
+                    "detail": f"GET {url} -> HTTP {code}",
+                })
+        except urllib.error.URLError as exc:
+            checks.append({
+                "name": name,
+                "ok": False,
+                "detail": f"GET {url}: {exc}",
+            })
+        except Exception as exc:  # pragma: no cover
+            checks.append({
+                "name": name,
+                "ok": False,
+                "detail": f"GET {url}: {exc}",
+            })
+
+    _probe("ui_reachability", ui_url)
+    _probe("mcp_reachability", mcp_url)
 
     ts_bin = resolve_tailscale_bin()
     ts_path = pathlib.Path(shlex.split(ts_bin)[0]) if ts_bin else None
     ts_exists = bool(ts_path and (ts_path.exists() or shutil.which(str(ts_path))))
     checks.append({
         "name": "tailscale_bin",
-        "ok": ts_exists,
-        "detail": f"{ts_bin}" + ("" if ts_exists else " (not found)"),
+        "ok": True,  # informational — Serve is optional; do not fail CI/cold Linux
+        "detail": f"{ts_bin}" + ("" if ts_exists else " (not found; Serve unavailable)"),
     })
 
     ts_status = probe_tailscale_status()
     checks.append({
         "name": "tailscale_auth",
-        "ok": bool(ts_status.get("logged_in")),
+        "ok": True,  # informational
         "detail": (
             f"{ts_status.get('chip')}: BackendState={ts_status.get('BackendState')!r}"
-            + ("" if ts_status.get("logged_in") else f"; {ts_status.get('message') or 'login required for Serve'}")
+            + (
+                ""
+                if ts_status.get("logged_in")
+                else f"; {ts_status.get('message') or 'login required for Serve'}"
+            )
         ),
     })
     checks.append({
         "name": "tailscale_serve",
-        "ok": True,  # informational note; capability depends on auth + bin
+        "ok": True,
         "detail": (
             "Serve maps localhost ports onto your tailnet when logged in. "
             "UI toggle is Serve on/off; Funnel remains available via CLI `--mode funnel`."
@@ -4765,7 +4880,6 @@ def cmd_doctor(args):
     })
 
     skill = skill_dir()
-    # App layout: port_registry_app package + ui/ + optional skill/SKILL.md
     app_pkg = skill / "port_registry_app"
     required_rel = [
         "port_registry_app/__init__.py",
@@ -4774,7 +4888,6 @@ def cmd_doctor(args):
         "port_registry_app/mcp.py",
     ]
     missing = [name for name in required_rel if not (skill / name).exists()]
-    # Accept either skill/SKILL.md (sidecar) or legacy root SKILL.md
     skill_md_ok = (skill / "skill" / "SKILL.md").exists() or (skill / "SKILL.md").exists()
     ui_ok = (skill / "ui").is_dir() or (app_pkg / "static").is_dir()
     skill_ok = not missing and ui_ok and skill_md_ok
@@ -4793,7 +4906,7 @@ def cmd_doctor(args):
         is_placeholder = script_is_placeholder(start_script)
         checks.append({
             "name": "start_script",
-            "ok": not is_placeholder,
+            "ok": True,  # informational — placeholder is common until customize
             "detail": (
                 f"placeholder still present: {start_script}"
                 if is_placeholder
@@ -4840,9 +4953,14 @@ def cmd_doctor(args):
             "detail": "skipped (registry not readable)",
         })
 
-    # tailscale_auth / tailscale_serve are reported but do not fail doctor alone
-    # (NeedsLogin is common until the user signs in for Serve).
-    hard_names = {"registry", "tailscale_bin", "skill_files", "start_script", "default_state"}
+    # Hard fail-closed: corrupt registry/listen, broken install, claimed-but-unreachable UI/MCP.
+    hard_names = {
+        "registry",
+        "listen",
+        "skill_files",
+        "ui_reachability",
+        "mcp_reachability",
+    }
     ok = all(item["ok"] for item in checks if item.get("name") in hard_names)
     focused_hist = None
     if registry_ok:
@@ -4865,9 +4983,14 @@ def cmd_doctor(args):
     emit({
         "status": "ok" if ok else "error",
         "reason": None if ok else "doctor_failed",
+        "version": __version__,
         "checks": checks,
         "registry_path": str(path),
         "registry_readable": registry_ok,
+        "listen_path": str(listen_file),
+        "listen": listen_payload,
+        "ui_url": ui_url,
+        "mcp_url": mcp_url,
         "skill_dir": str(skill),
         "default_state_counts": {"on": default_on, "off": default_off},
         "tailscale": ts_status,
@@ -4875,8 +4998,6 @@ def cmd_doctor(args):
     })
     if not ok:
         raise SystemExit(2)
-
-
 
 
 def cmd_history_list(args):
