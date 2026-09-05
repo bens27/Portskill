@@ -76,7 +76,7 @@ class DoctorOfflineTests(unittest.TestCase):
         payload = json.loads(proc.stdout)
         self.assertEqual(payload.get("status"), "ok")
 
-    def test_non_loopback_host_warns_without_failing(self) -> None:
+    def test_non_loopback_host_fails_closed_without_override(self) -> None:
         with IsolatedConfig() as iso:
             iso.write_listen({
                 "version": 1,
@@ -87,9 +87,11 @@ class DoctorOfflineTests(unittest.TestCase):
                 "mcp_url": "http://0.0.0.0:20001/mcp",
             })
             code, payload = _doctor({"PORT_REGISTRY_PATH": str(iso.registry_path)})
-        self.assertEqual(code, 0)
-        self.assertEqual(payload.get("status"), "ok")
+        self.assertEqual(code, 2)
+        self.assertEqual(payload.get("status"), "error")
+        self.assertEqual(payload.get("reason"), "doctor_failed")
         self.assertFalse(payload.get("loopback"))
+        self.assertFalse(payload.get("allow_non_loopback"))
         self.assertEqual(payload.get("bind_host"), "0.0.0.0")
         msg = payload.get("message") or ""
         self.assertIn("not loopback", msg)
@@ -97,9 +99,33 @@ class DoctorOfflineTests(unittest.TestCase):
         bind_check = next(
             c for c in payload["checks"] if c.get("name") == "bind_host"
         )
-        self.assertTrue(bind_check.get("ok"))
+        self.assertFalse(bind_check.get("ok"))
         self.assertTrue(bind_check.get("warning"))
         self.assertIn("not loopback", bind_check.get("detail") or "")
+        self.assertIn("--allow-non-loopback", bind_check.get("detail") or "")
+
+    def test_non_loopback_with_override_warns_and_exits_zero(self) -> None:
+        with IsolatedConfig() as iso:
+            iso.write_listen({
+                "version": 1,
+                "listening": False,
+                "host": "0.0.0.0",
+                "port": 20002,
+                "ui_url": "http://0.0.0.0:20002/",
+                "mcp_url": "http://0.0.0.0:20002/mcp",
+                "allow_non_loopback": True,
+            })
+            code, payload = _doctor({"PORT_REGISTRY_PATH": str(iso.registry_path)})
+        self.assertEqual(code, 0)
+        self.assertEqual(payload.get("status"), "ok")
+        self.assertFalse(payload.get("loopback"))
+        self.assertTrue(payload.get("allow_non_loopback"))
+        bind_check = next(
+            c for c in payload["checks"] if c.get("name") == "bind_host"
+        )
+        self.assertTrue(bind_check.get("ok"))
+        self.assertTrue(bind_check.get("warning"))
+        self.assertIn("--allow-non-loopback", bind_check.get("detail") or "")
 
     def test_invalid_kit_override_fails_closed(self) -> None:
         with IsolatedConfig() as iso:

@@ -13,7 +13,8 @@ Do **not** Funnel or publicly expose the Portskill listen port while testing a r
 ## What this project promises today (private-grade)
 
 - **Default bind is loopback** (`127.0.0.1`). The same unauthenticated listener serves the HTML UI, `GET /api/state`, and mutating `POST /mcp`.
-- **Stdio MCP** is the preferred agent path (`--mcp-stdio`). HTTP MCP is local-trust dogfood only.
+- **Non-loopback `--host` is refused** at start unless `--allow-non-loopback` (documented footgun). `doctor` fails closed (exit 2) if `listen.json` shows a non-loopback host without that override recorded.
+- **Stdio MCP** is the preferred agent path (`--mcp-stdio` / `examples/mcp.stdio.json`). HTTP MCP is local-trust dogfood only.
 - **Tailscale trust boundary:** Serve can map *your* claimed service ports onto your tailnet when logged in. Funneling the Portskill UI/MCP listen port is out of scope unless Ben explicitly OK’s it. Treat anything on the listen port as local-trust.
 
 ## What we do **not** claim yet
@@ -22,7 +23,7 @@ Do **not** Funnel or publicly expose the Portskill listen port while testing a r
 - **Gatekeeper workaround for trusted local builds:** `scripts/install-mac.sh` runs `xattr -dr com.apple.quarantine` on the installed app. Friends who skip the installer can right-click → Open once. This is not the same as Apple notarization.
 - **Notarization path (maintainer):** `scripts/notarize-mac.sh` codesigns `dist/Portskill.app` (`PORTSKILL_SIGN_IDENTITY` or auto-detect Developer ID Application), submits a zip/dmg via `xcrun notarytool` using App Store Connect API key env (`APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_API_KEY_PATH` → `AuthKey_XXX.p8`), and staples. Apple ID / app-specific password is not used. The script fails closed if those vars are missing. Do not commit the `.p8`. **This file does not claim notarization succeeded.**
 - **No code-signing identity guarantee** in CI receipts for this private cut.
-- **No authentication / allowlist** on the HTTP UI or HTTP MCP listener. Widening `--host` (e.g. `0.0.0.0`) is an explicit footgun — `doctor` and the UI surface a warning; default bind stays loopback.
+- **No authentication / allowlist** on the HTTP UI or HTTP MCP listener. Non-loopback `--host` (e.g. `0.0.0.0`) is **refused at start** unless `--allow-non-loopback` is passed (documented footgun). `doctor` fails closed (exit 2) when `listen.json` shows a non-loopback bind without that override recorded. With the override, start is allowed, the UI banner/chip stays, and `doctor` warns but exits 0. Default bind stays loopback.
 - **Remotes** (multi-machine registry) remain HOLD — not a security surface in this cut.
 - **No App Store Connect / ASC notarization claim** for Portskill, the Session Handoff kit, or the Chrome extension. Ad-hoc codesign ≠ notarized.
 

@@ -86,6 +86,9 @@ def is_loopback_host(host):
     return False
 
 
+ALLOW_NON_LOOPBACK_FLAG = "--allow-non-loopback"
+
+
 def bind_host_warning(host):
     """Clear warning when --host is not loopback. None when loopback / unset."""
     if host is None or is_loopback_host(host):
@@ -93,8 +96,26 @@ def bind_host_warning(host):
     return (
         f"Bound to {host} (not loopback). "
         "The unauthenticated UI and HTTP MCP are reachable beyond this machine. "
-        "Default bind remains 127.0.0.1. Remotes HOLD."
+        "Default bind remains 127.0.0.1. "
+        f"This requires {ALLOW_NON_LOOPBACK_FLAG} (documented footgun). Remotes HOLD."
     )
+
+
+def non_loopback_refuse_message(host):
+    """Error when bind host is not loopback and the override flag is absent."""
+    return (
+        f"Refusing to bind {host} (not loopback). "
+        "The unauthenticated UI and HTTP MCP would be reachable beyond this machine. "
+        f"Default bind is 127.0.0.1. Pass {ALLOW_NON_LOOPBACK_FLAG} only if you "
+        "intentionally accept that exposure (documented footgun)."
+    )
+
+
+def listen_allows_non_loopback(listen_payload):
+    """True when listen.json records an explicit non-loopback override."""
+    if not isinstance(listen_payload, dict):
+        return False
+    return bool(listen_payload.get("allow_non_loopback"))
 
 
 def pool_bounds():
@@ -4881,13 +4902,22 @@ def cmd_doctor(args):
             checks.append({"name": "listen", "ok": False, "detail": f"unreadable: {listen_file}: {exc}"})
 
     loopback_warn = bind_host_warning(bind_host)
+    allow_non_loopback = listen_allows_non_loopback(listen_payload)
     if loopback_warn:
-        checks.append({
-            "name": "bind_host",
-            "ok": True,  # warning only — default bind is still loopback; do not fail doctor
-            "detail": loopback_warn,
-            "warning": True,
-        })
+        if allow_non_loopback:
+            checks.append({
+                "name": "bind_host",
+                "ok": True,
+                "detail": loopback_warn,
+                "warning": True,
+            })
+        else:
+            checks.append({
+                "name": "bind_host",
+                "ok": False,
+                "detail": loopback_warn + f" doctor fails closed without {ALLOW_NON_LOOPBACK_FLAG}.",
+                "warning": True,
+            })
     elif bind_host:
         checks.append({
             "name": "bind_host",
@@ -5066,7 +5096,7 @@ def cmd_doctor(args):
     checks.append(handoff_check)
 
     # Hard fail-closed: corrupt registry/listen, broken install, claimed-but-unreachable UI/MCP,
-    # missing Session Handoff kit or invalid kit override.
+    # missing Session Handoff kit or invalid kit override, non-loopback bind without allow.
     hard_names = {
         "registry",
         "listen",
@@ -5074,6 +5104,7 @@ def cmd_doctor(args):
         "ui_reachability",
         "mcp_reachability",
         "handoff_kit",
+        "bind_host",
     }
     ok = all(item["ok"] for item in checks if item.get("name") in hard_names)
     focused_hist = None
@@ -5106,6 +5137,7 @@ def cmd_doctor(args):
         "listen": listen_payload,
         "bind_host": bind_host,
         "loopback": loopback_warn is None,
+        "allow_non_loopback": allow_non_loopback,
         "ui_url": ui_url,
         "mcp_url": mcp_url,
         "skill_dir": str(skill),
