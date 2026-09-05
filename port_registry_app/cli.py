@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from . import __version__
 from . import discover_ports as discover_ports_mod
+from .handoff import doctor_handoff
 import copy
 import datetime
 import fcntl
@@ -5052,13 +5053,27 @@ def cmd_doctor(args):
             "detail": "skipped (registry not readable)",
         })
 
-    # Hard fail-closed: corrupt registry/listen, broken install, claimed-but-unreachable UI/MCP.
+    settings_for_handoff = {}
+    if registry_ok:
+        try:
+            raw = path.read_text(encoding="utf-8")
+            data = json.loads(raw) if raw.strip() else {}
+            if isinstance(data, dict) and isinstance(data.get("settings"), dict):
+                settings_for_handoff = data["settings"]
+        except (OSError, json.JSONDecodeError):
+            settings_for_handoff = {}
+    handoff_check, handoff_info = doctor_handoff(settings_for_handoff)
+    checks.append(handoff_check)
+
+    # Hard fail-closed: corrupt registry/listen, broken install, claimed-but-unreachable UI/MCP,
+    # missing Session Handoff kit or invalid kit override.
     hard_names = {
         "registry",
         "listen",
         "skill_files",
         "ui_reachability",
         "mcp_reachability",
+        "handoff_kit",
     }
     ok = all(item["ok"] for item in checks if item.get("name") in hard_names)
     focused_hist = None
@@ -5097,6 +5112,7 @@ def cmd_doctor(args):
         "default_state_counts": {"on": default_on, "off": default_off},
         "tailscale": ts_status,
         "environment_history": focused_hist,
+        "handoff_kit": handoff_info,
     })
     if not ok:
         raise SystemExit(2)

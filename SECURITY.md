@@ -24,6 +24,16 @@ Do **not** Funnel or publicly expose the Portskill listen port while testing a r
 - **No code-signing identity guarantee** in CI receipts for this private cut.
 - **No authentication / allowlist** on the HTTP UI or HTTP MCP listener. Widening `--host` (e.g. `0.0.0.0`) is an explicit footgun — `doctor` and the UI surface a warning; default bind stays loopback.
 - **Remotes** (multi-machine registry) remain HOLD — not a security surface in this cut.
+- **No App Store Connect / ASC notarization claim** for Portskill, the Session Handoff kit, or the Chrome extension. Ad-hoc codesign ≠ notarized.
+
+## Session Handoff kit
+
+- The kit at `vendor/session-handoff-kit/` is local stdlib (Python / bash). Portskill does not add a network client for it.
+- Ledger writes go only through the vendored `handoff_ledger.py`. Files land in the project's `./.handoffs/` when that directory exists, otherwise `~/.claude/handoffs/<project-basename>/`.
+- Codex `install.sh` writes `$CODEX_HOME` (default `~/.codex`): hook scripts, a skill copy, and a `hooks.json` merge. It does **not** enable the hooks feature flag or approve hook trust. Portskill does not edit `config.toml`.
+- The Chrome extension is loaded in the user's browser (typically against `claude.ai`). Portskill only points at `chrome-extension/`; it does not inject into other sites.
+- Handoff MCP tools (`handoff_*`) share the **same unauthenticated loopback listener** as the HTML UI and `POST /mcp`. Prefer stdio MCP for agents. Widening `--host` exposes these tools too.
+- Remotes remain HOLD. This kit does not talk to remote Portskill instances.
 
 ## Safe defaults
 

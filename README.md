@@ -60,7 +60,7 @@ cd Portskill
 # Read live URLs (port is sticky; do not assume :8765):
 python3 -c "import json,pathlib; print(json.load(open(pathlib.Path.home()/'.config/port-registry/listen.json')))"
 # Open ui_url in a browser → claim/allocate a port range → use MCP tools/list
-./scripts/doctor.sh                 # version + listen + reachability + bind-host warn
+./scripts/doctor.sh                 # version + listen + reachability + bind-host warn + handoff kit
 ./scripts/smoke_test.sh             # only documented smoke / test entry
 ```
 
@@ -225,7 +225,7 @@ Each range stores additive `default_state` (`"off"` | `"on"`, missing ⇒ off).
 - Import backs up to `~/.config/port-registry/backups/workspace-YYYYMMDD-HHMMSS.json` first.
 - Per-range **Default** and **Tailscale Serve** switches; Browser Login required before Serve on.
 - Settings: auto-apply / auto-deactivate + locked **Require compatibility**. Remotes HOLD (no stub).
-- **Session Handoff** (collapsed, next to MCP tools): enable/add, vendored kit status, install matrix (Claude Code / Cowork / Codex / Chat / Chrome extension), open-handoff count, `package.sh`. Not Coming soon. Kit is `vendor/session-handoff-kit/` (optional `PORTSKILL_HANDOFF_KIT` / `settings.handoff_kit` override).
+- **Session Handoff** (collapsed, next to MCP tools): enable/add, vendored kit status, install-matrix **Add / manage** per surface (Claude Code copy `/plugin` commands; Cowork + chat `package.sh`; Codex `install.sh`; Chrome copy Load-unpacked path). Not Coming soon. `doctor` reports kit present/configured. Kit is `vendor/session-handoff-kit/` (optional `PORTSKILL_HANDOFF_KIT` / `settings.handoff_kit` override).
 
 ```bash
 portskill-cli tailscale login

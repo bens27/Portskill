@@ -26,6 +26,7 @@ from urllib.parse import urlparse, unquote
 from . import __version__
 from .handoff import (
     install_help_text,
+    run_codex_install,
     run_package_sh,
     status_payload,
 )
@@ -1314,6 +1315,8 @@ def console_css() -> str:
         ".pr-handoff-help{white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;background:#fafbf9;border:1px solid var(--line);border-radius:6px;padding:8px 10px;overflow:auto;max-height:220px}"
         ".pr-handoff-kit{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;word-break:break-all}"
         ".pr-handoff-err{color:#b42318}"
+        ".pr-handoff-manage{display:flex;flex-direction:column;align-items:flex-start;gap:6px}"
+        ".pr-handoff-honesty{color:#5c5c5c;font-size:11px;line-height:1.35}"
         ".pr-mcp-composer input[type=text],.pr-mcp-composer select{min-width:0;flex:1 1 10rem;max-width:100%}"
         ".pr-mcp-uc-name,.pr-mcp-uc-desc{min-width:0!important}"
         "@media(max-width:900px){"
@@ -2136,16 +2139,38 @@ def handoff_panel_html(view: dict | None = None) -> str:
         else:
             state = "see install help"
         note = item.get("note") or item.get("how") or ""
+        manage = item.get("manage") if isinstance(item.get("manage"), dict) else {}
+        action = str(manage.get("action") or "")
+        button = str(manage.get("button") or "Manage")
+        honesty = str(manage.get("honesty") or "")
+        copy = str(manage.get("copy") or "")
+        if action == "handoff-copy":
+            btn = (
+                f'<button type="button" class="pr-btn" data-pr-action="handoff-copy" '
+                f'data-copy="{esc(copy)}">{esc(button)}</button>'
+            )
+        elif action in ("handoff-package", "handoff-codex-install"):
+            btn = (
+                f'<button type="button" class="pr-btn" data-pr-action="{esc(action)}" '
+                f'data-surface="{esc(item.get("id") or "")}">{esc(button)}</button>'
+            )
+        else:
+            btn = ""
+        manage_html = (
+            f'<div class="pr-handoff-manage">{btn}'
+            f'<span class="pr-handoff-honesty">{esc(honesty)}</span></div>'
+        )
         rows.append(
             "<tr>"
             f"<td>{esc(item.get('label') or item.get('id') or '')}</td>"
             f"<td>{esc(state)}</td>"
+            f"<td>{manage_html}</td>"
             f"<td>{esc(note)}</td>"
             "</tr>"
         )
     matrix = (
         '<table class="pr-handoff-matrix">'
-        "<thead><tr><th>Surface</th><th>Status</th><th>Install</th></tr></thead>"
+        "<thead><tr><th>Surface</th><th>Status</th><th>Add / manage</th><th>Notes</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table>"
         if rows
         else '<p class="empty">Install matrix unavailable.</p>'
@@ -2184,12 +2209,11 @@ def handoff_panel_html(view: dict | None = None) -> str:
         f'<button type="submit" class="pr-btn" data-pr-action="handoff-set-kit">Set kit path</button>'
         f"</form>"
         f"{err_html}"
-        f"<h4>Install matrix</h4>{matrix}"
-        f'<div class="pr-handoff-row">'
-        f'<button type="button" class="pr-btn" data-pr-action="handoff-package" '
-        f'title="Run scripts/package.sh in the kit (writes dist/*.plugin and dist/*.skill)">Run package.sh</button>'
-        f'<span class="tag">Cowork plugin + chat skill artifacts</span>'
-        f"</div>"
+        f"<h4>Install matrix</h4>"
+        f"<p>Add or manage each surface from the kit README. Cowork and chat share "
+        f"<code>package.sh</code>; Claude Code and Chrome are copy-the-path (Portskill "
+        f"cannot run <code>/plugin</code> or Load unpacked).</p>"
+        f"{matrix}"
         f"<h4>Install help</h4>"
         f'<pre class="pr-handoff-help" id="pr-handoff-help">{help_text}</pre>'
         f"</div></details></div>"
@@ -2465,6 +2489,9 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
       if(result.body&&(result.body.backup_path||(result.body.result&&result.body.result.backup_path))){{
         var bp=result.body.backup_path||result.body.result.backup_path;
         alert('Import complete.\\nBackup saved to:\\n'+bp);
+      }}
+      if(result.body&&result.body.handoff_notice){{
+        alert(result.body.handoff_notice);
       }}
       window.location.reload();
       return;
@@ -2860,6 +2887,22 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
       postAction({{action:'allocate', count:parseInt(count,10)||1, note:note, project:proj, tailnet:'none'}})
         .then(function(result){{handleResult(result,btn);}}).catch(function(){{btn.disabled=false;}});
       return;
+    }}
+    if(action==='handoff-copy'){{
+      var text=btn.getAttribute('data-copy')||'';
+      function copied(){{ var t=btn.textContent; btn.textContent='Copied'; setTimeout(function(){{ btn.textContent=t; }}, 1200); }}
+      if(navigator.clipboard && navigator.clipboard.writeText){{
+        navigator.clipboard.writeText(text).then(copied).catch(function(){{ prompt('Copy', text); }});
+      }} else {{
+        prompt('Copy', text);
+      }}
+      return;
+    }}
+    if(action==='handoff-codex-install'){{
+      if(!confirm('Run codex/install.sh into $CODEX_HOME (default ~/.codex)? Copies hooks + skill and merges hooks.json. Does not enable hooks in config.toml or approve hook trust.'))return;
+    }}
+    if(action==='handoff-package'){{
+      if(!confirm('Run scripts/package.sh? Writes Cowork plugin and chat/Desktop skill artifacts under the kit dist/.'))return;
     }}
     btn.disabled=true;
     var payload={{action:action}};
@@ -3843,6 +3886,15 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
     if action == "handoff-package":
         settings = load_registry().get("settings") or {}
         result = run_package_sh(settings)
+        if result.get("ok"):
+            out = dict(result)
+            out["ok"] = True
+            return 0, out
+        return 422, result
+
+    if action == "handoff-codex-install":
+        settings = load_registry().get("settings") or {}
+        result = run_codex_install(settings)
         if result.get("ok"):
             out = dict(result)
             out["ok"] = True

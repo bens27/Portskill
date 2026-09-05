@@ -138,6 +138,46 @@ def package_script(settings: dict | None = None) -> pathlib.Path | None:
     return path if path.is_file() else None
 
 
+def codex_install_script(settings: dict | None = None) -> pathlib.Path | None:
+    path = kit_root(settings) / "codex" / "install.sh"
+    return path if path.is_file() else None
+
+
+def chrome_extension_dir(settings: dict | None = None) -> pathlib.Path | None:
+    path = kit_root(settings) / "chrome-extension"
+    return path if (path / "manifest.json").is_file() else None
+
+
+def doctor_handoff(settings: dict | None = None) -> tuple[dict, dict]:
+    """Doctor check + top-level payload. Hard-fail when kit missing or override invalid."""
+    override = configured_kit_override(settings)
+    present = kit_present(settings)
+    err = kit_error(settings)
+    enabled = _as_bool((settings or {}).get("handoff_enabled"), False)
+    configured = bool(override) or enabled
+    info = {
+        "present": present,
+        "configured": configured,
+        "enabled": enabled,
+        "path": str(kit_root(settings)),
+        "source": "override" if override else "vendored",
+        "override": override or None,
+        "error": err or None,
+    }
+    if not present:
+        detail = err or "Session Handoff kit missing or override is not a kit"
+        check = {"name": "handoff_kit", "ok": False, "detail": detail}
+        return check, info
+    bits = [
+        f"present={info['path']}",
+        f"source={info['source']}",
+        f"configured={'yes' if configured else 'no'}",
+        f"enabled={'on' if enabled else 'off'}",
+    ]
+    check = {"name": "handoff_kit", "ok": True, "detail": "; ".join(bits)}
+    return check, info
+
+
 def _read_text(path: pathlib.Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -267,9 +307,66 @@ def _chrome_probe(settings: dict | None) -> dict:
     }
 
 
+def _surface_manage(settings: dict | None = None) -> dict[str, dict]:
+    """Add/manage actions for the kit README install matrix (not Coming soon)."""
+    root = kit_root(settings)
+    claude_copy = (
+        f"/plugin marketplace add {root}\n"
+        "/plugin install session-handoff@session-handoff-kit"
+    )
+    chrome = chrome_extension_dir(settings)
+    chrome_path = str(chrome) if chrome else str(root / "chrome-extension")
+    return {
+        "claude_code": {
+            "action": "handoff-copy",
+            "button": "Copy add commands",
+            "copy": claude_copy,
+            "honesty": (
+                "Portskill cannot run /plugin. Paste these in Claude Code "
+                "(CLI / VS Code / JetBrains)."
+            ),
+        },
+        "cowork": {
+            "action": "handoff-package",
+            "button": "Package plugin",
+            "honesty": (
+                "Runs scripts/package.sh, then open dist/session-handoff.plugin "
+                "in a Cowork conversation and click install."
+            ),
+        },
+        "codex": {
+            "action": "handoff-codex-install",
+            "button": "Run install.sh",
+            "honesty": (
+                "Writes $CODEX_HOME (default ~/.codex): hooks + skill + hooks.json merge. "
+                "Still enable [features] hooks = true in config.toml and approve hook trust. "
+                "Portskill does not edit config.toml."
+            ),
+        },
+        "chat": {
+            "action": "handoff-package",
+            "button": "Package skill",
+            "honesty": (
+                "Runs scripts/package.sh, then Save skill on "
+                "dist/session-handoff-chat.skill (chat / Desktop / mobile)."
+            ),
+        },
+        "chrome": {
+            "action": "handoff-copy",
+            "button": "Copy extension path",
+            "copy": chrome_path,
+            "honesty": (
+                "chrome://extensions → Developer mode → Load unpacked → this folder. "
+                "Portskill cannot load the extension into Chrome."
+            ),
+        },
+    }
+
+
 def install_matrix(settings: dict | None = None) -> list[dict]:
     root = str(kit_root(settings))
-    return [
+    manages = _surface_manage(settings)
+    rows = [
         _claude_code_probe(),
         _artifact_probe(
             settings,
@@ -288,6 +385,11 @@ def install_matrix(settings: dict | None = None) -> list[dict]:
         ),
         _chrome_probe(settings),
     ]
+    for item in rows:
+        manage = manages.get(str(item.get("id") or ""))
+        if manage:
+            item["manage"] = manage
+    return rows
 
 
 def run_ledger(argv: list[str], settings: dict | None = None) -> tuple[int, Any, str, str]:
@@ -429,6 +531,46 @@ def run_package_sh(settings: dict | None = None) -> dict:
         "exit_code": completed.returncode,
         "output": out,
         "artifacts": [line for line in (completed.stdout or "").splitlines() if line.strip()],
+        "handoff_notice": out or ("package.sh finished" if completed.returncode == 0 else "package.sh failed"),
+    }
+
+
+def run_codex_install(settings: dict | None = None, codex_home: str | None = None) -> dict:
+    """Run the vendored codex/install.sh. Honors CODEX_HOME; does not edit config.toml."""
+    script = codex_install_script(settings)
+    if script is None:
+        return {
+            "ok": False,
+            "error": "codex_install_missing",
+            "message": "codex/install.sh not found in the Session Handoff kit",
+        }
+    env = os.environ.copy()
+    home = (codex_home or env.get("CODEX_HOME") or str(_home() / ".codex")).strip()
+    env["CODEX_HOME"] = home
+    try:
+        completed = subprocess.run(
+            ["bash", str(script)],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=str(script.parent),
+            env=env,
+        )
+    except OSError as exc:
+        return {"ok": False, "error": "codex_install_failed", "message": str(exc)}
+    out = ((completed.stdout or "") + (completed.stderr or "")).strip()
+    honesty = (
+        "install.sh writes hooks + skill and merges hooks.json. "
+        "Enable [features] hooks = true in config.toml and approve hook trust. "
+        "Portskill does not edit config.toml."
+    )
+    return {
+        "ok": completed.returncode == 0,
+        "exit_code": completed.returncode,
+        "output": out,
+        "codex_home": home,
+        "honesty": honesty,
+        "handoff_notice": (out + "\n\n" + honesty).strip() if out else honesty,
     }
 
 
