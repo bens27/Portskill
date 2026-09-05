@@ -66,7 +66,7 @@ Portable TypeScript modules for hosts wiring into a larger console live under `u
 - `--host` can widen exposure with **no allowlist** — do not use `0.0.0.0` casually.
 - Prefer **stdio MCP** for agents (`python3 -m port_registry_app --mcp-stdio` / `examples/mcp.stdio.json`). HTTP MCP is **local-trust dogfood only**.
 - Never Tailscale Funnel the Portskill listen/UI port without explicit human OK. Funnel on user services is a separate deliberate choice.
-- **Remotes · Coming soon** — HOLD.
+- **Remotes** — HOLD (not implemented).
 
 ## Registry Files
 

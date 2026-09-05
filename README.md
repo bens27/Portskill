@@ -4,9 +4,52 @@
 
 > Module path remains `port_registry_app` (compat). Product name is **Portskill**.
 
-## Cold path (install → open → claim → MCP)
+## Cold path (Mac friends)
 
-From a git clone (no house lore required):
+Treat Portskill like an app, not a developer ritual.
+
+```bash
+# 1) Trusted copy of this repo (zip or git clone), then:
+cd Portskill
+./scripts/build-app.sh                 # skip if dist/Portskill.app already exists
+./scripts/install-mac.sh               # → /Applications  (or --user for ~/Applications)
+# 2) Double-click Portskill in Applications, or:
+open /Applications/Portskill.app
+# 3) UI URL (sticky port — do not assume :8765):
+python3 -c "import json,pathlib; print(json.load(open(pathlib.Path.home()/'.config/port-registry/listen.json'))['ui_url'])"
+```
+
+`install-mac.sh` reuses `dist/Portskill.app` when it looks complete, copies it to Applications, and runs `xattr -dr com.apple.quarantine` on the installed app. Optional: `./scripts/install-mac.sh --keepalive` to start the LaunchAgent after install.
+
+### Gatekeeper (until a build is notarized)
+
+Friend builds are **not** App Store / notarized unless someone ran `./scripts/notarize-mac.sh` with a Developer ID and Apple credentials. Until then:
+
+- Prefer `./scripts/install-mac.sh` after a **trusted local build** — it strips `com.apple.quarantine`.
+- Or **right-click Portskill → Open** the first time (then Open again in the Gatekeeper sheet).
+
+Do not assume a downloaded zip is notarized just because this repo has a notarize script.
+
+### Notarization (maintainer, optional)
+
+```bash
+./scripts/build-app.sh
+./scripts/notarize-mac.sh          # zip payload (default)
+# ./scripts/notarize-mac.sh --dmg  # UDZO dmg instead
+```
+
+Requires a **Developer ID Application** identity (`PORTSKILL_SIGN_IDENTITY` or auto-detect) plus either:
+
+| Method | Environment variables |
+|--------|------------------------|
+| App Store Connect API key | `APP_STORE_CONNECT_API_KEY_PATH`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_ID` |
+| Apple ID | `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` (or `APPLE_PASSWORD`), `APPLE_TEAM_ID` |
+
+The script **fails closed** if those are missing and only prints success after `notarytool` accepts and `stapler` staples. Do not commit secrets. This repository does **not** claim a notarized build unless that command was actually run with credentials.
+
+## Agent / module path (secondary)
+
+For agents and Linux CI — not the friend install:
 
 ```bash
 git clone https://github.com/bens27/Portskill.git
@@ -25,7 +68,7 @@ Optional: `pip install -e .` then `portskill` / `portskill-cli`.
 
 | Face | What it is | How you run it |
 |------|------------|----------------|
-| **App / UI** | HTML console on the sticky listen port | `python3 -m port_registry_app` or `dist/Portskill.app` |
+| **App / UI** | HTML console on the sticky listen port | `/Applications/Portskill.app` via `./scripts/install-mac.sh`, or `python3 -m port_registry_app` |
 | **MCP** | Same process: stdio or `POST /mcp` JSON-RPC | `--mcp-stdio` or `mcp_url` from `listen.json` |
 | **CLI / skill** | Stdlib CLI (+ optional `skill/SKILL.md` sidecar) | `python3 -m port_registry_app.cli …` / `portskill-cli` |
 
@@ -35,8 +78,8 @@ One version string everywhere: `pyproject.toml` ↔ package `__version__` ↔ UI
 
 Pick **one** — all start the same UI + MCP HTTP server:
 
-1. **Double-click** `dist/Portskill.app` (primary Mac install; build with `./scripts/build-app.sh`)
-2. **Module launch** (see Cold path above)
+1. **Double-click** `/Applications/Portskill.app` after `./scripts/install-mac.sh` (or `dist/Portskill.app` from `./scripts/build-app.sh`)
+2. **Module launch** (see Agent / module path above)
 3. **Keepalive** (LaunchAgent + Dock/menubar; survives Terminal close / login):
    ```bash
    ./scripts/install-keepalive.sh install
@@ -78,22 +121,22 @@ Exit 0 on pass. GitHub Actions runs the same smoke on every push to `main` (`.gi
 ## UI highlights
 
 - **Compose** is first-class (topbar jump + MCP panel composer).
-- **System tools** disclosure is **default-closed** on desktop and narrow viewports.
-- **Workspaces · Coming soon** — runtime is one workspace (all services). Multi-workspace switching held; CLI/MCP presets still work.
+- **System tools** and **repo** disclosures are **default-closed** (chevrons + Show/Hide).
+- **One workspace** — all services in a single implicit workspace. Export/Import Workspace stay in ⚙ Actions. Named presets remain CLI/MCP.
 - **Defaults** — per-range Default On/Off; toolbar **Start Default Services** / activate via `apply-defaults`; deactivate keeps reserved unless `--also-release`.
 - **⚙ Actions** panel — workspace bulk actions (start/stop default/all, export/import workspace).
-- **Remotes · Coming soon** — Settings stub only; HOLD (no machine add/remove this cut).
+- **require_compat** is always on (Settings checkbox locked).
 
 ## Local trust / security
 
-See **[SECURITY.md](SECURITY.md)** for reporting and what we do not promise (unsigned app, no notarization, Tailscale trust boundary).
+See **[SECURITY.md](SECURITY.md)** for reporting, Gatekeeper / notarization status, and the Tailscale trust boundary.
 
 - Default bind is `127.0.0.1`.
 - The same **unauthenticated** listener serves the UI, `GET /api/state`, and mutating `POST /mcp` (including `set_tailnet` with `funnel`).
 - `--host` can widen exposure with **no allowlist** — do not use `0.0.0.0` casually.
 - Prefer **stdio MCP** for agents (`--mcp-stdio` / `examples/mcp.stdio.json`). HTTP MCP is **local-trust dogfood only**.
 - Never Tailscale Funnel the Portskill listen/UI port without explicit Ben OK. Funnel on *user* services is a separate deliberate choice.
-- **Remotes · Coming soon** — HOLD (no remote machine registry this cut).
+- Remote machines remain **HOLD** (not implemented; no Settings stub).
 
 ## Connect MCP
 
@@ -158,7 +201,7 @@ Builds/uses `dist/Portskill.app` when possible; writes `~/Library/LaunchAgents/l
 
 ## Remote machines
 
-**Coming soon.** Remote machine registry (add/remove, MCP `machine_*`) is held. This cut: keepalive, Dock/menubar, sticky listen, port hyperlinks only.
+**HOLD** — not implemented. Do not expect add/remove machines or MCP `machine_*` in this cut. Keepalive, Dock/menubar, sticky listen, and port hyperlinks are local-only.
 
 ## Workspaces, presets, defaults, bulk start/stop
 
@@ -176,11 +219,11 @@ Each range stores additive `default_state` (`"off"` | `"on"`, missing ⇒ off).
 
 ### UI details
 
-- Sidebar **Workspaces · Coming soon** (no tabs / New / Saved list).
+- Single implicit workspace (no Workspaces rail / tabs / New / Saved list).
 - **⚙ Actions**: Start Default / Start All / Stop non-Default / Stop All / Export / Import Workspace.
 - Import backs up to `~/.config/port-registry/backups/workspace-YYYYMMDD-HHMMSS.json` first.
 - Per-range **Default** and **Tailscale Serve** switches; Browser Login required before Serve on.
-- **Remote machines · Coming soon** stub in Settings. Remotes HOLD.
+- Settings: auto-apply / auto-deactivate + locked **Require compatibility**. Remotes HOLD (no stub).
 
 ```bash
 portskill-cli tailscale login
@@ -194,7 +237,7 @@ portskill-cli stop --non-default
 ```text
 port_registry_app/     # UI + MCP + CLI (compat module name)
 dist/Portskill.app/    # primary double-click bundle (after build-app.sh)
-scripts/               # build-app, install-keepalive, smoke_test, …
+scripts/               # install-mac, notarize-mac, build-app, install-keepalive, smoke_test, …
 macos/                 # Swift menu/Dock sources + launchd plist
 examples/              # MCP stdio + environment samples
 ui/                    # portable preview + WIRING
@@ -207,7 +250,7 @@ pyproject.toml         # name: portskill  version: 0.1.0
 
 ## Legacy (optional — kept, not primary)
 
-These still work during transition; prefer the Cold path / Run sections above.
+These still work during transition; prefer **Cold path (Mac friends)** or the agent/module path above.
 
 | Path | Role |
 |------|------|

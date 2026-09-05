@@ -51,6 +51,71 @@ def main() -> int:
         fail(f"version mismatch: SERVER_VERSION={SERVER_VERSION!r} __version__={pkg_ver!r}")
     ok(f"import port_registry_app version={pkg_ver} ({getattr(port_registry_app, '__file__', '?')})")
 
+    # 1b) Friend UI must not advertise unfinished Workspaces / Remotes / Presets.
+    try:
+        from port_registry_app.server import (
+            build_view,
+            env_rail_html,
+            environment_rail_html,
+            presets_panel_html,
+            render_page,
+            settings_panel_html,
+        )
+    except Exception as exc:  # pragma: no cover
+        fail(f"import UI render helpers: {exc}")
+    view = build_view({})
+    html = render_page(view, tailscale={"chip": "Needs login", "state": "needs_login", "logged_in": False})
+    if "Coming soon" in html:
+        fail("rendered UI still contains 'Coming soon' (Workspaces/Remotes/Presets chrome)")
+    for name, blob in (
+        ("env_rail_html", env_rail_html(view)),
+        ("environment_rail_html", environment_rail_html(view)),
+        ("presets_panel_html", presets_panel_html(view)),
+        ("settings_panel_html", settings_panel_html(view)),
+    ):
+        if "Coming soon" in blob:
+            fail(f"{name} still contains 'Coming soon'")
+    body = html.split("</style>", 1)[-1]
+    if "pr-env-soon" in body or "pr-remote-soon" in body or "pr-presets-soon" in body:
+        fail("friend UI still renders Workspaces/Remotes/Presets Coming soon markup")
+    if "System tools" not in html:
+        fail("System tools disclosure missing from rendered UI")
+    if "Export Workspace" not in html:
+        fail("Export Workspace missing from rendered UI")
+    if "Require compatibility" not in html or 'id="pr-require-compat"' not in html:
+        fail("require_compat lock missing from Settings")
+    if 'class="pr-disclose"' not in html and "pr-mcp-system-details" not in html:
+        fail("disclosure chevron markup missing")
+    ok("friend UI: no Coming soon chrome; Settings + Actions + disclosures present")
+
+    for script in ("scripts/install-mac.sh", "scripts/notarize-mac.sh"):
+        path = ROOT / script
+        if not path.is_file():
+            fail(f"missing {script}")
+        syn = subprocess.run(["bash", "-n", str(path)], capture_output=True, text=True)
+        if syn.returncode != 0:
+            fail(f"bash -n {script}: {syn.stderr or syn.stdout}")
+    creds = subprocess.run(
+        ["bash", str(ROOT / "scripts/notarize-mac.sh")],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    if creds.returncode == 0:
+        fail("notarize-mac.sh succeeded without credentials (must fail closed)")
+    hint = (creds.stderr or "") + (creds.stdout or "")
+    for need in (
+        "APP_STORE_CONNECT_API_KEY_PATH",
+        "APP_STORE_CONNECT_ISSUER_ID",
+        "APP_STORE_CONNECT_KEY_ID",
+        "APPLE_ID",
+        "APPLE_APP_SPECIFIC_PASSWORD",
+        "APPLE_TEAM_ID",
+    ):
+        if need not in hint:
+            fail(f"notarize-mac.sh missing-creds hint omitted {need}")
+    ok("install-mac.sh + notarize-mac.sh present; notarize fails closed without creds")
+
     # 2) CLI status + doctor (non-destructive; doctor must stay green offline)
     for cmd in ("status", "doctor"):
         proc = subprocess.run(
