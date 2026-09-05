@@ -19,7 +19,5 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Run smoke test
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: python3 tests/smoke_test.py
+      - name: Run smoke + unit suite
+        run: ./scripts/smoke_test.sh

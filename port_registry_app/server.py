@@ -35,9 +35,11 @@ from .mcp import (
 )
 from .cli import (
     apply_portskill_tailscale_serve,
+    bind_host_warning,
     default_machines,
     extract_tailscale_advertise_host,
     get_machine,
+    listen_path as cli_listen_path,
     normalize_machines,
     normalize_mcp_user_commands,
     probe_portskill_serve_status,
@@ -76,8 +78,12 @@ def _config_dir() -> pathlib.Path:
 
 
 def listen_path() -> pathlib.Path:
-    """Broadcast file beside registry.json (never wipes registry)."""
-    return _config_dir() / LISTEN_FILENAME
+    """Broadcast file beside registry.json (never wipes registry).
+
+    Honors PORTSKILL_LISTEN_PATH or the directory of PORT_REGISTRY_PATH so
+    tests can use temp dirs without touching ~/.config/port-registry/.
+    """
+    return cli_listen_path()
 
 
 def utc_now_iso() -> str:
@@ -1094,6 +1100,11 @@ def console_css() -> str:
         ".topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 28px;border-bottom:1px solid var(--line);background:#fafbf9;position:sticky;top:0;z-index:20}"
         ".pr-topbar-right{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-left:auto}"
         ".pr-topbar-right .pr-btn{flex:0 0 auto;padding:6px 10px;font-size:12px}"
+        ".pr-bind-chip{flex:0 0 auto;font-size:11px;font-weight:700;letter-spacing:.02em;"
+        "color:#5a3a00;background:#fde7c2;border:1px solid #e0b15a;border-radius:999px;"
+        "padding:3px 10px;font-family:ui-monospace,Menlo,monospace}"
+        ".pr-bind-banner{margin:0 28px 12px;padding:10px 14px;border-radius:8px;"
+        "background:#fde7c2;border:1px solid #e0b15a;color:#5a3a00;font-size:13px;font-weight:600}"
         ".live{display:flex;gap:7px;align-items:center;color:var(--muted);"
         "font-family:ui-monospace,Menlo,monospace;font-size:11px}"
         ".live i{width:7px;height:7px;border-radius:50%;background:var(--green)}"
@@ -2147,6 +2158,19 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
     mcp_footer_url = esc(listen.get("mcp_url") or "/mcp")
     mcp_footer_label = esc(listen.get("mcp_url") or "/mcp")
     mcp_listen_path = esc(listen.get("listen_path") or str(listen_path()))
+    bind_host = listen.get("host")
+    loopback_warn = bind_host_warning(bind_host)
+    bind_chip = ""
+    bind_banner = ""
+    if loopback_warn:
+        bind_chip = (
+            f'<span class="pr-bind-chip" id="pr-bind-chip" title="{esc(loopback_warn)}">'
+            f"Not loopback · {esc(bind_host)}</span>"
+        )
+        bind_banner = (
+            f'<div class="pr-bind-banner" id="pr-bind-banner" role="alert">'
+            f"{esc(loopback_warn)}</div>"
+        )
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2171,9 +2195,11 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
         <div class="pr-topbar-brand" aria-label="Portskill">Portskill</div>
         <div class="crumb">Workspace · <b>all services</b></div>
         <a class="pr-compose-jump" href="#pr-mcp-user-composer" title="Jump to Compose">Compose</a>
+        {bind_chip}
       </div>
       {topbar_right}
     </header>
+    {bind_banner}
     <section class="content">
       <div class="view-head"><p class="eyebrow" data-iterate="eyebrow">Workspace · Dev tooling</p><h2>{heading}{modified_block}</h2></div>
       {history_block}
@@ -4174,6 +4200,9 @@ def serve_http(
 
     print_listen_banner(listen_payload)
     print(f"port_source: {source}", flush=True)
+    host_warn = bind_host_warning(host)
+    if host_warn:
+        print(f"WARNING: {host_warn}", flush=True)
     try:
         settings = (load_registry().get("settings") or {})
         if settings.get("serve_portskill_on_tailscale"):

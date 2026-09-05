@@ -10,11 +10,17 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versioning f
 
 - Friend UI no longer renders **Coming soon** chrome for Workspaces, Remote machines, or Presets. One implicit workspace; Export/Import Workspace and locked `require_compat` stay.
 - Primary Mac cold path is `scripts/install-mac.sh` (build or reuse `dist/`, copy to Applications, strip quarantine). Git/module launch is secondary.
+- Cold-path smoke/doctor no longer require remembering `PYTHONPATH=.` — use `./scripts/smoke_test.sh` and `./scripts/doctor.sh` only.
+- CI runs `./scripts/smoke_test.sh` (friend smoke + `tests/test_*.py`).
 
 ### Added
 
 - `scripts/install-mac.sh` — friend-grade Mac install + Gatekeeper quarantine strip; optional `--keepalive`.
 - `scripts/notarize-mac.sh` — Developer ID codesign, `notarytool` via App Store Connect API key env (`APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_API_KEY_PATH`), staple. Fails closed without those vars. **Notarization is not claimed until that script is run with real creds.**
+- `scripts/build-app.sh` ad-hoc codesigns on Darwin when no Developer ID / `PORTSKILL_SIGN_IDENTITY` is present. Ad-hoc ≠ notarized. Signing is skipped (not failed) on Linux CI.
+- Loopback footgun warning: `doctor` `message` + UI banner/chip when `--host` is not `127.0.0.1` / `::1` / `localhost`. Default bind unchanged.
+- `scripts/cli.sh`, `scripts/doctor.sh`, `scripts/run.sh` — PYTHONPATH wrappers for a cold clone.
+- Expanded stdlib tests: version identity, doctor offline, MCP tool toggles, listen.json sticky, collapsed Compose/System Tools markup.
 
 ## [0.1.0] — 2026-09-05
 

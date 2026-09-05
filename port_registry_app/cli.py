@@ -22,6 +22,8 @@ import webbrowser
 
 VERSION = 1
 DEFAULT_REGISTRY_PATH = "~/.config/port-registry/registry.json"
+LISTEN_FILENAME = "listen.json"
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 DEFAULT_TAILSCALE_BIN = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
 DEFAULT_POOL_START = 20000
 DEFAULT_POOL_END = 29999
@@ -50,6 +52,48 @@ def emit(payload):
 def registry_path():
     configured = os.environ.get("PORT_REGISTRY_PATH", DEFAULT_REGISTRY_PATH)
     return pathlib.Path(configured).expanduser()
+
+
+def listen_path():
+    """Sticky listen.json beside the registry, or PORTSKILL_LISTEN_PATH.
+
+    Default (~/.config/port-registry/registry.json) keeps listen.json in the
+    same directory as today. Tests set PORT_REGISTRY_PATH to a temp file so
+    listen.json never touches the user's home config.
+    """
+    configured = os.environ.get("PORTSKILL_LISTEN_PATH")
+    if configured and str(configured).strip():
+        return pathlib.Path(configured).expanduser()
+    return registry_path().parent / LISTEN_FILENAME
+
+
+def is_loopback_host(host):
+    """True for 127.0.0.1 / ::1 / localhost (and 127.0.0.0/8). Missing host is loopback."""
+    if not isinstance(host, str):
+        return True
+    h = host.strip().lower()
+    if not h:
+        return True
+    if h in LOOPBACK_HOSTS:
+        return True
+    if h.startswith("[") and h.endswith("]"):
+        h = h[1:-1]
+    if h == "::1":
+        return True
+    if h.startswith("127."):
+        return True
+    return False
+
+
+def bind_host_warning(host):
+    """Clear warning when --host is not loopback. None when loopback / unset."""
+    if host is None or is_loopback_host(host):
+        return None
+    return (
+        f"Bound to {host} (not loopback). "
+        "The unauthenticated UI and HTTP MCP are reachable beyond this machine. "
+        "Default bind remains 127.0.0.1. Remotes HOLD."
+    )
 
 
 def pool_bounds():
@@ -4107,7 +4151,7 @@ def cmd_set_tailnet(args):
 
 def read_listen_port_from_disk():
     """Return Portskill listen port from sticky listen.json, or None."""
-    path = pathlib.Path(os.path.expanduser("~/.config/port-registry/listen.json"))
+    path = listen_path()
     if not path.is_file():
         return None
     try:
@@ -4758,11 +4802,12 @@ def cmd_doctor(args):
         "detail": f"portskill {__version__}",
     })
 
-    listen_file = pathlib.Path(os.path.expanduser("~/.config/port-registry/listen.json"))
+    listen_file = listen_path()
     listen_payload = None
     ui_url = None
     mcp_url = None
     listening = False
+    bind_host = None
     if not listen_file.is_file():
         checks.append({
             "name": "listen",
@@ -4784,12 +4829,13 @@ def cmd_doctor(args):
                 ui_url = listen_payload.get("ui_url")
                 mcp_url = listen_payload.get("mcp_url")
                 port = listen_payload.get("port")
+                bind_host = listen_payload.get("host")
                 checks.append({
                     "name": "listen",
                     "ok": True,
                     "detail": (
                         f"{listen_file} listening={listening} port={port} "
-                        f"ui_url={ui_url} mcp_url={mcp_url}"
+                        f"host={bind_host} ui_url={ui_url} mcp_url={mcp_url}"
                     ),
                 })
         except json.JSONDecodeError as exc:
@@ -4800,6 +4846,27 @@ def cmd_doctor(args):
             })
         except OSError as exc:
             checks.append({"name": "listen", "ok": False, "detail": f"unreadable: {listen_file}: {exc}"})
+
+    loopback_warn = bind_host_warning(bind_host)
+    if loopback_warn:
+        checks.append({
+            "name": "bind_host",
+            "ok": True,  # warning only — default bind is still loopback; do not fail doctor
+            "detail": loopback_warn,
+            "warning": True,
+        })
+    elif bind_host:
+        checks.append({
+            "name": "bind_host",
+            "ok": True,
+            "detail": f"loopback ({bind_host})",
+        })
+    else:
+        checks.append({
+            "name": "bind_host",
+            "ok": True,
+            "detail": "unset (default bind is loopback 127.0.0.1)",
+        })
 
     def _probe(name: str, url: object) -> None:
         if not listening:
@@ -4983,12 +5050,15 @@ def cmd_doctor(args):
     emit({
         "status": "ok" if ok else "error",
         "reason": None if ok else "doctor_failed",
+        "message": loopback_warn,
         "version": __version__,
         "checks": checks,
         "registry_path": str(path),
         "registry_readable": registry_ok,
         "listen_path": str(listen_file),
         "listen": listen_payload,
+        "bind_host": bind_host,
+        "loopback": loopback_warn is None,
         "ui_url": ui_url,
         "mcp_url": mcp_url,
         "skill_dir": str(skill),

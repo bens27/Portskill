@@ -1,0 +1,117 @@
+"""(e) Compose / System Tools details start collapsed; loopback banner markup."""
+from __future__ import annotations
+
+import re
+import unittest
+
+def _details_tags(markup: str, cls: str) -> list[str]:
+    tags = re.findall(r"<details\b[^>]*>", markup)
+    return [t for t in tags if cls in t]
+
+
+def _has_open_attr(tag: str) -> bool:
+    return re.search(r"\sopen(\s|=|/|>)", tag) is not None
+
+
+class CollapsedMarkupTests(unittest.TestCase):
+    def _render_with_project(self) -> str:
+        from port_registry_app.server import build_view, render_page
+
+        raw = {
+            "version": 1,
+            "pool": {"start": 20000, "end": 29999},
+            "projects": {
+                "/tmp/portskill-demo": {
+                    "ranges": [{
+                        "id": "r-demo",
+                        "start": 20001,
+                        "end": 20001,
+                        "state": "reserved",
+                        "note": "demo",
+                        "tailnet": {"mode": "none"},
+                        "default_state": "off",
+                    }],
+                }
+            },
+            "presets": {},
+            "settings": {},
+        }
+        view = build_view(raw)
+        return render_page(
+            view,
+            tailscale={"chip": "Needs login", "state": "needs_login", "logged_in": False},
+        )
+
+    def test_system_tools_and_repo_details_start_collapsed(self) -> None:
+        html = self._render_with_project()
+        markup = html.split("</style>", 1)[-1]
+        system = _details_tags(markup, "pr-mcp-system-details")
+        self.assertTrue(system, "pr-mcp-system-details missing from rendered HTML")
+        for tag in system:
+            self.assertFalse(_has_open_attr(tag), f"System tools details not collapsed: {tag}")
+            self.assertIn("pr-mcp-system-details", tag)
+
+        projects = _details_tags(markup, "pr-project")
+        self.assertTrue(projects, "details.pr-project missing from rendered HTML")
+        for tag in projects:
+            self.assertFalse(_has_open_attr(tag), f"repo details not collapsed: {tag}")
+            self.assertIn("pr-project", tag)
+
+    def test_loopback_has_no_bind_banner(self) -> None:
+        import port_registry_app.server as srv
+
+        prev = srv._ACTIVE_LISTEN
+        try:
+            srv._ACTIVE_LISTEN = {
+                "host": "127.0.0.1",
+                "port": 20000,
+                "ui_url": "http://127.0.0.1:20000/",
+                "mcp_url": "http://127.0.0.1:20000/mcp",
+            }
+            html = self._render_with_project()
+        finally:
+            srv._ACTIVE_LISTEN = prev
+        self.assertNotIn("pr-bind-banner", html)
+        self.assertNotIn("pr-bind-chip", html)
+        self.assertNotIn("Not loopback", html)
+
+    def test_non_loopback_shows_banner_and_chip(self) -> None:
+        import port_registry_app.server as srv
+
+        prev = srv._ACTIVE_LISTEN
+        try:
+            srv._ACTIVE_LISTEN = {
+                "host": "0.0.0.0",
+                "port": 20000,
+                "ui_url": "http://0.0.0.0:20000/",
+                "mcp_url": "http://0.0.0.0:20000/mcp",
+            }
+            html = self._render_with_project()
+        finally:
+            srv._ACTIVE_LISTEN = prev
+        self.assertIn('id="pr-bind-banner"', html)
+        self.assertIn('id="pr-bind-chip"', html)
+        self.assertIn("Not loopback", html)
+        self.assertIn("0.0.0.0", html)
+        self.assertIn("not loopback", html.lower())
+
+
+class AdHocCodesignScriptTests(unittest.TestCase):
+    def test_build_app_documents_adhoc_and_darwin_gate(self) -> None:
+        import pathlib
+        import subprocess
+
+        root = pathlib.Path(__file__).resolve().parents[1]
+        script = root / "scripts" / "build-app.sh"
+        text = script.read_text(encoding="utf-8")
+        self.assertIn("codesign --force --deep --sign -", text)
+        self.assertIn("uname -s", text)
+        self.assertIn("Darwin", text)
+        self.assertIn("Ad-hoc", text)
+        self.assertIn("not notarized", text.lower())
+        syn = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)
+        self.assertEqual(syn.returncode, 0, syn.stderr or syn.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()
