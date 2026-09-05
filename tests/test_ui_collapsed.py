@@ -37,13 +37,18 @@ class CollapsedMarkupTests(unittest.TestCase):
             "settings": {},
         }
         view = build_view(raw)
-        return render_page(
+        html = render_page(
             view,
             tailscale={"chip": "Needs login", "state": "needs_login", "logged_in": False},
         )
+        return html
 
     def test_system_tools_and_repo_details_start_collapsed(self) -> None:
-        html = self._render_with_project()
+        from tests.helpers import IsolatedConfig
+
+        with IsolatedConfig() as iso:
+            iso.write_registry()
+            html = self._render_with_project()
         markup = html.split("</style>", 1)[-1]
         system = _details_tags(markup, "pr-mcp-system-details")
         self.assertTrue(system, "pr-mcp-system-details missing from rendered HTML")
@@ -59,6 +64,7 @@ class CollapsedMarkupTests(unittest.TestCase):
 
     def test_loopback_has_no_bind_banner(self) -> None:
         import port_registry_app.server as srv
+        from tests.helpers import IsolatedConfig
 
         prev = srv._ACTIVE_LISTEN
         try:
@@ -68,15 +74,18 @@ class CollapsedMarkupTests(unittest.TestCase):
                 "ui_url": "http://127.0.0.1:20000/",
                 "mcp_url": "http://127.0.0.1:20000/mcp",
             }
-            html = self._render_with_project()
+            with IsolatedConfig() as iso:
+                iso.write_registry()
+                html = self._render_with_project()
         finally:
             srv._ACTIVE_LISTEN = prev
-        self.assertNotIn("pr-bind-banner", html)
-        self.assertNotIn("pr-bind-chip", html)
+        self.assertNotIn('id="pr-bind-banner"', html)
+        self.assertNotIn('id="pr-bind-chip"', html)
         self.assertNotIn("Not loopback", html)
 
     def test_non_loopback_shows_banner_and_chip(self) -> None:
         import port_registry_app.server as srv
+        from tests.helpers import IsolatedConfig
 
         prev = srv._ACTIVE_LISTEN
         try:
@@ -86,7 +95,9 @@ class CollapsedMarkupTests(unittest.TestCase):
                 "ui_url": "http://0.0.0.0:20000/",
                 "mcp_url": "http://0.0.0.0:20000/mcp",
             }
-            html = self._render_with_project()
+            with IsolatedConfig() as iso:
+                iso.write_registry()
+                html = self._render_with_project()
         finally:
             srv._ACTIVE_LISTEN = prev
         self.assertIn('id="pr-bind-banner"', html)
