@@ -1186,8 +1186,13 @@ def _listen_enrichment() -> dict:
         out["listen_path"] = str(_listen_path())
     if "setup" not in out:
         out["setup"] = {
+            "cursor_mcp_stdio_hint": (
+                "Preferred for agents: stdio MCP — examples/mcp.stdio.json "
+                "or python3 -m port_registry_app --mcp-stdio"
+            ),
             "cursor_mcp_http_hint": (
-                "Point an HTTP MCP client at mcp_url; or use stdio config in examples/mcp.stdio.json"
+                "HTTP MCP is local-trust dogfood only (unauthenticated loopback). "
+                "Prefer stdio for agents."
             ),
             "tools_endpoint": "initialize / tools/list / tools/call via JSON-RPC on /mcp",
         }

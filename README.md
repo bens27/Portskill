@@ -60,7 +60,7 @@ cd Portskill
 # Read live URLs (port is sticky; do not assume :8765):
 python3 -c "import json,pathlib; print(json.load(open(pathlib.Path.home()/'.config/port-registry/listen.json')))"
 # Open ui_url in a browser → claim/allocate a port range → use MCP tools/list
-./scripts/doctor.sh                 # version + listen + reachability + bind-host warn + handoff kit
+./scripts/doctor.sh                 # version + listen + reachability + handoff kit; bind-host fail-closed unless --allow-non-loopback
 ./scripts/smoke_test.sh             # only documented smoke / test entry
 ```
 
@@ -134,14 +134,14 @@ See **[SECURITY.md](SECURITY.md)** for reporting, Gatekeeper / notarization stat
 
 - Default bind is `127.0.0.1`.
 - The same **unauthenticated** listener serves the UI, `GET /api/state`, and mutating `POST /mcp` (including `set_tailnet` with `funnel`).
-- `--host` can widen exposure with **no allowlist** — do not use `0.0.0.0` casually. Binding off loopback shows a UI banner/chip and a `doctor` `message` warning. Remotes remain HOLD.
+- `--host` other than `127.0.0.1` / `::1` / `localhost` is **refused at start** unless you pass `--allow-non-loopback` (documented footgun; no allowlist). With the override, the UI banner/chip stays and `doctor` warns; without it, `doctor` fails closed (exit 2) if `listen.json` still shows a non-loopback host. Remotes remain HOLD.
 - Prefer **stdio MCP** for agents (`--mcp-stdio` / `examples/mcp.stdio.json`). HTTP MCP is **local-trust dogfood only**.
 - Never Tailscale Funnel the Portskill listen/UI port without explicit Ben OK. Funnel on *user* services is a separate deliberate choice.
 - Remote machines remain **HOLD** (not implemented; no Settings stub).
 
 ## Connect MCP
 
-**Stdio (preferred for agents)** — Cursor / Claude / Codex. See `examples/mcp.stdio.json`:
+**Stdio is the preferred agent path** (Cursor / Claude / Codex). Copy `examples/mcp.stdio.json` or the stdio block in the UI MCP / Compose panel. HTTP MCP is labeled local-trust dogfood only.
 
 ```json
 {

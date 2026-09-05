@@ -40,12 +40,15 @@ from .mcp import (
     run_cli,
 )
 from .cli import (
+    ALLOW_NON_LOOPBACK_FLAG,
     apply_portskill_tailscale_serve,
     bind_host_warning,
     default_machines,
     extract_tailscale_advertise_host,
     get_machine,
+    is_loopback_host,
     listen_path as cli_listen_path,
+    non_loopback_refuse_message,
     normalize_machines,
     normalize_mcp_user_commands,
     probe_portskill_serve_status,
@@ -177,13 +180,19 @@ def build_listen_payload(host: str, port: int) -> dict:
         "mcp_post": f"POST {mcp} (JSON-RPC)",
         "mcp_get_discovery": f"GET {mcp}",
         "stdio": "python3 -m port_registry_app --mcp-stdio",
+        "stdio_preferred": True,
         "registry_path": str(registry_path()),
         "listen_path": str(path),
         "pid": os.getpid(),
         "started_at": utc_now_iso(),
         "setup": {
+            "cursor_mcp_stdio_hint": (
+                "Preferred for agents: stdio MCP — examples/mcp.stdio.json "
+                "or python3 -m port_registry_app --mcp-stdio"
+            ),
             "cursor_mcp_http_hint": (
-                "Point an HTTP MCP client at mcp_url; or use stdio config in examples/mcp.stdio.json"
+                "HTTP MCP is local-trust dogfood only (unauthenticated loopback). "
+                "Prefer stdio for agents."
             ),
             "tools_endpoint": "initialize / tools/list / tools/call via JSON-RPC on /mcp",
         },
@@ -194,10 +203,10 @@ def print_listen_banner(payload: dict) -> None:
     print("", flush=True)
     print("======== Portskill ========", flush=True)
     print(f"UI:            {payload.get('ui_url')}", flush=True)
-    print(f"MCP POST:      {payload.get('mcp_post')}", flush=True)
+    print(f"Stdio MCP:     {payload.get('stdio')}  (preferred for agents)", flush=True)
+    print(f"HTTP MCP:      {payload.get('mcp_post')}  (local-trust dogfood only)", flush=True)
     print(f"MCP discovery: {payload.get('mcp_get_discovery')}", flush=True)
     print(f"listen.json:   {payload.get('listen_path') or listen_path()}", flush=True)
-    print(f"Stdio MCP:     {payload.get('stdio')}", flush=True)
     print(f"Registry:      {payload.get('registry_path') or registry_path()}", flush=True)
     print("===========================", flush=True)
     print("", flush=True)
@@ -1150,6 +1159,11 @@ def console_css() -> str:
         ".pr-mcp-head{display:flex;align-items:baseline;gap:10px;margin:0 0 8px}"
         ".pr-mcp-head h3{margin:0;font-size:15px}"
         ".pr-mcp-meta{margin:0 0 12px;color:var(--muted);font-size:12px}"
+        ".pr-mcp-connect{margin:0 0 14px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#f7f8fa;display:grid;gap:8px}"
+        ".pr-mcp-connect h4{margin:0;font-size:13px}"
+        ".pr-mcp-stdio-config{margin:0;padding:8px 10px;border-radius:6px;background:#fff;border:1px solid var(--line);"
+        "font-size:11px;line-height:1.45;overflow:auto;max-height:10em;white-space:pre}"
+        ".pr-mcp-connect-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}"
         ".pr-mcp-list{list-style:none;margin:0;padding:0;display:grid;gap:6px;max-height:280px;overflow:auto}"
         ".pr-mcp-section{margin:14px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}"
         ".pr-mcp-user{border-color:#c9b8f0;background:#f7f3ff}"
@@ -2092,6 +2106,33 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         )
     )
     count = len(system_rows) + len(user_rows)
+    stdio_config = (
+        '{\n'
+        '  "mcpServers": {\n'
+        '    "portskill": {\n'
+        '      "command": "python3",\n'
+        '      "args": ["-m", "port_registry_app", "--mcp-stdio"]\n'
+        '    }\n'
+        '  }\n'
+        '}'
+    )
+    stdio_block = (
+        f'<div class="pr-mcp-connect" id="pr-mcp-connect">'
+        f'<h4>Connect an agent — stdio preferred</h4>'
+        f'<p class="pr-mcp-meta" style="margin:0">Preferred path for Cursor / Claude / Codex. '
+        f'Copy this stdio config (same as <code>examples/mcp.stdio.json</code>). '
+        f'Command: <code id="pr-mcp-stdio-cmd">{esc(stdio)}</code></p>'
+        f'<pre class="pr-mcp-stdio-config" id="pr-mcp-stdio-config">{esc(stdio_config)}</pre>'
+        f'<div class="pr-mcp-connect-row">'
+        f'<button type="button" class="pr-btn" id="pr-mcp-stdio-copy">Copy stdio config</button>'
+        f'<span class="tag">preferred for agents</span>'
+        f'</div>'
+        f'<p class="pr-mcp-meta" style="margin:0" id="pr-mcp-http-dogfood">'
+        f'HTTP MCP is <strong>local-trust dogfood only</strong> — same unauthenticated listener as this UI: '
+        f'<a class="pr-port-link" href="{esc(mcp_url)}" target="_blank" rel="noopener"><code>{esc(mcp_url)}</code></a>. '
+        f'Do not Funnel or bind off loopback.</p>'
+        f'</div>'
+    )
     return (
         f'<div class="panel pr-panel pr-mcp" id="pr-mcp-tools">'
         f'<div class="pr-mcp-head"><h3>MCP tools</h3>'
@@ -2099,12 +2140,12 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         f'<div class="pr-mcp-jump-row">'
         f'<a class="pr-compose-jump" href="#pr-mcp-user-composer">Compose</a>'
         f'<span class="tag">user command composer</span></div>'
-        f'<p class="pr-mcp-meta">Live surface from <code>tools/list</code> — same as '
-        f'<a class="pr-port-link" href="{esc(mcp_url)}" target="_blank" rel="noopener"><code>{esc(mcp_url)}</code></a> '
-        f'and stdio <code>{esc(stdio)}</code>. '
+        f'<p class="pr-mcp-meta">Live <code>tools/list</code> surface. Agents should use '
+        f'<strong>stdio MCP</strong> (<code>{esc(stdio)}</code>). HTTP MCP is local-trust dogfood only. '
         f'Toggles filter live <code>tools/list</code> + <code>tools/call</code> (disabled tools stay listed here so you can re-enable). '
         f'Session Handoff tools are flat names (<code>handoff_status</code>, <code>handoff_list</code>, …) — not nested <code>session-handoff/*</code>. '
         f'User commands are marked <code>x-portskill-kind: user-command</code> and respect the same enable map.</p>'
+        f"{stdio_block}"
         f"{composer}"
         f"{user_body}"
         f"{system_body}"
@@ -3454,6 +3495,22 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
       prompt('Copy Serve URL', u);
     }}
   }});
+  document.addEventListener('click', function(ev){{
+    var btn=ev.target && ev.target.closest && ev.target.closest('#pr-mcp-stdio-copy');
+    if(!btn) return;
+    ev.preventDefault();
+    var pre=document.getElementById('pr-mcp-stdio-config');
+    var txt=pre ? pre.textContent : '';
+    if(!txt) return;
+    function ok(){{ var t=btn.textContent; btn.textContent='Copied'; setTimeout(function(){{ btn.textContent=t; }}, 1200); }}
+    if(navigator.clipboard && navigator.clipboard.writeText){{
+      navigator.clipboard.writeText(txt).then(ok).catch(function(){{
+        prompt('Copy stdio MCP config', txt);
+      }});
+    }} else {{
+      prompt('Copy stdio MCP config', txt);
+    }}
+  }});
   (function(){{
     /* Disclosures: default-collapsed (System tools, repo, Settings, Serve URL, handoff). */
     document.querySelectorAll(
@@ -3525,7 +3582,8 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
 <footer class="pr-mcp-footer" style="position:fixed;bottom:0;left:0;right:0;padding:6px 14px;
 background:#fafbf9;border-top:1px solid var(--line);font-size:11px;color:var(--muted);
 font-family:ui-monospace,Menlo,monospace;z-index:20">
-  MCP: <a href="{mcp_footer_url}" style="color:var(--cobalt)">{mcp_footer_label}</a>
+  Stdio MCP (preferred): <code>python3 -m port_registry_app --mcp-stdio</code>
+  · HTTP MCP (local-trust dogfood): <a href="{mcp_footer_url}" style="color:var(--cobalt)">{mcp_footer_label}</a>
   · listen: <span title="Sticky broadcast">{mcp_listen_path}</span>
 </footer>
 </body>
@@ -4364,9 +4422,16 @@ def serve_http(
     auto_apply: bool = True,
     *,
     explicit: bool = False,
+    allow_non_loopback: bool = False,
 ) -> int:
-    """Bind UI+MCP. If not explicit, sticky/allocate a port; write listen.json after bind."""
+    """Bind UI+MCP. If not explicit, sticky/allocate a port; write listen.json after bind.
+
+    Non-loopback ``host`` is refused unless ``allow_non_loopback`` (footgun).
+    """
     global _ACTIVE_LISTEN
+    if not is_loopback_host(host) and not allow_non_loopback:
+        print(non_loopback_refuse_message(host), flush=True)
+        return 2
     if auto_apply:
         run_launch_auto_apply()
     else:
@@ -4429,6 +4494,8 @@ def serve_http(
 
     listen_payload = build_listen_payload(host, bound_port)
     listen_payload["port_source"] = source
+    if allow_non_loopback and not is_loopback_host(host):
+        listen_payload["allow_non_loopback"] = True
     try:
         write_listen_file(listen_payload)
     except OSError as exc:
@@ -4527,7 +4594,21 @@ def main(argv=None) -> int:
         action="store_true",
         help="HTTP UI + /mcp endpoint (default when not --mcp-stdio)",
     )
-    parser.add_argument("--host", default=DEFAULT_HOST, help="Bind host (default 127.0.0.1)")
+    parser.add_argument(
+        "--host",
+        default=DEFAULT_HOST,
+        help="Bind host (default 127.0.0.1). Non-loopback requires --allow-non-loopback.",
+    )
+    parser.add_argument(
+        ALLOW_NON_LOOPBACK_FLAG,
+        action="store_true",
+        dest="allow_non_loopback",
+        help=(
+            "FOOTGUN: allow --host that is not 127.0.0.1 / ::1 / localhost. "
+            "Exposes the unauthenticated UI and HTTP MCP beyond this machine. "
+            "Without this flag, non-loopback bind is refused."
+        ),
+    )
     parser.add_argument(
         "--port",
         type=int,
@@ -4558,6 +4639,7 @@ def main(argv=None) -> int:
         open_browser=not args.no_open,
         auto_apply=not args.no_auto_apply,
         explicit=explicit_port is not None,
+        allow_non_loopback=bool(args.allow_non_loopback),
     )
 
 

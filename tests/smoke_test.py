@@ -94,7 +94,11 @@ def main() -> int:
         fail("require_compat lock missing from Settings")
     if 'class="pr-disclose"' not in html and "pr-mcp-system-details" not in html:
         fail("disclosure chevron markup missing")
-    ok("friend UI: no Coming soon chrome; Settings + Actions + disclosures present")
+    if "stdio preferred" not in html.lower() and "preferred for agents" not in html.lower():
+        fail("UI MCP panel missing stdio preference")
+    if "--mcp-stdio" not in html or "local-trust dogfood" not in html.lower():
+        fail("UI missing copyable stdio MCP / HTTP dogfood label")
+    ok("friend UI: no Coming soon chrome; Settings + Actions + disclosures present; stdio preferred")
 
     for script in (
         "scripts/install-mac.sh",

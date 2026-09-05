@@ -63,7 +63,7 @@ Portable TypeScript modules for hosts wiring into a larger console live under `u
 
 - Default bind is `127.0.0.1`.
 - The same **unauthenticated** listener serves the UI, `GET /api/state`, and mutating `POST /mcp` (including `set_tailnet` / funnel).
-- `--host` can widen exposure with **no allowlist** — do not use `0.0.0.0` casually.
+- `--host` other than loopback is **refused** unless `--allow-non-loopback` (documented footgun; no allowlist). Do not use `0.0.0.0` casually.
 - Prefer **stdio MCP** for agents (`python3 -m port_registry_app --mcp-stdio` / `examples/mcp.stdio.json`). HTTP MCP is **local-trust dogfood only**.
 - Never Tailscale Funnel the Portskill listen/UI port without explicit human OK. Funnel on user services is a separate deliberate choice.
 - **Remotes** — HOLD (not implemented).
