@@ -4,6 +4,18 @@ All notable changes to **Portskill** are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versioning follows the `project.version` in `pyproject.toml` (single product version for UI, MCP `initialize`, and `doctor`).
 
+## [Unreleased]
+
+### Changed
+
+- Friend UI no longer renders **Coming soon** chrome for Workspaces, Remote machines, or Presets. One implicit workspace; Export/Import Workspace and locked `require_compat` stay.
+- Primary Mac cold path is `scripts/install-mac.sh` (build or reuse `dist/`, copy to Applications, strip quarantine). Git/module launch is secondary.
+
+### Added
+
+- `scripts/install-mac.sh` — friend-grade Mac install + Gatekeeper quarantine strip; optional `--keepalive`.
+- `scripts/notarize-mac.sh` — Developer ID codesign, `notarytool` via App Store Connect API key env (`APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_API_KEY_PATH`), staple. Fails closed without those vars. **Notarization is not claimed until that script is run with real creds.**
+
 ## [0.1.0] — 2026-09-05
 
 ### Added
@@ -18,7 +30,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versioning f
 
 ### Notes
 
-- Remotes remain **Coming soon** (HOLD) — no fake multi-machine maturity.
+- Remotes remain HOLD — no fake multi-machine maturity.
 - Module path remains `port_registry_app` for compatibility; product name is **Portskill**.
 - Runtime is stdlib-only (packaging metadata in `pyproject.toml` does not add pip deps to run).
 

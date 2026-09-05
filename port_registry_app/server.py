@@ -1391,38 +1391,9 @@ def console_css() -> str:
     )
 
 
-def presets_panel_html(view: dict) -> str:  # noqa: C901
-    presets = view.get("presets") or []
-    if not presets:
-        rows = '<div class="empty">No saved presets yet.</div>'
-    else:
-        parts = []
-        for p in presets:
-            desc = esc(p.get("description") or "")
-            meta = f'{p.get("serviceCount", 0)} services'
-            if p.get("updatedAt"):
-                meta += f' · {esc(p["updatedAt"])}'
-            if desc:
-                meta += f' · {desc}'
-            parts.append(
-                f'<div class="pr-preset-row" data-preset-name="{esc(p["name"])}">'
-                f'<label class="pr-preset-check"><input type="checkbox" class="pr-compat-preset" value="{esc(p["name"])}"> </label>'
-                f'<span class="pr-preset-name">{esc(p["name"])}</span>'
-                f'<span class="pr-preset-meta">{meta}</span>'
-                f'<button type="button" class="pr-btn" data-pr-action="preset-apply" data-name="{esc(p["name"])}">Apply</button>'
-                f'<button type="button" class="pr-btn pr-btn-danger" data-pr-action="preset-delete" data-name="{esc(p["name"])}">Delete</button>'
-                f"</div>"
-            )
-        rows = "".join(parts)
-    count = len(presets)
-    return (
-        '<details class="pr-subpanel pr-presets-soon" id="pr-presets">'
-        f"<summary>Presets · Coming soon <span class=\"tag\">{count} saved (CLI/MCP)</span></summary>"
-        '<p class="pr-remote-soon-body" style="margin:8px 0 0">Multi-workspace preset switching is held. '
-        "CLI/MCP <code>preset *</code> still works.</p>"
-        f'<div style="display:none" aria-hidden="true">{rows}</div>'
-        "</details>"
-    )
+def presets_panel_html(view: dict) -> str:
+    """Named presets stay CLI/MCP-only. No friend-facing Coming soon chrome."""
+    return ""
 
 
 def settings_panel_html(view: dict) -> str:
@@ -1435,14 +1406,7 @@ def settings_panel_html(view: dict) -> str:
         name = p["name"]
         sel = " selected" if name == current else ""
         options.append(f'<option value="{esc(name)}"{sel}>{esc(name)}</option>')
-    # Keep ONE Remote machines Coming soon stub (Settings box only)
-    machines_block = (
-        '<div class="pr-machines pr-remote-soon" aria-disabled="true">'
-        '<h3 style="margin:12px 0 8px;font-size:13px;text-transform:uppercase;'
-        'letter-spacing:.08em;color:var(--muted)">Remote machines</h3>'
-        '<div class="pr-remote-soon-body">Coming soon — register other hosts’ port ranges here.</div>'
-        "</div>"
-    )
+    # Remotes remain HOLD — do not render a Coming soon stub.
     return (
         '<div class="pr-subpanel" id="pr-settings">'
         "<h3>Settings</h3>"
@@ -1455,7 +1419,6 @@ def settings_panel_html(view: dict) -> str:
         "Require compatibility — on</label>"
         '<button type="button" class="pr-btn" data-pr-action="settings-save">Save settings</button>'
         "</div>"
-        f"{machines_block}"
         "</div>"
     )
 
@@ -1610,18 +1573,13 @@ def filter_view_for_environment(view: dict, raw: dict, focused: str | None) -> d
 
 
 def env_rail_html(view: dict) -> str:
-    """Workspaces Coming soon stub — no tabs / New / Saved list."""
-    explainer = (
-        "A Workspace contains a set of apps and services you generally run together. "
-        "More than one Workspace can be active simultaneously."
-    )
-    return (
-        '<div class="pr-env-soon" id="pr-env-rail" data-iterate="env-rail" '
-        f'title="{esc(explainer)}" data-explainer="{esc(explainer)}">'
-        '<div class="pr-env-soon-title">Workspaces</div>'
-        '<div class="pr-env-soon-body">Coming soon</div>'
-        "</div>"
-    )
+    """Single implicit workspace — no Workspaces Coming soon rail."""
+    return ""
+
+
+def environment_rail_html(view: dict) -> str:
+    """Alias kept for callers that use the longer name."""
+    return env_rail_html(view)
 
 
 
