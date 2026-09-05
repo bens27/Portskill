@@ -3,7 +3,7 @@
 #
 # Does NOT claim success unless notarytool + stapler actually finish.
 # Fails closed when signing identity or notarization credentials are missing.
-# Never prints secrets. Do not commit API keys / app-specific passwords.
+# Never prints secrets. Do not commit the .p8 key.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -24,21 +24,16 @@ notarytool, wait, and staple the ticket.
   --skip-staple   Submit only; do not stapler staple
   -h, --help      Show this help
 
-Signing identity (first match wins):
-  PORTSKILL_SIGN_IDENTITY   exact codesign identity string
-  or auto-detect the first "Developer ID Application" identity
+Codesign identity (build Mac, first match wins):
+  PORTSKILL_SIGN_IDENTITY   exact "Developer ID Application: …" string
+  or auto-detect the first Developer ID Application identity in the keychain
 
-Notarization credentials — one of these two sets is required:
+notarytool credentials (App Store Connect API key — required, all three):
+  APP_STORE_CONNECT_KEY_ID          key id (AuthKey_XXX)
+  APP_STORE_CONNECT_ISSUER_ID       issuer UUID
+  APP_STORE_CONNECT_API_KEY_PATH    path to AuthKey_XXX.p8
 
-  App Store Connect API key:
-    APP_STORE_CONNECT_API_KEY_PATH
-    APP_STORE_CONNECT_ISSUER_ID
-    APP_STORE_CONNECT_KEY_ID
-
-  Apple ID + app-specific password:
-    APPLE_ID
-    APPLE_APP_SPECIFIC_PASSWORD   (or APPLE_PASSWORD)
-    APPLE_TEAM_ID
+Apple ID / app-specific password is not used. Do not put the .p8 in the repo.
 
 Optional: PORTSKILL_BUNDLE_ID (codesign identifier; default from Info.plist).
 
@@ -56,23 +51,17 @@ need_darwin() {
 
 creds_hint() {
   cat <<'HINT' >&2
-Missing notarization credentials. Set one complete set, then retry.
+Missing App Store Connect API key credentials. Set all three, then retry:
 
-  App Store Connect API key:
-    APP_STORE_CONNECT_API_KEY_PATH   path to AuthKey_XXXXXX.p8
-    APP_STORE_CONNECT_ISSUER_ID      issuer UUID
-    APP_STORE_CONNECT_KEY_ID         key id
+  APP_STORE_CONNECT_KEY_ID          key id
+  APP_STORE_CONNECT_ISSUER_ID       issuer UUID
+  APP_STORE_CONNECT_API_KEY_PATH    path to AuthKey_XXX.p8
 
-  Apple ID + app-specific password:
-    APPLE_ID
-    APPLE_APP_SPECIFIC_PASSWORD      (or APPLE_PASSWORD)
-    APPLE_TEAM_ID
+Codesign (build Mac) still needs Developer ID Application:
+  PORTSKILL_SIGN_IDENTITY           or auto-detect from the keychain
 
-Signing identity (if not auto-detected):
-    PORTSKILL_SIGN_IDENTITY          Developer ID Application: …
-
-Do not commit these values. This script does not claim notarization until
-notarytool + stapler actually succeed.
+Do not commit the .p8 or these values. This script does not claim
+notarization until notarytool + stapler actually succeed.
 HINT
 }
 
@@ -80,12 +69,6 @@ have_api_key() {
   [[ -n "${APP_STORE_CONNECT_API_KEY_PATH:-}" ]] && \
     [[ -n "${APP_STORE_CONNECT_ISSUER_ID:-}" ]] && \
     [[ -n "${APP_STORE_CONNECT_KEY_ID:-}" ]]
-}
-
-have_apple_id() {
-  [[ -n "${APPLE_ID:-}" ]] && \
-    [[ -n "${APPLE_APP_SPECIFIC_PASSWORD:-${APPLE_PASSWORD:-}}" ]] && \
-    [[ -n "${APPLE_TEAM_ID:-}" ]]
 }
 
 detect_identity() {
@@ -137,27 +120,15 @@ PLIST
 
 submit_notary() {
   local payload="$1"
-  if have_api_key; then
-    if [[ ! -f "${APP_STORE_CONNECT_API_KEY_PATH}" ]]; then
-      echo "APP_STORE_CONNECT_API_KEY_PATH is not a file: ${APP_STORE_CONNECT_API_KEY_PATH}" >&2
-      creds_hint
-      exit 1
-    fi
-    xcrun notarytool submit "${payload}" --wait \
-      --key "${APP_STORE_CONNECT_API_KEY_PATH}" \
-      --key-id "${APP_STORE_CONNECT_KEY_ID}" \
-      --issuer "${APP_STORE_CONNECT_ISSUER_ID}"
-    return 0
+  if [[ ! -f "${APP_STORE_CONNECT_API_KEY_PATH}" ]]; then
+    echo "APP_STORE_CONNECT_API_KEY_PATH is not a file: ${APP_STORE_CONNECT_API_KEY_PATH}" >&2
+    creds_hint
+    exit 1
   fi
-  if have_apple_id; then
-    xcrun notarytool submit "${payload}" --wait \
-      --apple-id "${APPLE_ID}" \
-      --password "${APPLE_APP_SPECIFIC_PASSWORD:-${APPLE_PASSWORD:-}}" \
-      --team-id "${APPLE_TEAM_ID}"
-    return 0
-  fi
-  creds_hint
-  exit 1
+  xcrun notarytool submit "${payload}" --wait \
+    --key "${APP_STORE_CONNECT_API_KEY_PATH}" \
+    --key-id "${APP_STORE_CONNECT_KEY_ID}" \
+    --issuer "${APP_STORE_CONNECT_ISSUER_ID}"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -173,9 +144,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Fail closed on missing creds before OS / toolchain checks so the env list
-# is always the first error when credentials are absent.
-if ! have_api_key && ! have_apple_id; then
+# Fail closed on missing API-key env before OS / toolchain checks so the
+# required var list is always the first error when credentials are absent.
+if ! have_api_key; then
   creds_hint
   exit 1
 fi

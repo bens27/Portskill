@@ -14,7 +14,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versioning f
 ### Added
 
 - `scripts/install-mac.sh` — friend-grade Mac install + Gatekeeper quarantine strip; optional `--keepalive`.
-- `scripts/notarize-mac.sh` — Developer ID codesign, `notarytool` submit, staple. Fails closed without credentials. **Notarization is not claimed until that script is run with real creds.**
+- `scripts/notarize-mac.sh` — Developer ID codesign, `notarytool` via App Store Connect API key env (`APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_API_KEY_PATH`), staple. Fails closed without those vars. **Notarization is not claimed until that script is run with real creds.**
 
 ## [0.1.0] — 2026-09-05
 

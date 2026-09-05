@@ -38,14 +38,15 @@ Do not assume a downloaded zip is notarized just because this repo has a notariz
 # ./scripts/notarize-mac.sh --dmg  # UDZO dmg instead
 ```
 
-Requires a **Developer ID Application** identity (`PORTSKILL_SIGN_IDENTITY` or auto-detect) plus either:
+Requires a **Developer ID Application** identity on the build Mac (`PORTSKILL_SIGN_IDENTITY` or auto-detect) plus App Store Connect API key env (not Apple ID password):
 
-| Method | Environment variables |
-|--------|------------------------|
-| App Store Connect API key | `APP_STORE_CONNECT_API_KEY_PATH`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_ID` |
-| Apple ID | `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` (or `APPLE_PASSWORD`), `APPLE_TEAM_ID` |
+| Variable | What it is |
+|----------|------------|
+| `APP_STORE_CONNECT_KEY_ID` | Key id (`AuthKey_XXX`) |
+| `APP_STORE_CONNECT_ISSUER_ID` | Issuer UUID |
+| `APP_STORE_CONNECT_API_KEY_PATH` | Path to `AuthKey_XXX.p8` |
 
-The script **fails closed** if those are missing and only prints success after `notarytool` accepts and `stapler` staples. Do not commit secrets. This repository does **not** claim a notarized build unless that command was actually run with credentials.
+The script **fails closed** if those are missing and only prints success after `notarytool` accepts and `stapler` staples. Do not commit the `.p8` or these values. This repository does **not** claim a notarized build unless that command was actually run with credentials.
 
 ## Agent / module path (secondary)
 

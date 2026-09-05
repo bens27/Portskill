@@ -108,13 +108,27 @@ def main() -> int:
         "APP_STORE_CONNECT_API_KEY_PATH",
         "APP_STORE_CONNECT_ISSUER_ID",
         "APP_STORE_CONNECT_KEY_ID",
-        "APPLE_ID",
-        "APPLE_APP_SPECIFIC_PASSWORD",
-        "APPLE_TEAM_ID",
     ):
         if need not in hint:
             fail(f"notarize-mac.sh missing-creds hint omitted {need}")
-    ok("install-mac.sh + notarize-mac.sh present; notarize fails closed without creds")
+    if "APPLE_ID" in hint or "APPLE_APP_SPECIFIC_PASSWORD" in hint:
+        fail("notarize-mac.sh still advertises Apple ID password auth")
+    help_proc = subprocess.run(
+        ["bash", str(ROOT / "scripts/notarize-mac.sh"), "--help"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    help_text = (help_proc.stdout or "") + (help_proc.stderr or "")
+    for need in (
+        "APP_STORE_CONNECT_KEY_ID",
+        "APP_STORE_CONNECT_ISSUER_ID",
+        "APP_STORE_CONNECT_API_KEY_PATH",
+        "PORTSKILL_SIGN_IDENTITY",
+    ):
+        if need not in help_text:
+            fail(f"notarize-mac.sh --help omitted {need}")
+    ok("install-mac.sh + notarize-mac.sh present; notarize fails closed without API key env")
 
     # 2) CLI status + doctor (non-destructive; doctor must stay green offline)
     for cmd in ("status", "doctor"):
