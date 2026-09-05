@@ -1,0 +1,17 @@
+/* Portskill Iterate Mode — persisted CSS tokens.
+ * Written by POST /iterate/persist. Marked section for honest patching.
+ * ITERATE-TOKENS-BEGIN
+ */
+:root {
+  --amber: #b97303;
+  --cobalt: #2743d6;
+  --green: #188a5e;
+  --ink: #15181d;
+  --line: #dde0da;
+  --muted: #5d6572;
+  --panel: #ffffff;
+  --paper: #f3f4f1;
+  --red: #bf3b3b;
+  --violet: #6c46c8;
+}
+/* ITERATE-TOKENS-END */

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "portskill": {
+      "command": "portskill",
+      "args": ["--mcp-stdio"]
+    }
+  }
+}

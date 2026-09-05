@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "portskill"
+version = "0.1.0"
+description = "Portskill — local port registry for humans and LLMs (UI + MCP + CLI, stdlib-only runtime)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Ben" }]
+keywords = ["ports", "registry", "mcp", "devtools", "portskill"]
+# Runtime is stdlib-only; no install_requires.
+dependencies = []
+
+[project.scripts]
+portskill = "port_registry_app.server:main"
+portskill-cli = "port_registry_app.cli:main"
+# Legacy aliases (same entrypoints)
+port-registry = "port_registry_app.cli:main"
+port-registry-app = "port_registry_app.server:main"
+
+[tool.setuptools.packages.find]
+include = ["port_registry_app*"]
+
+[tool.setuptools.package-data]
+port_registry_app = ["static/**/*"]

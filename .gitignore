@@ -1,0 +1,54 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+*.code-workspace
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/*.egg
+build/
+.build/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Local Portskill / registry runtime (never publish — live store is ~/.config/port-registry/)
+.port-registry/
+.port-registry.json
+.port-registry*
+.portskill-collab/
+*.log
+# Accidental copies of live listen/registry into the package tree
+listen.json
+registry.json
+
+# Swift / Xcode local
+macos/PortskillMenu/.build/
+macos/PortskillMenu/PortskillMenu.app/
+**/xcuserdata/
+
+# Desk / agent scratch
+*.tgz
+*.zip
+collab-last-seen.txt
+
+# Optional: uncomment before commit if shipping source-only (no rebuilt app trees):
+# dist/
+# macos/Portskill.app/
+# macos/Portskill.app/Contents/MacOS/Portskill
+
+# Binary policy (Ben 2026-09-05): ship source + build scripts; ignore built apps
+dist/
+macos/Portskill.app/
+macos/PortskillMenu/PortskillMenu.app/
+macos/PortskillMenu/.build/

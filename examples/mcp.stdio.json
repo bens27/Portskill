@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "portskill": {
+      "command": "python3",
+      "args": ["-m", "port_registry_app", "--mcp-stdio"],
+      "env": {
+        "PYTHONPATH": "/absolute/path/to/portskill/package"
+      }
+    }
+  }
+}
