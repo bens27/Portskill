@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 import re
 import subprocess
@@ -33,9 +32,6 @@ def _pyproject_version() -> str:
 
 
 def main() -> int:
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(ROOT) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
-
     # 1) import + version consistency (pyproject ↔ package ↔ MCP SERVER_VERSION)
     try:
         import port_registry_app  # noqa: F401
@@ -150,46 +146,45 @@ def main() -> int:
             fail(f"notarize-mac.sh --help omitted {need}")
     ok("install-mac.sh + notarize-mac.sh present; notarize fails closed without API key env")
 
-    # 2) CLI status + doctor (non-destructive; doctor must stay green offline)
-    for cmd in ("status", "doctor"):
-        proc = subprocess.run(
-            [sys.executable, "-m", "port_registry_app.cli", cmd],
-            cwd=str(ROOT),
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        if proc.returncode != 0:
-            fail(f"cli {cmd} exit {proc.returncode}: {proc.stderr or proc.stdout}")
-        try:
-            payload = json.loads(proc.stdout)
-        except json.JSONDecodeError as exc:
-            fail(f"cli {cmd} non-JSON: {exc}: {proc.stdout[:200]}")
-        if payload.get("status") != "ok":
-            fail(f"cli {cmd} unexpected payload status={payload.get('status')!r}")
-        if cmd == "doctor":
-            if payload.get("version") != pkg_ver:
-                fail(f"doctor version={payload.get('version')!r} != {pkg_ver!r}")
-            if not payload.get("registry_path"):
-                fail("doctor missing registry_path")
-            if not payload.get("listen_path"):
-                fail("doctor missing listen_path")
-            names = {c.get("name") for c in (payload.get("checks") or []) if isinstance(c, dict)}
-            for need in (
-                "version",
-                "listen",
-                "ui_reachability",
-                "mcp_reachability",
-                "registry",
-                "handoff_kit",
-            ):
-                if need not in names:
-                    fail(f"doctor missing check {need!r}")
-            hk = payload.get("handoff_kit")
-            if not isinstance(hk, dict) or not hk.get("present"):
-                fail(f"doctor handoff_kit not present: {hk!r}")
-        ok(f"cli {cmd} status={payload.get('status')!r}")
+    # 2) CLI status + doctor (isolated; leftover home listen.json must not flake offline)
+    from tests.helpers import IsolatedConfig, parse_cli_json
+
+    with IsolatedConfig() as iso:
+        for cmd in ("status", "doctor"):
+            proc = iso.run_cli([cmd])
+            if proc.returncode != 0:
+                fail(f"cli {cmd} exit {proc.returncode}: {proc.stderr or proc.stdout}")
+            try:
+                payload = parse_cli_json(proc)
+            except json.JSONDecodeError as exc:
+                fail(f"cli {cmd} non-JSON: {exc}: {proc.stdout[:200]}")
+            if payload.get("status") != "ok":
+                fail(f"cli {cmd} unexpected payload status={payload.get('status')!r}")
+            if cmd == "doctor":
+                if payload.get("reason") is not None:
+                    fail(f"doctor offline reason={payload.get('reason')!r}")
+                if payload.get("version") != pkg_ver:
+                    fail(f"doctor version={payload.get('version')!r} != {pkg_ver!r}")
+                if not payload.get("registry_path"):
+                    fail("doctor missing registry_path")
+                if not payload.get("listen_path"):
+                    fail("doctor missing listen_path")
+                names = {c.get("name") for c in (payload.get("checks") or []) if isinstance(c, dict)}
+                for need in (
+                    "version",
+                    "listen",
+                    "ui_reachability",
+                    "mcp_reachability",
+                    "registry",
+                    "bind_host",
+                    "handoff_kit",
+                ):
+                    if need not in names:
+                        fail(f"doctor missing check {need!r}")
+                hk = payload.get("handoff_kit")
+                if not isinstance(hk, dict) or not hk.get("present"):
+                    fail(f"doctor handoff_kit not present: {hk!r}")
+            ok(f"cli {cmd} status={payload.get('status')!r}")
 
     # 3) If server already up, GET ui_url and mcp_url from listen.json
     if not LISTEN.is_file():

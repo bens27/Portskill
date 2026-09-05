@@ -95,43 +95,31 @@ class CollapsedMarkupTests(unittest.TestCase):
         self.assertIn("Serve URL", html)
 
     def test_loopback_has_no_bind_banner(self) -> None:
-        import port_registry_app.server as srv
-        from tests.helpers import IsolatedConfig
+        from tests.helpers import IsolatedConfig, active_listen
 
-        prev = srv._ACTIVE_LISTEN
-        try:
-            srv._ACTIVE_LISTEN = {
-                "host": "127.0.0.1",
-                "port": 20000,
-                "ui_url": "http://127.0.0.1:20000/",
-                "mcp_url": "http://127.0.0.1:20000/mcp",
-            }
-            with IsolatedConfig() as iso:
-                iso.write_registry()
-                html = self._render_with_project()
-        finally:
-            srv._ACTIVE_LISTEN = prev
+        with IsolatedConfig() as iso, active_listen({
+            "host": "127.0.0.1",
+            "port": 20000,
+            "ui_url": "http://127.0.0.1:20000/",
+            "mcp_url": "http://127.0.0.1:20000/mcp",
+        }):
+            iso.write_registry()
+            html = self._render_with_project()
         self.assertNotIn('id="pr-bind-banner"', html)
         self.assertNotIn('id="pr-bind-chip"', html)
         self.assertNotIn("Not loopback", html)
 
     def test_non_loopback_shows_banner_and_chip(self) -> None:
-        import port_registry_app.server as srv
-        from tests.helpers import IsolatedConfig
+        from tests.helpers import IsolatedConfig, active_listen
 
-        prev = srv._ACTIVE_LISTEN
-        try:
-            srv._ACTIVE_LISTEN = {
-                "host": "0.0.0.0",
-                "port": 20000,
-                "ui_url": "http://0.0.0.0:20000/",
-                "mcp_url": "http://0.0.0.0:20000/mcp",
-            }
-            with IsolatedConfig() as iso:
-                iso.write_registry()
-                html = self._render_with_project()
-        finally:
-            srv._ACTIVE_LISTEN = prev
+        with IsolatedConfig() as iso, active_listen({
+            "host": "0.0.0.0",
+            "port": 20000,
+            "ui_url": "http://0.0.0.0:20000/",
+            "mcp_url": "http://0.0.0.0:20000/mcp",
+        }):
+            iso.write_registry()
+            html = self._render_with_project()
         self.assertIn('id="pr-bind-banner"', html)
         self.assertIn('id="pr-bind-chip"', html)
         self.assertIn("Not loopback", html)

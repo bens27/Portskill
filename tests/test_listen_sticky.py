@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import json
-import pathlib
+import os
 import unittest
 
-from tests.helpers import IsolatedConfig, free_loopback_port, hold_loopback_port
-
-HOME_LISTEN = pathlib.Path.home() / ".config" / "port-registry" / "listen.json"
+from tests.helpers import HOME_LISTEN, IsolatedConfig, free_loopback_port, hold_loopback_port
 
 
 class ListenStickyTests(unittest.TestCase):
@@ -23,6 +21,7 @@ class ListenStickyTests(unittest.TestCase):
         with IsolatedConfig() as iso:
             self.assertEqual(listen_path(), iso.listen_path)
             self.assertEqual(server_listen_path(), iso.listen_path)
+            self.assertEqual(os.environ.get("PORTSKILL_LISTEN_PATH"), str(iso.listen_path))
             self.assertTrue(str(listen_path()).startswith(str(iso.root)))
 
     def test_write_read_listen_stays_in_temp(self) -> None:
@@ -41,6 +40,7 @@ class ListenStickyTests(unittest.TestCase):
             self.assertIsNotNone(data)
             self.assertEqual(data.get("port"), 20042)
             self.assertEqual(self._home_snapshot(), before)
+            self.assertFalse(iso.real_home_listen.exists() and iso.real_home_listen.samefile(iso.listen_path))
             # Path must not be the user's live listen.json
             self.assertNotEqual(iso.listen_path.resolve(), HOME_LISTEN.resolve())
 
@@ -48,18 +48,23 @@ class ListenStickyTests(unittest.TestCase):
         from port_registry_app.server import select_listen_port, write_listen_file
 
         before = self._home_snapshot()
-        port = free_loopback_port()
         with IsolatedConfig() as iso:
             iso.write_registry()
-            write_listen_file({
-                "version": 1,
-                "listening": False,
-                "host": "127.0.0.1",
-                "port": port,
-            })
-            chosen, source = select_listen_port("127.0.0.1")
-            self.assertEqual(chosen, port)
-            self.assertEqual(source, "sticky")
+            last: tuple[int, str, int] | None = None
+            for _ in range(8):
+                port = free_loopback_port()
+                write_listen_file({
+                    "version": 1,
+                    "listening": False,
+                    "host": "127.0.0.1",
+                    "port": port,
+                })
+                chosen, source = select_listen_port("127.0.0.1")
+                last = (chosen, source, port)
+                if chosen == port and source == "sticky":
+                    break
+            else:
+                self.fail(f"sticky port lost to bind race after retries: {last}")
             self.assertEqual(self._home_snapshot(), before)
             self.assertTrue(iso.listen_path.is_file())
 
@@ -67,24 +72,29 @@ class ListenStickyTests(unittest.TestCase):
         from port_registry_app.server import PORTSKILL_NOTE, _portskill_project_path, select_listen_port
 
         before = self._home_snapshot()
-        port = free_loopback_port()
         with IsolatedConfig() as iso:
-            iso.write_registry({
-                "projects": {
-                    _portskill_project_path(): {
-                        "ranges": [{
-                            "id": "ps-claim-1",
-                            "start": port,
-                            "end": port,
-                            "state": "reserved",
-                            "note": PORTSKILL_NOTE,
-                        }],
+            last: tuple[int, str, int] | None = None
+            for _ in range(8):
+                port = free_loopback_port()
+                iso.write_registry({
+                    "projects": {
+                        _portskill_project_path(): {
+                            "ranges": [{
+                                "id": "ps-claim-1",
+                                "start": port,
+                                "end": port,
+                                "state": "reserved",
+                                "note": PORTSKILL_NOTE,
+                            }],
+                        }
                     }
-                }
-            })
-            chosen, source = select_listen_port("127.0.0.1")
-            self.assertEqual(chosen, port)
-            self.assertEqual(source, "claim")
+                })
+                chosen, source = select_listen_port("127.0.0.1")
+                last = (chosen, source, port)
+                if chosen == port and source == "claim":
+                    break
+            else:
+                self.fail(f"claim port lost to bind race after retries: {last}")
             self.assertEqual(self._home_snapshot(), before)
 
     def test_busy_sticky_falls_through_to_claim_without_rewriting_home(self) -> None:
