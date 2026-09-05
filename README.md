@@ -6,7 +6,7 @@
 
 ## Cold path (Mac friends)
 
-Treat Portskill like an app, not a developer ritual.
+Treat Portskill like an app, not a developer ritual. Trusted-friend share (AirDrop/zip vs clone + installer): **[PLAYBOOK.md](PLAYBOOK.md)**.
 
 ```bash
 # 1) Trusted copy of this repo (zip or git clone), then:
@@ -122,7 +122,7 @@ Runs the friend smoke plus the expanded stdlib suite under `tests/test_*.py`. Ex
 ## UI highlights
 
 - **Compose** is first-class (topbar jump + MCP panel composer).
-- **System tools** and **repo** disclosures are **default-closed** (chevrons + Show/Hide).
+- **System tools**, **Session Handoff**, **repo**, **Settings**, and **Serve URL** disclosures are **default-closed** (cobalt chevron + Show/Hide).
 - **One workspace** — all services in a single implicit workspace. Export/Import Workspace stay in ⚙ Actions. Named presets remain CLI/MCP.
 - **Defaults** — per-range Default On/Off; toolbar **Start Default Services** / activate via `apply-defaults`; deactivate keeps reserved unless `--also-release`.
 - **⚙ Actions** panel — workspace bulk actions (start/stop default/all, export/import workspace).
@@ -247,7 +247,7 @@ skill/SKILL.md         # optional agent sidecar
 tests/                 # smoke_test.py + test_*.py (run via ./scripts/smoke_test.sh only)
 vendor/session-handoff-kit/  # Session Handoff product (tracked source, no submodule)
 .github/workflows/ci.yml
-SECURITY.md / CHANGELOG.md
+SECURITY.md / CHANGELOG.md / PLAYBOOK.md
 pyproject.toml         # name: portskill  version: 0.1.0
 ```
 
