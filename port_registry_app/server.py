@@ -1063,10 +1063,18 @@ def range_html(project: str, rng: dict) -> str:
 
 def project_html(project: dict) -> str:
     ranges = "".join(range_html(project["project"], r) for r in project["ranges"])
-    return f"""<div class="pr-project">
-  <h3 class="pr-project-name" title="{esc(project["project"])}">{esc(project["projectLabel"])}</h3>
-  <div class="pr-ranges">{ranges}</div>
-</div>"""
+    n = len(project.get("ranges") or [])
+    label = esc(project["projectLabel"])
+    full = esc(project["project"])
+    return (
+        f'<details class="pr-project pr-disclose" data-project="{full}">'
+        f'<summary class="pr-project-name" title="{full}">'
+        f'{label} <span class="tag">{n}</span>'
+        f'<span class="pr-disclose-hint" aria-hidden="true">Show</span>'
+        f"</summary>"
+        f'<div class="pr-ranges">{ranges}</div>'
+        "</details>"
+    )
 
 
 def console_css() -> str:
@@ -1103,7 +1111,7 @@ def console_css() -> str:
         ".b-block{background:#f8eeda;color:var(--amber)}"
         ".b-term{background:#f8e6e6;color:var(--red)}"
         ".empty{padding:18px;color:var(--muted)}"
-        ".pr-panel{padding:18px}.pr-project{margin-bottom:18px}"
+        ".pr-panel{padding:18px}.pr-project{margin-bottom:18px;border:1px solid var(--line);border-radius:8px;background:var(--panel);overflow:hidden}"
         ".pr-defaults{margin:0 0 16px}"
         ".pr-mcp{margin:0 0 16px}"
         ".pr-mcp-head{display:flex;align-items:baseline;gap:10px;margin:0 0 8px}"
@@ -1158,8 +1166,17 @@ def console_css() -> str:
         ".pr-defaults-jump{margin-left:auto;font-size:12px;color:var(--cobalt);text-decoration:none}"
         ".pr-defaults-jump:hover{text-decoration:underline}"
         ".pr-project:last-child{margin-bottom:0}"
-        ".pr-project-name{margin:0 0 10px;color:var(--muted);text-transform:uppercase;"
-        "letter-spacing:.08em;font-size:11px}"
+        ".pr-project>summary.pr-project-name{margin:0;color:var(--muted);text-transform:uppercase;"
+        "letter-spacing:.08em;font-size:11px;cursor:pointer;list-style:none;"
+        "display:flex;align-items:center;gap:8px;padding:10px 12px;user-select:none;font-weight:600}"
+        ".pr-project>summary.pr-project-name::-webkit-details-marker{display:none}"
+        ".pr-project[open]>summary.pr-project-name{border-bottom:1px solid var(--line)}"
+        ".pr-project .pr-ranges{padding:12px}"
+        ".pr-project>summary .pr-disclose-hint{margin-left:auto;font-size:11px;font-weight:500;"
+        "text-transform:none;letter-spacing:0;color:var(--cobalt);opacity:.85}"
+        ".pr-project[open]>summary .pr-disclose-hint{font-size:0}"
+        ".pr-project>summary .pr-disclose-hint::after{content:\" services\"}"
+        ".pr-project[open]>summary .pr-disclose-hint::after{content:\"Hide\";font-size:11px;opacity:.55}"
         ".pr-ranges{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}"
         ".pr-range{position:relative;border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:#fafbf9}"
         ".pr-card-pencil{position:absolute;top:8px;right:8px;z-index:2;border:1px solid var(--line);"
@@ -3251,9 +3268,10 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
     }}
   }});
   (function(){{
-    /* System tools: default-closed on all viewports (desktop + narrow). */
+    /* Disclosures: default-collapsed (System tools + repo sections). */
     var d=document.getElementById('pr-mcp-system-details');
     if(d){{ d.open=false; }}
+    document.querySelectorAll('details.pr-project').forEach(function(el){{ el.open=false; }});
   }})();
   function applyTailscaleStatus(body){{
     if(!body)return;
