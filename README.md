@@ -113,7 +113,8 @@ Doctor is **read-only and idempotent** — running it twice does not create, rew
 - **Compose** is first-class (topbar jump + MCP panel composer).
 - **System tools**, **repo**, **Settings**, and **Serve URL** disclosures are **default-closed** (chevron + Show/Hide).
 - **One workspace** — all services in a single implicit workspace. Export/Import Workspace stay in ⚙ Actions. Named presets remain CLI/MCP.
-- **Defaults** — per-range Default On/Off; toolbar **Start Default Services** / activate via `apply-defaults`; deactivate keeps reserved unless `--also-release`.
+- **Defaults** — per-range Default On/Off; toolbar **Start Default Services** via `apply-defaults`; deactivate keeps reserved unless `--also-release`.
+- **Stop also Release** — Settings toggle (`settings.stop_also_release`, default on). When off, Stop keeps the range reserved and Release is the explicit free.
 - **⚙ Actions** — workspace bulk actions (start/stop default/all, export/import workspace).
 - **require_compat** is always on (Settings checkbox locked).
 - **Iterate Mode** (optional) — floating control for in-page chrome/token A/B; persist writes `port_registry_app/static/iterate-tokens.css`.
@@ -151,9 +152,9 @@ Agents auto-invoke registry lifecycle tools on the same listener as the HTML UI.
 }
 ```
 
-Tools: `allocate`, `activate`, `start`, `stop`, `release`, `status`, `portskill_path`, `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults`, `deactivate`, `compat_check`, `preset_save`, `preset_list`, `preset_apply`, `preset_delete`, `settings_get`, `settings_set`. (`exit_house` remains as a deactivate alias.) `portskill_path` is the skip-aware happy-path orchestrator (`mode` start|stop|release|restart|status); fine primitives stay callable and `mcp_tools` can hide the path tool.
+`portskill` is one MCP tool for your agent to handle all port management functions. Happy-path tools are `portskill`, `start`, `stop`, `release`, and `status`. `allocate` remains available. `activate` is an internal primitive (off in lean; enable with `settings set --mcp-tool activate=on`). Other tools include `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults`, `deactivate`, `compat_check`, `preset_save`, `preset_list`, `preset_apply`, `preset_delete`, `settings_get`, and `settings_set`. (`exit_house` remains a deactivate alias.) CLI `path` / `portskill-path` / `portskill_path` still call the same orchestrator. An older `settings.mcp_tools.portskill_path: false` key still hides `portskill`.
 
-Named `mcp_tools` profiles (`settings.mcp_tools_profile`): default **`full`** (all tools enabled; existing installs stay here). Opt-in **`lean`** enables `portskill_path`, `status`, `settings_get`, plus escape hatches `allocate` / `stop` / `release`; other CRUD and flat `handoff_*` tools stay off until you toggle them. Switch with `./scripts/cli.sh settings set --mcp-tools-profile lean|full` or MCP `settings_set` `{ "mcp_tools_profile": "lean"|"full" }`. The enable map remains `settings.mcp_tools` (missing key = enabled).
+Named `mcp_tools` profiles (`settings.mcp_tools_profile`): default **`full`** (all tools enabled; existing installs stay here). Opt-in **`lean`** enables `portskill`, `status`, `settings_get`, plus escape hatches `allocate` / `stop` / `release`. `activate` stays off until you toggle it. Switch with `./scripts/cli.sh settings set --mcp-tools-profile lean|full` or MCP `settings_set` `{ "mcp_tools_profile": "lean"|"full" }`. The enable map remains `settings.mcp_tools` (missing key = enabled).
 
 Session Handoff (vendored kit, default on in `tools/list`): flat names `handoff_status`, `handoff_skill`, `handoff_template`, `handoff_list`, `handoff_resolve`, `handoff_new_path`, `handoff_resume`, `handoff_supersede`, `handoff_install_help` — not nested `session-handoff/*`. Ledger writes go only through `vendor/session-handoff-kit/codex/hooks/handoff_ledger.py`.
 
@@ -180,6 +181,8 @@ Wrappers set `PYTHONPATH` (`./scripts/cli.sh`, `./scripts/doctor.sh`). After `pi
 ./scripts/cli.sh settings get
 ./scripts/cli.sh settings set --mcp-tools-profile lean
 ./scripts/cli.sh settings set --mcp-tools-profile full
+./scripts/cli.sh settings set --stop-also-release off
+./scripts/cli.sh settings set --stop-also-release on
 ./scripts/cli.sh http-auth show
 ./scripts/cli.sh http-auth regenerate
 ./scripts/cli.sh http-auth gate show
@@ -230,8 +233,9 @@ May build or reuse `dist/Portskill.app` via `build-app.sh`; writes `~/Library/La
 
 Each range stores additive `default_state` (`"off"` | `"on"`, missing ⇒ off).
 
-- **Activate** = `apply-defaults` (start Default On; optional `--also-stop-off`)
+- **Start Default Services** = `apply-defaults` (start Default On; optional `--also-stop-off`)
 - **Deactivate** = `deactivate` (aliases `exit-house` / `leave`) — safe stop; **keeps reserved** unless `--also-release`
+- **Stop also Release** = `settings.stop_also_release` (default **on**). When off, `stop` keeps the range reserved.
 
 **Named presets** live in `registry.json` under `presets`. File packs: `examples/environments/`.
 

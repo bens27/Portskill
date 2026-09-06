@@ -59,7 +59,7 @@ class McpToolToggleTests(unittest.TestCase):
 
 class McpToolsProfileTests(unittest.TestCase):
     LEAN_ENABLED = (
-        "portskill_path",
+        "portskill",
         "status",
         "settings_get",
         "stop",
@@ -124,7 +124,8 @@ class McpToolsProfileTests(unittest.TestCase):
 
             resp = mcp_handle({"jsonrpc": "2.0", "id": 10, "method": "tools/list"})
             rpc_names = [t["name"] for t in resp["result"]["tools"]]
-            self.assertIn("portskill_path", rpc_names)
+            self.assertIn("portskill", rpc_names)
+            self.assertNotIn("portskill_path", rpc_names)
             self.assertIn("status", rpc_names)
             self.assertNotIn("handoff_status", rpc_names)
             self.assertNotIn("activate", rpc_names)
@@ -206,7 +207,8 @@ class McpToolsProfileTests(unittest.TestCase):
             settings = body.get("settings") or {}
             self.assertEqual(settings.get("mcp_tools_profile"), "lean")
             names = [t["name"] for t in enabled_tool_defs()]
-            self.assertIn("portskill_path", names)
+            self.assertIn("portskill", names)
+            self.assertNotIn("portskill_path", names)
             self.assertNotIn("preset_save", names)
             self.assertNotIn("handoff_list", names)
 

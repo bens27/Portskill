@@ -596,6 +596,7 @@ def load_registry() -> dict:
             "require_compat": True,
             "mcp_tools": {},
             "mcp_tools_profile": "full",
+            "stop_also_release": True,
             "mcp_user_commands": {},
             "serve_portskill_on_tailscale": True,
             "handoff_enabled": False,
@@ -630,6 +631,11 @@ def load_registry() -> dict:
         flag = flag.strip().lower() in ("1", "true", "yes", "on")
     else:
         flag = bool(flag)
+    stop_also = settings.get("stop_also_release", True)
+    if isinstance(stop_also, str):
+        stop_also = stop_also.strip().lower() in ("1", "true", "yes", "on")
+    else:
+        stop_also = True if stop_also is None else bool(stop_also)
     exit_flag = settings.get("auto_exit_on_shutdown", False)
     if isinstance(exit_flag, str):
         exit_flag = exit_flag.strip().lower() in ("1", "true", "yes", "on")
@@ -688,6 +694,7 @@ def load_registry() -> dict:
         "auto_apply_preset": preset,
         "auto_apply_on_launch": flag,
         "auto_exit_on_shutdown": exit_flag,
+        "stop_also_release": stop_also,
         "require_compat": req,
         "open_environment_tabs": [t for t in tabs if isinstance(t, str) and t.strip()],
         "focused_environment": focused,
@@ -954,6 +961,7 @@ def build_view(raw: dict) -> dict:
             "autoApplyPreset": settings.get("auto_apply_preset"),
             "autoApplyOnLaunch": bool(settings.get("auto_apply_on_launch")),
             "autoExitOnShutdown": bool(settings.get("auto_exit_on_shutdown")),
+            "stopAlsoRelease": bool(settings.get("stop_also_release", True)),
             "requireCompat": True,
             "openEnvironmentTabs": list(settings.get("open_environment_tabs") or []),
             "focusedEnvironment": settings.get("focused_environment"),
@@ -1541,6 +1549,7 @@ def settings_panel_html(view: dict) -> str:
     settings = view.get("settings") or {}
     checked = "checked" if settings.get("autoApplyOnLaunch") else ""
     exit_checked = "checked" if settings.get("autoExitOnShutdown") else ""
+    stop_release_checked = "checked" if settings.get("stopAlsoRelease", True) else ""
     current = settings.get("autoApplyPreset") or ""
     options = ['<option value="">(none)</option>']
     for p in view.get("presets") or []:
@@ -1574,6 +1583,7 @@ def settings_panel_html(view: dict) -> str:
         f'<label><input type="checkbox" id="pr-auto-apply-launch" {checked}> Auto-apply on launch</label>'
         f'<label>Preset <select id="pr-auto-apply-preset">{"".join(options)}</select></label>'
         f'<label><input type="checkbox" id="pr-auto-exit-shutdown" {exit_checked}> Auto-deactivate on shutdown</label>'
+        f'<label title="When on, Stop also frees the range. When off, Stop keeps it reserved; use Release to free it."><input type="checkbox" id="pr-stop-also-release" {stop_release_checked}> Stop also Release</label>'
         '<label class="pr-compat-locked" title="Always on">'
         '<input type="checkbox" id="pr-require-compat" checked disabled> '
         "Require compatibility — on</label>"
@@ -2182,12 +2192,13 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
     settings = (view or {}).get("settings") or {}
     prefs = settings.get("mcpTools") if isinstance(settings.get("mcpTools"), dict) else {}
     user_cmds = settings.get("mcpUserCommands") if isinstance(settings.get("mcpUserCommands"), dict) else {}
+    from .mcp import _tool_enabled  # noqa: PLC0415
 
     def tool_row(name: str, desc: str, *, user: bool = False) -> str:
         desc_one = " ".join((desc or "").strip().split())
         if len(desc_one) > 140:
             desc_one = desc_one[:137] + "…"
-        is_enabled = True if name not in prefs else bool(prefs.get(name))
+        is_enabled = _tool_enabled(prefs, name)
         checked = "checked" if is_enabled else ""
         aria = "true" if is_enabled else "false"
         disabled_cls = "" if is_enabled else " is-disabled"
@@ -2230,7 +2241,7 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         desc = tool.get("description") or ""
         if not isinstance(desc, str):
             desc = ""
-        is_enabled = True if name not in prefs else bool(prefs.get(name))
+        is_enabled = _tool_enabled(prefs, name)
         if is_enabled:
             enabled_count += 1
         system_rows.append(tool_row(name, desc, user=False))
@@ -2327,6 +2338,9 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
     stdio_block = (
         f'<div class="pr-mcp-connect" id="pr-mcp-connect">'
         f'<div class="pr-mcp-section">Agent connection</div>'
+        f'<p class="pr-mcp-meta" id="pr-mcp-portskill-pitch" style="margin:0">'
+        f'Connect an agent here. The <code>portskill</code> tool is one MCP tool for your agent '
+        f'to handle all port management functions.</p>'
         f'<details class="pr-mcp-system-details pr-mcp-connect-details" id="pr-mcp-connect-stdio">'
         f'<summary>Stdio MCP <span class="tag">agent install option</span>'
         f'<span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
@@ -2359,7 +2373,9 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         f'<div class="pr-mcp-jump-row">'
         f'<a class="pr-compose-jump" href="#pr-mcp-user-composer">Compose</a>'
         f'<span class="tag">user command composer</span></div>'
-        f'<p class="pr-mcp-meta">Live <code>tools/list</code> surface. Agents auto-invoke registry '
+        f'<p class="pr-mcp-meta" id="pr-mcp-tools-pitch">'
+        f'The <code>portskill</code> tool is one MCP tool for your agent to handle all port '
+        f'management functions. Live <code>tools/list</code> surface. Agents auto-invoke registry '
         f'lifecycle tools. Use this HTML UI for maintenance and defaults. '
         f'Stdio MCP (<code>{esc(stdio)}</code>) is an available agent install option. '
         f'Toggles filter live <code>tools/list</code> + <code>tools/call</code> (disabled tools stay listed here so you can re-enable).</p>'
@@ -3259,10 +3275,12 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
       var launch=document.getElementById('pr-auto-apply-launch');
       var sel=document.getElementById('pr-auto-apply-preset');
       var exitBox=document.getElementById('pr-auto-exit-shutdown');
+      var stopRelBox=document.getElementById('pr-stop-also-release');
       var compatBox=document.getElementById('pr-require-compat');
       payload.autoApplyOnLaunch=!!(launch&&launch.checked);
       payload.autoApplyPreset=(sel&&sel.value)||null;
       payload.autoExitOnShutdown=!!(exitBox&&exitBox.checked);
+      payload.stopAlsoRelease=!(stopRelBox)||!!stopRelBox.checked;
       payload.requireCompat=true;
     }}
     if(action==='compat-check'){{
@@ -4194,6 +4212,11 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             argv += [
                 "--auto-exit-on-shutdown",
                 "on" if body.get("autoExitOnShutdown") else "off",
+            ]
+        if "stopAlsoRelease" in body:
+            argv += [
+                "--stop-also-release",
+                "on" if body.get("stopAlsoRelease") else "off",
             ]
         # Always force require_compat on
         argv += ["--require-compat", "on"]

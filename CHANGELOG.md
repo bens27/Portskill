@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Changed
+- MCP tools/list name is **`portskill`** (was `portskill_path`). Description: “One MCP tool for your agent to handle all port management functions.” Compat: tools/call still accepts `portskill_path`; CLI keeps `path` / `portskill-path` / `portskill_path`. Lean enable list uses `portskill`. An older `settings.mcp_tools.portskill_path: false` key still hides the renamed tool.
+- `activate` is no longer presented as a happy-path peer. It stays off in lean, remains implemented, and can be re-enabled with `settings set --mcp-tool activate=on`. `apply-defaults` / **Start Default Services** are not rebranded as Activate.
+- `settings.stop_also_release` (bool, default **true**) controls whether `stop` also frees the range. When false, Stop keeps the range reserved and Release is the explicit free. Honored by CLI stop (single + bulk), UI Stop, MCP `stop`, and orchestrator mode `stop`. Restart’s stop phase still keeps the range so allocate can reuse it. Settings checkbox **Stop also Release**; CLI/MCP `settings get` / `settings set --stop-also-release on|off`. Optional per-call `--also-release on|off` / MCP `also_release`.
+
 ### Added
 - Optional WebAuthn/passkey HTTP gate (default **off**). When on, the personal listen UI and mutating HTTP APIs accept a short-lived httpOnly passkey session cookie **or** the optional bearer. Register/authenticate are stdlib-only (no new pip runtime dependency). Operator credentials live in `~/.config/port-registry/http_passkey.json`, not `registry.json`. Settings UI can enable the gate and register/manage passkeys. CLI: `http-auth gate on|off` and `http-auth passkeys`.
 

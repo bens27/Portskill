@@ -35,7 +35,7 @@ Then open the printed URL (default `http://127.0.0.1:8765/`).
 - `POST /port-registry/actions` → invokes `port_registry_app.cli` (see contract below)
 - `POST /mcp` → MCP JSON-RPC (`initialize`, `tools/list`, `tools/call`); `GET /mcp` → discovery
 - Binds `127.0.0.1` only; no Node
-- MCP tools: allocate, activate, start, stop, release, status, doctor
+- MCP tools: portskill (one MCP tool for your agent to handle all port management functions), allocate, start, stop, release, status, doctor
 
 ## 3. Import TS modules into a host console
 

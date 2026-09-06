@@ -114,6 +114,10 @@ def main() -> int:
         fail("Export Workspace missing from rendered UI")
     if "Require compatibility" not in html or 'id="pr-require-compat"' not in html:
         fail("require_compat lock missing from Settings")
+    if "Stop also Release" not in html or 'id="pr-stop-also-release"' not in html:
+        fail("Stop also Release setting missing from Settings")
+    if "one MCP tool for your agent to handle all port management functions" not in html:
+        fail("portskill happy-path pitch missing from MCP UI")
     if 'class="pr-disclose"' not in html and "pr-mcp-system-details" not in html:
         fail("disclosure chevron markup missing")
     if "dogfood" in html.lower() or "stdio preferred" in html.lower() or "preferred for agents" in html.lower():
