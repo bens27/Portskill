@@ -114,7 +114,7 @@ def bind_host_warning(host):
     return (
         f"Bound to {host} (not loopback). "
         "The HTTP UI and MCP listener are reachable beyond this machine "
-        "(bearer auth is still required; Tailscale is not authentication). "
+        "(Tailscale is not authentication). "
         "Default bind remains 127.0.0.1. "
         f"This requires {ALLOW_NON_LOOPBACK_FLAG} (documented footgun). Remotes HOLD."
     )
@@ -2134,7 +2134,7 @@ def refuse_funnel_listen_message(port):
         f"Refusing Tailscale Funnel of Portskill listen/UI/MCP port {int(port)}. "
         "Funnel of the listen port is blocked in code. "
         "Serve of user claimed service ports stays a deliberate user action. "
-        "Tailscale is not authentication — HTTP MCP/UI require a local bearer token."
+        "Tailscale is not authentication."
     )
 
 
@@ -5771,7 +5771,7 @@ def parser():
 
     http_auth = subparsers.add_parser(
         "http-auth",
-        help="Show or regenerate the local HTTP bearer token (stdio MCP unchanged)",
+        help="Optional helper: show or regenerate local HTTP token (does not gate UI)",
     )
     http_auth_sub = http_auth.add_subparsers(dest="http_auth_command", required=True)
     http_auth_show = http_auth_sub.add_parser(

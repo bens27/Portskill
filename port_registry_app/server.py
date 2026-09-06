@@ -199,9 +199,8 @@ def build_listen_payload(host: str, port: int) -> dict:
                 "or python3 -m port_registry_app --mcp-stdio"
             ),
             "cursor_mcp_http_hint": (
-                "HTTP MCP is local-trust dogfood only and requires "
-                "Authorization: Bearer (even on loopback). Prefer stdio for agents. "
-                "Tailscale is not authentication."
+                "HTTP MCP is local-trust dogfood only. Prefer stdio for agents. "
+                "Tailscale is not authentication. Funnel of this listen port is refused."
             ),
             "tools_endpoint": "initialize / tools/list / tools/call via JSON-RPC on /mcp",
         },
@@ -213,10 +212,9 @@ def print_listen_banner(payload: dict) -> None:
     print("======== Portskill ========", flush=True)
     print(f"UI:            {payload.get('ui_url')}", flush=True)
     print(f"Stdio MCP:     {payload.get('stdio')}  (preferred for agents)", flush=True)
-    print(f"HTTP MCP:      {payload.get('mcp_post')}  (Bearer required; stdio preferred)", flush=True)
-    print(f"MCP discovery: {payload.get('mcp_get_discovery')}  (Bearer required)", flush=True)
-    print("HTTP auth:     configured (token in ~/.config/port-registry/http_auth.json)", flush=True)
-    print("               show/regenerate: portskill-cli http-auth show|regenerate", flush=True)
+    print(f"HTTP MCP:      {payload.get('mcp_post')}  (stdio preferred; no bearer required)", flush=True)
+    print(f"MCP discovery: {payload.get('mcp_get_discovery')}", flush=True)
+    print("HTTP auth:     optional helper (http-auth show|regenerate; does not gate this UI)", flush=True)
     print(f"listen.json:   {payload.get('listen_path') or listen_path()}", flush=True)
     print(f"Registry:      {payload.get('registry_path') or registry_path()}", flush=True)
     print("===========================", flush=True)
@@ -1535,10 +1533,11 @@ def settings_panel_html(view: dict) -> str:
         "</div>"
         '<div class="pr-settings-row" id="pr-http-auth">'
         "<strong>HTTP auth</strong>"
-        '<p class="pr-mcp-meta" style="margin:6px 0">Local bearer for HTTP MCP and UI APIs '
-        "(even on loopback). Stdio MCP does not use this token. "
+        '<p class="pr-mcp-meta" style="margin:6px 0">Optional local token helper '
+        "(<code>http_auth.json</code>) for a later passkey cut. "
+        "It does <strong>not</strong> gate this UI or ordinary HTTP APIs. "
+        "Stdio MCP does not use this token. "
         "Tailscale Serve/Funnel is not authentication. "
-        "Regenerate invalidates the old token. "
         "CLI: <code>portskill-cli http-auth show</code></p>"
         '<p class="pr-mcp-meta" id="pr-http-auth-status" style="margin:0 0 8px">Token configured — not shown here.</p>'
         '<input type="password" id="pr-http-auth-input" autocomplete="off" '
@@ -2199,8 +2198,7 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         f'<span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
         f'<div class="pr-mcp-connect-body">'
         f'<p class="pr-mcp-meta" style="margin:0" id="pr-mcp-http-dogfood">'
-        f'HTTP MCP is <strong>local-trust dogfood only</strong> and requires '
-        f'<code>Authorization: Bearer</code> (even on loopback). '
+        f'HTTP MCP is <strong>local-trust dogfood only</strong> (no bearer required on this listen path). '
         f'<a class="pr-port-link" href="{esc(mcp_url)}" target="_blank" rel="noopener"><code>{esc(mcp_url)}</code></a>. '
         f'Tailscale is not authentication. Funnel of this listen port is refused.</p>'
         f'</div></details>'
@@ -2214,7 +2212,7 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         f'<a class="pr-compose-jump" href="#pr-mcp-user-composer">Compose</a>'
         f'<span class="tag">user command composer</span></div>'
         f'<p class="pr-mcp-meta">Live <code>tools/list</code> surface. Agents should use '
-        f'<strong>stdio MCP</strong> (<code>{esc(stdio)}</code>). HTTP MCP is local-trust dogfood only and needs a bearer token. '
+        f'<strong>stdio MCP</strong> (<code>{esc(stdio)}</code>). HTTP MCP is local-trust dogfood only. '
         f'Toggles filter live <code>tools/list</code> + <code>tools/call</code> (disabled tools stay listed here so you can re-enable).</p>'
         f"{system_body}"
         f"{stdio_block}"
@@ -2345,7 +2343,7 @@ def handoff_panel_html(view: dict | None = None) -> str:
         f"<h4>Write-a-Handoff skill</h4>"
         f'<p class="pr-mcp-meta" style="margin:0">Download the bundled skill to review, then upload a replacement. '
         f"The choice persists under <code>~/.config/port-registry/</code> (reload keeps it). "
-        f"HTTP bearer is required for upload; stdio MCP is unchanged.</p>"
+        f"Stdio MCP is unchanged.</p>"
         f'<div class="pr-handoff-row" id="pr-handoff-skill">'
         f'<span class="tag" id="pr-handoff-skill-source">skill: {skill_src}</span>'
         f'<code class="pr-handoff-kit" id="pr-handoff-skill-path" title="Current skill file">{skill_current}</code>'
@@ -3764,7 +3762,7 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
 background:#fafbf9;border-top:1px solid var(--line);font-size:11px;color:var(--muted);
 font-family:ui-monospace,Menlo,monospace;z-index:20">
   Stdio MCP (preferred): <code>python3 -m port_registry_app --mcp-stdio</code>
-  · HTTP MCP (Bearer required): <a href="{mcp_footer_url}" style="color:var(--cobalt)">{mcp_footer_label}</a>
+  · HTTP MCP (local-trust dogfood): <a href="{mcp_footer_url}" style="color:var(--cobalt)">{mcp_footer_label}</a>
   · listen: <span title="Sticky broadcast">{mcp_listen_path}</span>
 </footer>
 </body>
@@ -4424,48 +4422,6 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
     return 400, {"ok": False, "message": f"unsupported action: {action}"}
 
 
-def http_auth_login_page() -> str:
-    """HTML shell with no registry inventory. Used when GET / has no bearer/cookie."""
-    return """<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Portskill HTTP auth</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-body{font:15px/1.45 ui-sans-serif,system-ui,sans-serif;max-width:36rem;margin:12vh auto;padding:0 18px;color:#1a1d24}
-code{font:13px ui-monospace,Menlo,monospace}
-input{width:100%;padding:10px 12px;font:14px ui-monospace,Menlo,monospace;margin:10px 0 14px;box-sizing:border-box}
-button{padding:8px 14px;font:14px inherit;cursor:pointer}
-.muted{color:#5c6570;font-size:13px}
-</style></head><body>
-<h1>Portskill HTTP auth</h1>
-<p>This listener requires a local bearer token (even on loopback). Stdio MCP does not.</p>
-<p class="muted">Show the token: <code>portskill-cli http-auth show</code> (or <code>./scripts/cli.sh http-auth show</code>). Tailscale Serve/Funnel is not authentication. Funnel of this listen port is refused.</p>
-<form id="f">
-<input type="password" id="t" autocomplete="off" placeholder="Bearer token" autofocus>
-<button type="submit">Continue</button>
-</form>
-<p id="err" class="muted" hidden>Token rejected (401). No tool side effects.</p>
-<script>
-(function(){
-  var COOKIE='""" + HTTP_AUTH_COOKIE_NAME + """';
-  document.getElementById('f').addEventListener('submit', function(ev){
-    ev.preventDefault();
-    var token=(document.getElementById('t').value||'').trim();
-    var err=document.getElementById('err');
-    if(!token){err.hidden=false;err.textContent='Paste the token from http-auth show.';return;}
-    fetch('/api/http-auth/session',{method:'POST',headers:{'Authorization':'Bearer '+token,'content-type':'application/json'},body:'{}'})
-      .then(function(res){
-        if(res.status===401){err.hidden=false;err.textContent='Token rejected (401). No tool side effects.';return;}
-        try{sessionStorage.setItem('portskill_http_token', token);}catch(e){}
-        document.cookie=COOKIE+'='+encodeURIComponent(token)+'; Path=/; SameSite=Lax';
-        location.reload();
-      }).catch(function(){err.hidden=false;err.textContent='Could not reach HTTP auth.';});
-  });
-})();
-</script>
-</body></html>
-"""
-
-
 class Handler(BaseHTTPRequestHandler):
     server_version = f"PortskillUI/{__version__}"
 
@@ -4549,15 +4505,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "service": "portskill"})
             return
         if path == "/mcp":
-            if not self._require_auth():
-                return
             self._send_json(200, discovery_payload())
             return
         if path in ("/", "/port-registry"):
-            if not self._auth_ok():
-                page = http_auth_login_page().encode("utf-8")
-                self._send(200, page, "text/html; charset=utf-8")
-                return
             raw = load_registry()
             # Fast first paint: no Tailscale probes; local 127.0.0.1 links OK until async refresh
             # One workspace: show all services (no focused-preset filter)
@@ -4575,23 +4525,15 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, payload)
             return
         if path == "/api/tailscale-status":
-            if not self._require_auth():
-                return
             self._send_json(200, api_tailscale_status_payload())
             return
         if path == "/api/state":
-            if not self._require_auth():
-                return
             self._send_json(200, load_registry())
             return
         if path == "/iterate/state":
-            if not self._require_auth():
-                return
             self._send_json(200, iterate_state_payload())
             return
         if path == "/iterate/collab/messages":
-            if not self._require_auth():
-                return
             self._send_json(200, {"ok": True, "messages": iterate_read_collab()})
             return
         self._send_json(404, {"ok": False, "message": "not found"})
@@ -4632,8 +4574,6 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         if path == "/mcp":
-            if not self._require_auth(discard_body=True):
-                return
             length = int(self.headers.get("Content-Length") or "0")
             raw = self.rfile.read(length) if length else b""
             try:
@@ -4666,8 +4606,6 @@ class Handler(BaseHTTPRequestHandler):
             "/iterate/persist",
             "/iterate/collab/send",
         ):
-            if not self._require_auth(discard_body=True):
-                return
             length = int(self.headers.get("Content-Length") or "0")
             raw = self.rfile.read(length) if length else b""
             try:
@@ -4705,8 +4643,6 @@ class Handler(BaseHTTPRequestHandler):
 
         if path != "/port-registry/actions":
             self._send_json(404, {"ok": False, "message": "not found"})
-            return
-        if not self._require_auth(discard_body=True):
             return
         length = int(self.headers.get("Content-Length") or "0")
         raw = self.rfile.read(length) if length else b""
@@ -4819,7 +4755,7 @@ def serve_http(
             flush=True,
         )
     except OSError as exc:
-        print(f"http_auth: failed to mint/load token ({exc}); HTTP will fail closed", flush=True)
+        print(f"http_auth: failed to mint/load optional token ({exc}); UI/API stay open", flush=True)
 
     source = "explicit" if explicit and port is not None else "pending"
     if explicit and port is not None:

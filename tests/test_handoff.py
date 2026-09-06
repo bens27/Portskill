@@ -433,20 +433,16 @@ class HandoffCustomSkillTests(unittest.TestCase):
         self.assertIn("name: session-handoff", text)
         self.assertNotIn("# custom only", text)
 
-    def test_skill_upload_requires_http_bearer(self) -> None:
+    def test_skill_upload_works_without_http_bearer(self) -> None:
         import threading
-        import urllib.error
         import urllib.request
         from http.server import ThreadingHTTPServer
 
-        from port_registry_app.cli import ensure_http_auth_token
         from port_registry_app.server import Handler
         from tests.helpers import free_loopback_port
 
         with IsolatedConfig() as iso:
             iso.write_registry()
-            auth, _minted = ensure_http_auth_token()
-            token = auth["token"]
             port = free_loopback_port()
             httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
             thread = threading.Thread(target=httpd.serve_forever, daemon=True)
@@ -461,19 +457,6 @@ class HandoffCustomSkillTests(unittest.TestCase):
                     url,
                     data=payload,
                     headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                with self.assertRaises(urllib.error.HTTPError) as ctx:
-                    urllib.request.urlopen(req, timeout=5)
-                self.assertEqual(ctx.exception.code, 401)
-
-                req = urllib.request.Request(
-                    url,
-                    data=payload,
-                    headers={
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {token}",
-                    },
                     method="POST",
                 )
                 with urllib.request.urlopen(req, timeout=5) as resp:
