@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Docs
+- README rewritten for developers: clone then ./scripts/run.sh; removed Mac-friends cold path, installer-first narrative, and notarization-as-distribution sections.
+- PLAYBOOK.md retired (friend-share / installer path unsupported).
+- SECURITY.md: no signed/notarized distribution claim; Apple signing left to developers who need it.
+
 All notable changes to **Portskill** are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versioning follows the `project.version` in `pyproject.toml` (single product version for UI, MCP `initialize`, and `doctor`).
