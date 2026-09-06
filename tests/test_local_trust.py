@@ -96,12 +96,22 @@ class SurfaceCopyDocTests(unittest.TestCase):
         self.assertIn("*End of human-written pre-amble*", readme)
 
     def test_listen_hints_do_not_rank_stdio(self) -> None:
+        import json
+
         from port_registry_app.mcp import discovery_payload
         from port_registry_app.server import build_listen_payload
 
         with IsolatedConfig() as iso:
             iso.write_registry()
             payload = build_listen_payload("127.0.0.1", 20000)
+            iso.listen_path.write_text(
+                json.dumps({
+                    "host": "127.0.0.1",
+                    "port": 20000,
+                    "mcp_url": "http://127.0.0.1:20000/mcp",
+                }),
+                encoding="utf-8",
+            )
             fallback = discovery_payload()["setup"]
         stdio = str(payload["setup"]["cursor_mcp_stdio_hint"]).lower()
         http = str(payload["setup"]["cursor_mcp_http_hint"]).lower()
