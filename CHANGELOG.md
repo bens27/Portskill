@@ -3,7 +3,13 @@
 ## Unreleased
 
 ### Changed
+- MCP Tools panel order is System tools → Agent connection (each setup instruction is a start-collapsed disclosure) → User commands → Command composer.
+- Session Handoff flat tool-name copy (`handoff_status`, `handoff_list`, … — not nested `session-handoff/*`) lives in the Session Handoff section. The user-command enable-map sentence stays next to User commands.
+- Settings → Services list is denser (tighter padding/gap between service entries). Collapsed project disclosures show registered / active / Tailnet-served counts.
 - Personal Mac `.app` path is keepalive + `build-app.sh` only. `scripts/install-mac.sh` and `scripts/notarize-mac.sh` removed from the product surface. Remotes/ASC remain HOLD.
+
+### Added
+- Write-a-Handoff skill file control in Session Handoff: download the bundled skill, upload a replacement, persist `settings.handoff_skill` under `~/.config/port-registry/`. Reload keeps the choice. HTTP bearer still required for UI/API mutations; stdio MCP is unchanged.
 
 ### Security
 - HTTP mutating and inventory surfaces require a local bearer token (`~/.config/port-registry/http_auth.json`) even on loopback. Unauthenticated `POST /mcp` fails closed with 401. Stdio MCP is unchanged. Funnel of Portskill’s own listen/UI/MCP port is refused. Tailscale is not HTTP authentication. Passkeys/OAuth are not in this cut.

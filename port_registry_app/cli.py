@@ -330,6 +330,7 @@ def default_settings():
         "serve_portskill_on_tailscale": True,  # default ON — Serve Portskill listen port (never Funnel)
         "handoff_enabled": False,  # Session Handoff section opt-in
         "handoff_kit": None,  # optional override; default is vendored kit
+        "handoff_skill": None,  # optional custom Write-a-Handoff SKILL.md path
     }
 
 
@@ -439,6 +440,11 @@ def normalize_settings(settings):
         normalized["handoff_kit"] = kit.strip()
     else:
         normalized["handoff_kit"] = None
+    skill = settings.get("handoff_skill")
+    if isinstance(skill, str) and skill.strip():
+        normalized["handoff_skill"] = skill.strip()
+    else:
+        normalized["handoff_skill"] = None
     return normalized
 
 
@@ -4019,6 +4025,13 @@ def cmd_settings_set(args):
             else:
                 settings["handoff_kit"] = token
             changed = True
+        if getattr(args, "handoff_skill", None) is not None:
+            token = str(args.handoff_skill).strip()
+            if token.lower() in ("none", "off", "null", ""):
+                settings["handoff_skill"] = None
+            else:
+                settings["handoff_skill"] = token
+            changed = True
         mcp_tools_json = getattr(args, "mcp_tools_json", None)
         if mcp_tools_json is not None:
             raw = str(mcp_tools_json).strip()
@@ -6028,6 +6041,11 @@ def parser():
         "--handoff-kit",
         default=None,
         help="Optional Session Handoff kit path override (or none to use vendored kit)",
+    )
+    settings_set.add_argument(
+        "--handoff-skill",
+        default=None,
+        help="Optional custom Write-a-Handoff SKILL.md path (or none to use bundled skill)",
     )
     settings_set.set_defaults(func=cmd_settings)
 

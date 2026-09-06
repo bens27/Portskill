@@ -228,7 +228,9 @@ Compatibility: `compat check` / `preset check` / `environment check` — exit 2 
 
 **⚙ Actions:** Start Default / Start All / Stop non-Default / Stop All / Export / Import Workspace. Import backs up to `~/.config/port-registry/backups/workspace-YYYYMMDD-HHMMSS.json` first.
 
-**Session Handoff** (collapsed, next to MCP tools): enable/add, vendored kit status, install helpers per surface. Kit lives at `vendor/session-handoff-kit/` (optional `PORTSKILL_HANDOFF_KIT` / `settings.handoff_kit` override).
+**Session Handoff** (collapsed, next to MCP tools): enable/add, vendored kit status, install helpers per surface, and Write-a-Handoff skill download/upload. Custom skill persists as `settings.handoff_skill` pointing at `handoff-skill.md` beside the registry (`~/.config/port-registry/`). Kit lives at `vendor/session-handoff-kit/` (optional `PORTSKILL_HANDOFF_KIT` / `settings.handoff_kit` override). Flat tool-name copy lives in this section (`handoff_status`, `handoff_list`, … — not nested `session-handoff/*`).
+
+**MCP tools** panel order: System tools → Agent connection (each setup instruction starts collapsed) → User commands → Command composer.
 
 ```bash
 portskill-cli tailscale login
