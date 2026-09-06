@@ -45,7 +45,7 @@ python3 -m port_registry_app --mcp-stdio
 - MCP stdio (**preferred for agents**): newline-delimited JSON-RPC on stdin/stdout — `python3 -m port_registry_app --mcp-stdio` (see `examples/mcp.stdio.json`).
 - MCP HTTP (**local-trust dogfood only**): same loopback listener as the UI — `POST http://127.0.0.1:<port>/mcp` JSON-RPC; `GET /mcp` discovery. No bearer required on the personal listen path. Do not bind `0.0.0.0` casually. Funnel of the Portskill listen port is refused. Tailscale is not authentication.
 
-MCP tools (all map to CLI subcommands): `allocate`, `activate`, `start`, `stop`, `release`, `status`, `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults` (activate), `deactivate` (safe stop, keep reserved; `exit_house` alias), `compat_check`, presets/settings tools. Exit-code-3 needs_input (Tailnet) is returned as a tool error with structured `needs_input` / `prompt` / `options` / `resume_hint` (`--tailnet`) so the agent can resume.
+MCP tools (all map to CLI subcommands): `allocate`, `activate`, `start`, `stop`, `release`, `status`, `portskill_path`, `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults` (activate), `deactivate` (safe stop, keep reserved; `exit_house` alias), `compat_check`, presets/settings tools. `portskill_path` (`mode` start|stop|release|restart|status) orchestrates the happy path and returns `{ran, skipped, result, needs_input?}`; skips are inspectable; fine primitives stay callable. Exit-code-3 needs_input (Tailnet) is returned as a tool error with structured `needs_input` / `prompt` / `options` / `resume_hint` so the agent can resume.
 
 Thin wrappers `app.py` / `serve_ui.py` / `port_registry.py` remain for transition; prefer `portskill` / `python3 -m port_registry_app` and `portskill-cli` (legacy: `port-registry`).
 
@@ -157,6 +157,14 @@ Inspect the current registry state. Use this to answer which ports are allocated
 Key flags:
 
 - `--project PATH`: Show ranges for one project directory. Omit to show every project's ranges.
+
+### `path` / `portskill_path`
+
+Skip-aware happy-path orchestrator (MCP `portskill_path`, CLI `path --mode …`). Modes: `start` | `stop` | `release` | `restart` | `status`.
+
+`start` phases (server-side): allocate → wire (defaults/commands if needed) → activate → start → optional Tailnet Serve of **user** service ports. Never Funnels the Portskill listen port. Returns `{ran, skipped, result, needs_input?}`. Skips are deterministic (already reserved/active/running, Tailnet not requested / not logged in, Funnel-of-listen). Fine primitives stay callable. `settings.mcp_tools.portskill_path` can hide the tool.
+
+If Tailnet Serve is requested and login is required, the path completes earlier phases, skips Tailnet, and exits 3 with `needs_input` so you can resume after `tailscale login`.
 
 ### `doctor`
 

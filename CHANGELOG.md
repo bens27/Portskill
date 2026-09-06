@@ -10,6 +10,7 @@
 - Personal Mac `.app` path is keepalive + `build-app.sh` only. `scripts/install-mac.sh` and `scripts/notarize-mac.sh` removed from the product surface. Remotes/ASC remain HOLD.
 
 ### Added
+- MCP tool `portskill_path` (CLI `path` / `portskill-path`) with `mode` start|stop|release|restart|status. Happy-path `start` is allocate → wire → activate → start → optional Tailnet Serve of **user** service ports. Returns `{ran, skipped, result, needs_input?}`. Skip predicates are deterministic Python rules. Fine primitives stay callable. `mcp_tools` can hide the path tool. Never Funnels Portskill listen. Lean `mcp_tools` preset is not in this cut. Remotes/ASC HOLD. Passkey not in this cut.
 - Write-a-Handoff skill file control in Session Handoff: download the bundled skill, upload a replacement, persist `settings.handoff_skill` under `~/.config/port-registry/`. Reload keeps the choice. Stdio MCP is unchanged.
 
 ### Security

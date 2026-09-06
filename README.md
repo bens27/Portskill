@@ -149,7 +149,7 @@ See **[SECURITY.md](SECURITY.md)** for reporting and trust boundaries.
 
 **HTTP MCP (local-trust only):** same loopback listener as the UI — no bearer required on the personal listen path. Prefer stdio for agent install. If dogfooding HTTP: run the app, then `POST` JSON-RPC to the `mcp_url` from `listen.json` (also `GET /mcp` discovery). Do not Funnel the listen port; Tailscale is not authentication.
 
-Tools: `allocate`, `activate`, `start`, `stop`, `release`, `status`, `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults`, `deactivate`, `compat_check`, `preset_save`, `preset_list`, `preset_apply`, `preset_delete`, `settings_get`, `settings_set`. (`exit_house` remains as a deactivate alias.)
+Tools: `allocate`, `activate`, `start`, `stop`, `release`, `status`, `portskill_path`, `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults`, `deactivate`, `compat_check`, `preset_save`, `preset_list`, `preset_apply`, `preset_delete`, `settings_get`, `settings_set`. (`exit_house` remains as a deactivate alias.) `portskill_path` is the skip-aware happy-path orchestrator (`mode` start|stop|release|restart|status); fine primitives stay callable and `mcp_tools` can hide the path tool.
 
 Session Handoff (vendored kit, default on in `tools/list`): flat names `handoff_status`, `handoff_skill`, `handoff_template`, `handoff_list`, `handoff_resolve`, `handoff_new_path`, `handoff_resume`, `handoff_supersede`, `handoff_install_help` — not nested `session-handoff/*`. Ledger writes go only through `vendor/session-handoff-kit/codex/hooks/handoff_ledger.py`.
 
@@ -164,6 +164,8 @@ Wrappers set `PYTHONPATH` (`./scripts/cli.sh`, `./scripts/doctor.sh`). After `pi
 ./scripts/cli.sh start --range-id <id> --project . --tailnet none
 ./scripts/cli.sh stop --range-id <id> --project .
 ./scripts/cli.sh release --range-id <id> --project .
+./scripts/cli.sh path --mode start --project . --command 'sleep 60'
+./scripts/cli.sh path --mode status --project .
 
 ./scripts/cli.sh set-default --range-id <id> --state on --project .
 ./scripts/cli.sh apply-defaults
