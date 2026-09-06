@@ -170,6 +170,9 @@ _replace_app_bundle_unlocked() {
   local src="$1"
   local dest="$2"
   local dest_dir dest_base stage leftover
+  if [[ -n "${PORTSKILL_TEST_LOCK_LOG:-}" ]]; then
+    echo "${PORTSKILL_TEST_LOCK_TAG:-x}-in" >> "${PORTSKILL_TEST_LOCK_LOG}"
+  fi
   if [[ ! -d "${src}" ]]; then
     echo "replace_app_bundle: missing source ${src}" >&2
     return 1
@@ -221,6 +224,9 @@ _replace_app_bundle_unlocked() {
       return 1
     fi
   done
+  if [[ -n "${PORTSKILL_TEST_LOCK_LOG:-}" ]]; then
+    echo "${PORTSKILL_TEST_LOCK_TAG:-x}-out" >> "${PORTSKILL_TEST_LOCK_LOG}"
+  fi
 }
 
 replace_app_bundle() {

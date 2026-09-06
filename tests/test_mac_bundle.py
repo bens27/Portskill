@@ -281,20 +281,21 @@ test "$(cat "{dest}/Contents/MacOS/Portskill")" = "new-bin"
             order = tmp_path / "order.log"
             env = os.environ.copy()
             env["PORTSKILL_INSTALL_LOCK"] = str(lock)
-            env["PORTSKILL_TEST_REPLACE_SLEEP"] = "0.5"
+            env["PORTSKILL_TEST_REPLACE_SLEEP"] = "0.4"
+            env["PORTSKILL_TEST_LOCK_LOG"] = str(order)
 
             def _launch(src: pathlib.Path, tag: str) -> subprocess.Popen[str]:
+                run_env = env.copy()
+                run_env["PORTSKILL_TEST_LOCK_TAG"] = tag
                 script = f"""
 set -euo pipefail
 . "{HELPER}"
-echo "{tag}-in" >> "{order}"
 replace_app_bundle "{src}" "{dest}"
-echo "{tag}-out" >> "{order}"
 """
                 return subprocess.Popen(
                     ["bash", "-c", script],
                     cwd=str(ROOT),
-                    env=env,
+                    env=run_env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
@@ -309,9 +310,12 @@ echo "{tag}-out" >> "{order}"
             self.assertEqual(b.returncode, 0, out_b[1] or out_b[0])
             lines = order.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(lines), 4, lines)
-            # Exclusive lock: one critical section finishes before the other starts.
-            first, second = lines[0][0], lines[2][0]
-            self.assertEqual(lines, [f"{first}-in", f"{first}-out", f"{second}-in", f"{second}-out"])
+            # Exclusive lock: in/out are written inside replace (already holding flock).
+            first, second = lines[0].split("-", 1)[0], lines[2].split("-", 1)[0]
+            self.assertEqual(
+                lines,
+                [f"{first}-in", f"{first}-out", f"{second}-in", f"{second}-out"],
+            )
             self.assertFalse(any(dest.glob(".*.new.*")))
             self.assertFalse((dest / "Portskill.app").exists())
             self.assertIn(
@@ -345,8 +349,10 @@ with_install_lock bash -c 'echo {tag}-in >> "{order}"; sleep {sleep_s}; echo {ta
             a = _launch("A", "0.4")
             time.sleep(0.08)
             b = _launch("B", "0")
-            self.assertEqual(a.wait(timeout=10), 0)
-            self.assertEqual(b.wait(timeout=10), 0)
+            out_a = a.communicate(timeout=10)
+            out_b = b.communicate(timeout=10)
+            self.assertEqual(a.returncode, 0, out_a[1] or out_a[0])
+            self.assertEqual(b.returncode, 0, out_b[1] or out_b[0])
             lines = order.read_text(encoding="utf-8").splitlines()
             self.assertEqual(lines, ["A-in", "A-out", "B-in", "B-out"])
 
