@@ -24,7 +24,7 @@
 - README rewritten for developers: clone then ./scripts/run.sh; removed Mac-friends cold path, installer-first narrative, and notarization-as-distribution sections.
 - PLAYBOOK.md retired (friend-share / installer path unsupported).
 - SECURITY.md: no signed/notarized distribution claim; personal packaging is keepalive + `build-app.sh`; ASC/notarize HOLD.
-- HTTP `http-auth` CLI / `http_auth.json` documented as optional helpers (not a default UI/API gate). Opt-in passkey gate documented (default off). Human-written README preamble left verbatim.
+- HTTP `http-auth` CLI / `http_auth.json` documented as optional helpers (not a default UI/API gate). Opt-in passkey gate documented (default off). Public copy no longer ranks stdio over the HTML UI / HTTP MCP or uses “dogfood”. Human-written README preamble left verbatim.
 
 All notable changes to **Portskill** are documented here.
 
