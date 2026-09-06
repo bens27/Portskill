@@ -326,6 +326,7 @@ def default_settings():
         "open_environment_tabs": [],
         "focused_environment": None,
         "mcp_tools": {},  # tool_name -> bool; missing key = enabled
+        "mcp_tools_profile": "full",  # named preset: full|lean; apply writes mcp_tools
         "mcp_user_commands": {},  # name -> {name, description, steps[{tool,arguments,mode}]}
         "serve_portskill_on_tailscale": True,  # default ON — Serve Portskill listen port (never Funnel)
         "handoff_enabled": False,  # Session Handoff section opt-in
@@ -407,6 +408,12 @@ def normalize_settings(settings):
             else:
                 mcp_tools[name] = bool(val)
     normalized["mcp_tools"] = mcp_tools
+    # Named mcp_tools profile (full|lean). Default full; lean is opt-in apply only.
+    raw_profile = settings.get("mcp_tools_profile", "full")
+    if isinstance(raw_profile, str) and raw_profile.strip().lower() in ("full", "lean"):
+        normalized["mcp_tools_profile"] = raw_profile.strip().lower()
+    else:
+        normalized["mcp_tools_profile"] = "full"
     # Optional preference: Tailscale Serve the Portskill UI/MCP listen port (not Funnel).
     serve_ps = settings.get("serve_portskill_on_tailscale", True)
     if isinstance(serve_ps, bool):
@@ -3947,6 +3954,18 @@ def cmd_settings_set(args):
             if settings.get("focused_environment") == name:
                 settings["focused_environment"] = tabs[-1] if tabs else None
             changed = True
+        # Named mcp_tools profile: --mcp-tools-profile full|lean (writes settings.mcp_tools)
+        if getattr(args, "mcp_tools_profile", None) is not None:
+            token = str(args.mcp_tools_profile).strip().lower()
+            if token not in ("full", "lean"):
+                fail("invalid_args", "--mcp-tools-profile must be full|lean")
+            from .mcp import mcp_tools_map_for_profile  # noqa: PLC0415
+
+            settings["mcp_tools"] = mcp_tools_map_for_profile(
+                token, settings.get("mcp_tools") or {}
+            )
+            settings["mcp_tools_profile"] = token
+            changed = True
         # Per-tool MCP prefs: --mcp-tool NAME=on|off (repeatable)
         mcp_tool_args = getattr(args, "mcp_tool", None) or []
         if mcp_tool_args:
@@ -4061,7 +4080,7 @@ def cmd_settings_set(args):
         if not changed:
             fail(
                 "invalid_args",
-                "settings set requires a recognized flag (--auto-apply-preset, tabs, focus, --mcp-tool, …)",
+                "settings set requires a recognized flag (--auto-apply-preset, tabs, focus, --mcp-tool, --mcp-tools-profile, …)",
             )
         # Validate preset exists when enabling launch apply with a name
         preset_name = settings.get("auto_apply_preset")
@@ -6046,6 +6065,17 @@ def parser():
         "--mcp-tools-json",
         default=None,
         help="JSON object of MCP tool name -> bool (merged into settings.mcp_tools)",
+    )
+    settings_set.add_argument(
+        "--mcp-tools-profile",
+        choices=["full", "lean"],
+        default=None,
+        help=(
+            "Apply named MCP tools profile into settings.mcp_tools. "
+            "full = all tools enabled (empty map; default). "
+            "lean = portskill_path, status, settings_get, allocate/stop/release; "
+            "other CRUD and handoff_* stay off until toggled. Opt-in."
+        ),
     )
     settings_set.add_argument(
         "--serve-portskill-on-tailscale",

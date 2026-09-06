@@ -10,7 +10,8 @@
 - Personal Mac `.app` path is keepalive + `build-app.sh` only. `scripts/install-mac.sh` and `scripts/notarize-mac.sh` removed from the product surface. Remotes/ASC remain HOLD.
 
 ### Added
-- MCP tool `portskill_path` (CLI `path` / `portskill-path`) with `mode` start|stop|release|restart|status. Happy-path `start` is allocate → wire → activate → start → optional Tailnet Serve of **user** service ports. Returns `{ran, skipped, result, needs_input?}`. Skip predicates are deterministic Python rules. Fine primitives stay callable. `mcp_tools` can hide the path tool. Never Funnels Portskill listen. Lean `mcp_tools` preset is not in this cut. Remotes/ASC HOLD. Passkey not in this cut.
+- MCP tool `portskill_path` (CLI `path` / `portskill-path`) with `mode` start|stop|release|restart|status. Happy-path `start` is allocate → wire → activate → start → optional Tailnet Serve of **user** service ports. Returns `{ran, skipped, result, needs_input?}`. Skip predicates are deterministic Python rules. Fine primitives stay callable. `mcp_tools` can hide the path tool. Never Funnels Portskill listen. Remotes/ASC HOLD. Passkey not in this cut.
+- Named `settings.mcp_tools` profiles `lean` and `full`. Default stays `full` (empty enable map; existing installs unchanged). Opt-in `lean` enables `portskill_path`, `status`, `settings_get`, plus escape hatches `allocate` / `stop` / `release`; rarely used CRUD and flat `handoff_*` tools stay off until toggled. Apply via `settings set --mcp-tools-profile lean|full` or MCP `settings_set` `{mcp_tools_profile}`. Writes the existing `mcp_tools` map; no second store. HTML UI reorder not required.
 - Write-a-Handoff skill file control in Session Handoff: download the bundled skill, upload a replacement, persist `settings.handoff_skill` under `~/.config/port-registry/`. Reload keeps the choice. Stdio MCP is unchanged.
 
 ### Security

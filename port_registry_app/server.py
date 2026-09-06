@@ -574,6 +574,7 @@ def load_registry() -> dict:
             "auto_exit_on_shutdown": False,
             "require_compat": True,
             "mcp_tools": {},
+            "mcp_tools_profile": "full",
             "mcp_user_commands": {},
             "serve_portskill_on_tailscale": True,
             "handoff_enabled": False,
@@ -636,6 +637,11 @@ def load_registry() -> dict:
                 mcp_tools[name] = val.strip().lower() in ("1", "true", "yes", "on")
             else:
                 mcp_tools[name] = bool(val)
+    raw_profile = settings.get("mcp_tools_profile", "full")
+    if isinstance(raw_profile, str) and raw_profile.strip().lower() in ("full", "lean"):
+        mcp_tools_profile = raw_profile.strip().lower()
+    else:
+        mcp_tools_profile = "full"
     serve_ps = settings.get("serve_portskill_on_tailscale", True)
     if isinstance(serve_ps, str):
         serve_ps = serve_ps.strip().lower() in ("1", "true", "yes", "on")
@@ -665,6 +671,7 @@ def load_registry() -> dict:
         "open_environment_tabs": [t for t in tabs if isinstance(t, str) and t.strip()],
         "focused_environment": focused,
         "mcp_tools": mcp_tools,
+        "mcp_tools_profile": mcp_tools_profile,
         "mcp_user_commands": mcp_user_commands,
         "serve_portskill_on_tailscale": serve_ps,
         "handoff_enabled": handoff_enabled,
@@ -930,6 +937,7 @@ def build_view(raw: dict) -> dict:
             "openEnvironmentTabs": list(settings.get("open_environment_tabs") or []),
             "focusedEnvironment": settings.get("focused_environment"),
             "mcpTools": dict(settings.get("mcp_tools") or {}),
+            "mcpToolsProfile": settings.get("mcp_tools_profile") or "full",
             "mcpUserCommands": dict(settings.get("mcp_user_commands") or {}),
             "servePortskillOnTailscale": bool(settings.get("serve_portskill_on_tailscale")),
             "handoffEnabled": bool(settings.get("handoff_enabled")),

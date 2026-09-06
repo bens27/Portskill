@@ -109,6 +109,7 @@ class IsolatedConfig:
     def write_registry(self, data: dict[str, Any] | None = None) -> pathlib.Path:
         settings = {
             "mcp_tools": {},
+            "mcp_tools_profile": "full",
             "mcp_user_commands": {},
             "require_compat": True,
         }

@@ -47,6 +47,13 @@ python3 -m port_registry_app --mcp-stdio
 
 MCP tools (all map to CLI subcommands): `allocate`, `activate`, `start`, `stop`, `release`, `status`, `portskill_path`, `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults` (activate), `deactivate` (safe stop, keep reserved; `exit_house` alias), `compat_check`, presets/settings tools. `portskill_path` (`mode` start|stop|release|restart|status) orchestrates the happy path and returns `{ran, skipped, result, needs_input?}`; skips are inspectable; fine primitives stay callable. Exit-code-3 needs_input (Tailnet) is returned as a tool error with structured `needs_input` / `prompt` / `options` / `resume_hint` so the agent can resume.
 
+Named `settings.mcp_tools` profiles (stored as `settings.mcp_tools_profile`, applied into the existing `settings.mcp_tools` enable map; missing key = enabled):
+
+- **`full`** (default) — every system tool and `handoff_*` tool is listed. Existing installs stay here until you opt in.
+- **`lean`** — enables `portskill_path`, `status`, `settings_get`, plus escape hatches `allocate` / `stop` / `release`. Rarely used CRUD (`activate`, `start`, `doctor`, environment/preset/history/ports/tailscale helpers, `settings_set`, …) and flat `handoff_*` tools stay off until toggled (`settings set --mcp-tool NAME=on`).
+
+Switch: `settings set --mcp-tools-profile lean|full` (CLI) or MCP `settings_set` with `mcp_tools_profile`. After `lean`, `settings_set` itself is hidden until you re-enable it or apply `full` from the CLI. Individual `--mcp-tool` / HTML toggles still work; no UI reorder required.
+
 Thin wrappers `app.py` / `serve_ui.py` / `port_registry.py` remain for transition; prefer `portskill` / `python3 -m port_registry_app` and `portskill-cli` (legacy: `port-registry`).
 
 For a static sample only (no live registry):
@@ -84,7 +91,7 @@ Each project may also have a local mirror:
 
 Treat the global registry as the source of truth. Treat the local mirror as a convenience file for project context, status checks, and handoff between agent sessions.
 
-Additive root keys (normalize if missing; never wipe `projects`): `presets` (named environments) and `settings` (`auto_apply_preset`, `auto_apply_on_launch`, optional `auto_exit_on_shutdown`).
+Additive root keys (normalize if missing; never wipe `projects`): `presets` (named environments) and `settings` (`auto_apply_preset`, `auto_apply_on_launch`, optional `auto_exit_on_shutdown`, `mcp_tools`, `mcp_tools_profile`).
 
 ## CLI Commands
 
@@ -210,8 +217,9 @@ Per focused environment, Portskill keeps an undo stack (`registry.environment_hi
 - `preset save --name NAME [--description TEXT] [--project PATH]... [--from-file PATH]` — snapshot live non-released ranges (or load from environment file) into `registry.presets[NAME]`.
 - `preset list` / `preset show --name NAME` / `preset delete --name NAME`
 - `preset apply --name NAME [--also-stop-off]` — import preset services into live ranges + apply-defaults.
-- `settings get` — read auto-apply (and related) settings.
+- `settings get` — read auto-apply (and related) settings, including `mcp_tools` and `mcp_tools_profile`.
 - `settings set --auto-apply-preset NAME|none` / `--auto-apply-on-launch on|off` / shortcut `--auto-apply NAME|off`.
+- `settings set --mcp-tools-profile lean|full` — apply the named MCP tools profile into `settings.mcp_tools` (opt-in; default remains `full`). `--mcp-tool NAME=on|off` still toggles one tool after a profile apply.
 - App launch auto-applies when enabled; `--no-auto-apply` skips once. Placeholder start failures are warnings — the server keeps running.
 
 Sample: `examples/environments/ui-work.sample.json`.
