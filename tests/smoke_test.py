@@ -55,6 +55,7 @@ def main() -> int:
             environment_rail_html,
             presets_panel_html,
             render_page,
+            services_panel_html,
             settings_panel_html,
         )
     except Exception as exc:  # pragma: no cover
@@ -68,6 +69,7 @@ def main() -> int:
         ("environment_rail_html", environment_rail_html(view)),
         ("presets_panel_html", presets_panel_html(view)),
         ("settings_panel_html", settings_panel_html(view)),
+        ("services_panel_html", services_panel_html('<div class="empty">none</div>', 0)),
     ):
         if "Coming soon" in blob:
             fail(f"{name} still contains 'Coming soon'")
@@ -104,6 +106,20 @@ def main() -> int:
         fail("collapsed project summaries missing registered/active/Tailnet counts")
     if "Session Handoff" not in html or 'id="pr-handoff-details"' not in html:
         fail("Session Handoff section missing from rendered UI")
+    if 'class="panel pr-panel pr-handoff"' in html or "pr-mcp-system-details pr-handoff-details" in html:
+        fail("Session Handoff still uses the old panel / system-tools wrapper")
+    if "pr-subpanel pr-handoff" not in html and "pr-handoff pr-handoff-details" not in html:
+        fail("Session Handoff is not styled like Settings (pr-subpanel)")
+    if 'id="pr-services"' not in html or "<summary>Services" not in html:
+        fail("SERVICES section header missing from rendered UI")
+    if "pr-section-stack" not in html:
+        fail("stacked section gap wrapper missing")
+    if html.find('id="pr-settings"') < 0 or html.find('id="pr-services"') < html.find('id="pr-settings"'):
+        fail("SERVICES should follow SETTINGS in the main panel")
+    if ".pr-services-body{padding:0" not in html or "border-radius:0" not in html:
+        fail("SERVICES rows are not full-bleed (padding/radius still inset)")
+    if "padding:5px 10px;line-height:1.25" not in html:
+        fail("SERVICES rows are not denser")
     if "Coming soon" in html.split("Session Handoff", 1)[-1][:800]:
         fail("Session Handoff section advertises Coming soon")
     if "Add / manage" not in html or 'data-pr-action="handoff-copy"' not in html:
