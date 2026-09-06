@@ -8,6 +8,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PACKAGE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=mac-bundle.sh
+. "${SCRIPT_DIR}/mac-bundle.sh"
 DIST_APP="${PACKAGE_ROOT}/dist/Portskill.app"
 DIST_DIR="${PACKAGE_ROOT}/dist"
 MAKE_DMG=0
@@ -167,6 +169,7 @@ IDENTITY="$(detect_identity)" || exit 1
 echo "== Codesign =="
 echo "App:      ${DIST_APP}"
 echo "Identity: ${IDENTITY}"
+strip_finder_junk "${DIST_APP}"
 
 ENTITLEMENTS="$(mktemp "${TMPDIR:-/tmp}/portskill-entitlements.XXXXXX.plist")"
 trap 'rm -f "${ENTITLEMENTS}"' EXIT

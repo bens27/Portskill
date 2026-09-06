@@ -100,6 +100,7 @@ def main() -> int:
         "scripts/install-mac.sh",
         "scripts/notarize-mac.sh",
         "scripts/build-app.sh",
+        "scripts/mac-bundle.sh",
         "scripts/smoke_test.sh",
         "scripts/doctor.sh",
         "scripts/cli.sh",

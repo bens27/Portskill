@@ -8,6 +8,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versioning f
 
 ### Changed
 
+- Mac rebuild replace no longer races `rm -rf` + `cp -R` (`cp: File exists`). `install-mac.sh` / `build-app.sh` stage then `mv -f` after a verified wipe. Finder junk (`.DS_Store`, `._*`) is stripped before codesign so ad-hoc signing does not warn about an unsealed bundle root.
 - Friend UI no longer renders **Coming soon** chrome for Workspaces, Remote machines, or Presets. One implicit workspace; Export/Import Workspace and locked `require_compat` stay.
 - Primary Mac cold path is `scripts/install-mac.sh` (build or reuse `dist/`, copy to Applications, strip quarantine). Git/module launch is secondary.
 - Cold-path smoke/doctor no longer require remembering `PYTHONPATH=.` — use `./scripts/smoke_test.sh` and `./scripts/doctor.sh` only.
