@@ -36,7 +36,11 @@ class DoctorContractTests(unittest.TestCase):
         self.assertIn("version", names)
         self.assertIn("bind_host", names)
         self.assertIn("handoff_kit", names)
+        self.assertIn("http_auth", names)
         self.assertTrue(payload.get("loopback"))
+        self.assertIsInstance(payload.get("http_auth"), dict)
+        self.assertIn("configured", payload.get("http_auth") or {})
+        self.assertNotIn("token", payload.get("http_auth") or {})
         self.assertIsNone(payload.get("message"))
         hk = payload.get("handoff_kit") or {}
         self.assertTrue(hk.get("present"), hk)
@@ -261,6 +265,7 @@ class DoctorContractTests(unittest.TestCase):
         self.assertNotIn("start_script", DOCTOR_HARD_CHECKS)
         self.assertNotIn("default_state", DOCTOR_HARD_CHECKS)
         self.assertNotIn("version", DOCTOR_HARD_CHECKS)
+        self.assertNotIn("http_auth", DOCTOR_HARD_CHECKS)
 
 
 if __name__ == "__main__":
