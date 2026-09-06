@@ -15,10 +15,6 @@ Portskill is a port registry tool, with some bells and whistles:
 
 - Additional skill included: Session Handoff. A hook views the session's context window after each turn. At a determined value (preset to 130,000 tokens), the session automatically creates a handoff document, and writes its "Open" status to a ledger. At that point, just /clear your session and ask your agent to retrieve its handoff. Keeps your agent out of the stupid zone.
 
-Coming soon:
-- Multiple workspaces - choose services you generally run for one 'mode' in your life, like UI Work Mode, Travel Advice mode, etc.
-- 
-
 *End of human-written pre-amble*
 
 
