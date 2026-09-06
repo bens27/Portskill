@@ -18,6 +18,8 @@ _ISOLATE_KEYS = (
     "PORT_REGISTRY_PATH",
     "PORTSKILL_LISTEN_PATH",
     "PORTSKILL_HTTP_AUTH_PATH",
+    "PORTSKILL_HTTP_PASSKEY_PATH",
+    "PORTSKILL_HTTP_SESSIONS_PATH",
     "HOME",
     "XDG_CONFIG_HOME",
     "PORTSKILL_HANDOFF_KIT",
@@ -55,6 +57,8 @@ class IsolatedConfig:
         os.environ["XDG_CONFIG_HOME"] = str(self.xdg_config)
         os.environ.pop("PORTSKILL_HANDOFF_KIT", None)
         os.environ.pop("PORTSKILL_HTTP_AUTH_PATH", None)
+        os.environ.pop("PORTSKILL_HTTP_PASSKEY_PATH", None)
+        os.environ.pop("PORTSKILL_HTTP_SESSIONS_PATH", None)
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -77,6 +81,8 @@ class IsolatedConfig:
         )
         env.pop("PORTSKILL_HANDOFF_KIT", None)
         env.pop("PORTSKILL_HTTP_AUTH_PATH", None)
+        env.pop("PORTSKILL_HTTP_PASSKEY_PATH", None)
+        env.pop("PORTSKILL_HTTP_SESSIONS_PATH", None)
         if extra:
             env.update(extra)
         return env

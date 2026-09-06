@@ -123,7 +123,7 @@ Doctor is **read-only and idempotent** — running it twice does not create, rew
 See **[SECURITY.md](SECURITY.md)** for reporting and trust boundaries.
 
 - Default bind is `127.0.0.1`.
-- Local HTTP UI and ordinary HTTP APIs (`GET /`, `GET /api/state`, UI `/api/*`, `/port-registry/actions`, `GET /mcp`, `POST /mcp`) open without `Authorization: Bearer`. `http-auth` / `http_auth.json` are optional helpers and do not gate this listen path. Stdio MCP does **not** use a token.
+- Local HTTP UI and ordinary HTTP APIs (`GET /`, `GET /api/state`, UI `/api/*`, `/port-registry/actions`, `GET /mcp`, `POST /mcp`) open without `Authorization: Bearer` unless the **opt-in** passkey gate is enabled. Default is **off** (same open personal listen as after #14). When on, those routes need a short-lived httpOnly passkey session **or** the optional bearer. `http-auth` / `http_auth.json` remain optional helpers. Stdio MCP does **not** use a token or passkey.
 - `--host` other than `127.0.0.1` / `::1` / `localhost` is **refused at start** unless you pass `--allow-non-loopback` (documented footgun; no allowlist). The UI banner/chip stays and `doctor` warns. Without the flag, `doctor` fails closed (exit 2) if `listen.json` still shows a non-loopback host.
 - Prefer **stdio MCP** for agents (`--mcp-stdio` / `examples/mcp.stdio.json`). HTTP MCP is **local-trust dogfood only**. Tailscale Serve/Funnel is **not** authentication.
 - Funnel of the Portskill listen/UI/MCP port is **refused in code**. Funnel on *user* claimed service ports stays a deliberate user action.
@@ -147,7 +147,7 @@ See **[SECURITY.md](SECURITY.md)** for reporting and trust boundaries.
 }
 ```
 
-**HTTP MCP (local-trust only):** same loopback listener as the UI — no bearer required on the personal listen path. Prefer stdio for agent install. If dogfooding HTTP: run the app, then `POST` JSON-RPC to the `mcp_url` from `listen.json` (also `GET /mcp` discovery). Do not Funnel the listen port; Tailscale is not authentication.
+**HTTP MCP (local-trust only):** same loopback listener as the UI — open on the personal listen path unless the opt-in passkey gate is on. Prefer stdio for agent install. If dogfooding HTTP: run the app, then `POST` JSON-RPC to the `mcp_url` from `listen.json` (also `GET /mcp` discovery). Do not Funnel the listen port; Tailscale is not authentication.
 
 Tools: `allocate`, `activate`, `start`, `stop`, `release`, `status`, `portskill_path`, `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults`, `deactivate`, `compat_check`, `preset_save`, `preset_list`, `preset_apply`, `preset_delete`, `settings_get`, `settings_set`. (`exit_house` remains as a deactivate alias.) `portskill_path` is the skip-aware happy-path orchestrator (`mode` start|stop|release|restart|status); fine primitives stay callable and `mcp_tools` can hide the path tool.
 
@@ -180,22 +180,31 @@ Wrappers set `PYTHONPATH` (`./scripts/cli.sh`, `./scripts/doctor.sh`). After `pi
 ./scripts/cli.sh settings set --mcp-tools-profile full
 ./scripts/cli.sh http-auth show
 ./scripts/cli.sh http-auth regenerate
+./scripts/cli.sh http-auth gate show
+./scripts/cli.sh http-auth gate on
+./scripts/cli.sh http-auth passkeys
 ```
 
-## HTTP bearer auth (optional helper)
+## HTTP auth (optional helper + opt-in passkey gate)
 
-Local high-entropy token at `~/.config/port-registry/http_auth.json` (minted on first HTTP serve or `http-auth show`). Optional plumbing for a later passkey cut — it does **not** gate `GET /` or ordinary UI/API/MCP HTTP routes.
+Local high-entropy token at `~/.config/port-registry/http_auth.json` (minted on first HTTP serve or `http-auth show`). It does **not** gate `GET /` or ordinary UI/API/MCP HTTP routes by default.
+
+An **opt-in** WebAuthn/passkey gate (default **off**) can lock the personal HTTP UI and mutating APIs. Credentials live in `~/.config/port-registry/http_passkey.json` (not `registry.json`). After a successful assertion the server sets a short-lived **httpOnly** session cookie; logout clears it. When the gate is on, a valid bearer still works (`Authorization: Bearer` **or** passkey session).
 
 ```bash
-./scripts/cli.sh http-auth show         # prints the token
+./scripts/cli.sh http-auth show         # prints the optional bearer
 ./scripts/cli.sh http-auth regenerate   # invalidates the previous token
+./scripts/cli.sh http-auth gate show    # default off
+./scripts/cli.sh http-auth gate on      # opt-in; fails closed without session/bearer
+./scripts/cli.sh http-auth passkeys     # list local operator credentials
 ./scripts/doctor.sh                    # reports configured (token present) without printing the secret
 ```
 
-- Default personal listen path: no `Authorization: Bearer` required
+- Default personal listen path: no `Authorization: Bearer` and no passkey required
+- Settings → HTTP auth: enable the gate and register/manage passkeys
 - Optional helper endpoints (`/api/http-auth`, regenerate) still check a bearer if you use them
-- Stdio MCP (`--mcp-stdio`) is unchanged and does not read this token
-- Passkey / OAuth is not in this cut
+- Stdio MCP (`--mcp-stdio`) is unchanged and does not read this token or a passkey
+- OAuth / SSO / multi-user is not in this cut
 
 ## Keep-alive (macOS, optional)
 

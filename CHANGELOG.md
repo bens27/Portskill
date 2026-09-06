@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Optional WebAuthn/passkey HTTP gate (default **off**). When on, the personal listen UI and mutating HTTP APIs accept a short-lived httpOnly passkey session cookie **or** the optional bearer. Register/authenticate are stdlib-only (no new pip runtime dependency). Operator credentials live in `~/.config/port-registry/http_passkey.json`, not `registry.json`. Settings UI can enable the gate and register/manage passkeys. CLI: `http-auth gate on|off` and `http-auth passkeys`.
+
 ### Changed
 - Local HTTP UI and ordinary HTTP APIs on the personal listen path no longer require `Authorization: Bearer`. `GET /` serves the registry UI (no login wall). Funnel of Portskill’s own listen port remains refused. Stdio MCP is unchanged. `http-auth` CLI / `http_auth.json` remain optional helpers and do not gate default UI routes.
 - MCP Tools panel order is System tools → Agent connection (each setup instruction is a start-collapsed disclosure) → User commands → Command composer.
@@ -15,13 +18,13 @@
 - Write-a-Handoff skill file control in Session Handoff: download the bundled skill, upload a replacement, persist `settings.handoff_skill` under `~/.config/port-registry/`. Reload keeps the choice. Stdio MCP is unchanged.
 
 ### Security
-- Local HTTP UI and APIs on the personal listen path are open without a bearer token. Funnel of Portskill’s own listen/UI/MCP port is refused. Tailscale is not HTTP authentication. `http-auth` / `http_auth.json` remain optional helpers (not a default gate). Passkeys/OAuth are not in this cut.
+- Local HTTP UI and APIs on the personal listen path are open without a bearer token unless the **opt-in** passkey gate is enabled. Funnel of Portskill’s own listen/UI/MCP port is refused. Tailscale is not HTTP authentication. `http-auth` / `http_auth.json` remain optional helpers (not a default gate). Passkeys are opt-in only; OAuth/SSO/multi-user are not in this cut.
 
 ### Docs
 - README rewritten for developers: clone then ./scripts/run.sh; removed Mac-friends cold path, installer-first narrative, and notarization-as-distribution sections.
 - PLAYBOOK.md retired (friend-share / installer path unsupported).
 - SECURITY.md: no signed/notarized distribution claim; personal packaging is keepalive + `build-app.sh`; ASC/notarize HOLD.
-- HTTP `http-auth` CLI / `http_auth.json` documented as optional helpers (not a default UI/API gate). Human-written README preamble left verbatim.
+- HTTP `http-auth` CLI / `http_auth.json` documented as optional helpers (not a default UI/API gate). Opt-in passkey gate documented (default off). Human-written README preamble left verbatim.
 
 All notable changes to **Portskill** are documented here.
 

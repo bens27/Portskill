@@ -29,6 +29,7 @@ DEFAULT_REGISTRY_PATH = "~/.config/port-registry/registry.json"
 LISTEN_FILENAME = "listen.json"
 HTTP_AUTH_FILENAME = "http_auth.json"
 HTTP_AUTH_COOKIE_NAME = "portskill_http"
+HTTP_SESSION_COOKIE_NAME = "portskill_session"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 # Doctor exit contract (main): 0 = healthy / informational warnings; 2 = fail-closed.
 # Hard checks only; informational checks never flip the exit code.
@@ -181,10 +182,16 @@ def http_auth_configured():
 
 def http_auth_public_status():
     """Doctor/UI-safe: path + configured. Never includes the secret."""
+    from .webauthn import passkey_public_status
+
+    pk = passkey_public_status()
     return {
         "configured": http_auth_configured(),
         "present": http_auth_configured(),
         "path": str(http_auth_path()),
+        "passkey_gate": bool(pk.get("gate")),
+        "passkey_credentials": int(pk.get("count") or 0),
+        "passkey_path": pk.get("path"),
     }
 
 
@@ -4983,7 +4990,16 @@ def cmd_workspace(args):
 
 
 def cmd_http_auth(args):
-    """Show or regenerate the local HTTP bearer token (never used by stdio MCP)."""
+    """Show/regenerate optional bearer, or toggle the opt-in passkey gate."""
+    from .webauthn import (
+        delete_passkey_credential,
+        http_passkey_gate_enabled,
+        list_passkey_credentials,
+        passkey_path,
+        passkey_public_status,
+        set_http_passkey_gate,
+    )
+
     sub = getattr(args, "http_auth_command", None)
     path = str(http_auth_path())
     if sub == "show":
@@ -4997,6 +5013,8 @@ def cmd_http_auth(args):
             "minted": bool(minted),
             "created_at": payload.get("created_at"),
             "updated_at": payload.get("updated_at"),
+            "passkey_gate": http_passkey_gate_enabled(),
+            "passkey_credentials": len(list_passkey_credentials()),
         })
         return
     if sub == "regenerate":
@@ -5010,10 +5028,45 @@ def cmd_http_auth(args):
             "regenerated": True,
             "created_at": payload.get("created_at"),
             "updated_at": payload.get("updated_at"),
+            "passkey_gate": http_passkey_gate_enabled(),
             "message": "Previous HTTP bearer token is invalidated.",
         })
         return
-    fail("invalid_args", "http-auth requires show|regenerate")
+    if sub == "gate":
+        mode = getattr(args, "gate_mode", None)
+        if mode in ("on", "off"):
+            set_http_passkey_gate(mode == "on")
+        pk = passkey_public_status()
+        emit({
+            "status": "ok",
+            "passkey_gate": bool(pk.get("gate")),
+            "passkey_credentials": int(pk.get("count") or 0),
+            "path": str(passkey_path()),
+            "default": "off",
+            "message": (
+                "Passkey HTTP gate is ON — UI/mutating APIs need a passkey session or bearer."
+                if pk.get("gate")
+                else "Passkey HTTP gate is OFF — personal listen UI/API stay open (post-#14)."
+            ),
+        })
+        return
+    if sub == "passkeys":
+        action = getattr(args, "passkeys_action", None) or "list"
+        if action == "delete":
+            cred_id = getattr(args, "credential_id", None)
+            if not isinstance(cred_id, str) or not cred_id.strip():
+                fail("invalid_args", "http-auth passkeys delete requires --id")
+            deleted = delete_passkey_credential(cred_id.strip())
+            emit({
+                "status": "ok",
+                "deleted": bool(deleted),
+                "id": cred_id.strip(),
+                **passkey_public_status(),
+            })
+            return
+        emit({"status": "ok", **passkey_public_status()})
+        return
+    fail("invalid_args", "http-auth requires show|regenerate|gate|passkeys")
 
 
 def cmd_tailscale(args):
@@ -5129,11 +5182,16 @@ def cmd_doctor(args):
             checks.append({"name": "listen", "ok": False, "detail": f"unreadable: {listen_file}: {exc}"})
 
     auth_status = http_auth_public_status()
+    gate = "on" if auth_status.get("passkey_gate") else "off"
+    cred_n = int(auth_status.get("passkey_credentials") or 0)
     if auth_status.get("configured"):
         checks.append({
             "name": "http_auth",
             "ok": True,
-            "detail": f"configured (token present) at {auth_status.get('path')}",
+            "detail": (
+                f"configured (token present) at {auth_status.get('path')}; "
+                f"passkey_gate={gate} credentials={cred_n}"
+            ),
         })
     else:
         checks.append({
@@ -5141,7 +5199,8 @@ def cmd_doctor(args):
             "ok": True,  # informational — minted on first HTTP serve; doctor never writes
             "detail": (
                 f"absent: {auth_status.get('path')} "
-                "(minted on first HTTP serve; doctor never writes this file)"
+                "(minted on first HTTP serve; doctor never writes this file); "
+                f"passkey_gate={gate} credentials={cred_n}"
             ),
         })
 
@@ -5827,7 +5886,7 @@ def parser():
 
     http_auth = subparsers.add_parser(
         "http-auth",
-        help="Optional helper: show or regenerate local HTTP token (does not gate UI)",
+        help="Optional helper: bearer token + opt-in passkey gate (default off)",
     )
     http_auth_sub = http_auth.add_subparsers(dest="http_auth_command", required=True)
     http_auth_show = http_auth_sub.add_parser(
@@ -5840,6 +5899,30 @@ def parser():
         help="Mint a new HTTP bearer token and invalidate the old one",
     )
     http_auth_regen.set_defaults(func=cmd_http_auth)
+    http_auth_gate = http_auth_sub.add_parser(
+        "gate",
+        help="Show or set the opt-in passkey HTTP gate (default off)",
+    )
+    http_auth_gate.add_argument(
+        "gate_mode",
+        nargs="?",
+        choices=["on", "off", "show"],
+        default="show",
+        help="on|off|show (default show). Off keeps post-#14 open listen.",
+    )
+    http_auth_gate.set_defaults(func=cmd_http_auth)
+    http_auth_keys = http_auth_sub.add_parser(
+        "passkeys",
+        help="List or delete local operator passkeys (not stored in registry.json)",
+    )
+    http_auth_keys.add_argument(
+        "passkeys_action",
+        nargs="?",
+        choices=["list", "delete"],
+        default="list",
+    )
+    http_auth_keys.add_argument("--id", dest="credential_id", default=None)
+    http_auth_keys.set_defaults(func=cmd_http_auth)
 
     set_default = subparsers.add_parser("set-default")
     set_default.add_argument("--range-id", required=True)

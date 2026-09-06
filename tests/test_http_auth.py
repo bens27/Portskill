@@ -23,7 +23,15 @@ def _start_handler(host: str = "127.0.0.1") -> tuple[ThreadingHTTPServer, int]:
     return httpd, port
 
 
-def _http_json(url: str, *, method: str = "GET", token: str | None = None, body=None, timeout: float = 5):
+def _http_json(
+    url: str,
+    *,
+    method: str = "GET",
+    token: str | None = None,
+    cookie: str | None = None,
+    body=None,
+    timeout: float = 5,
+):
     data = None
     headers = {}
     if body is not None:
@@ -31,6 +39,8 @@ def _http_json(url: str, *, method: str = "GET", token: str | None = None, body=
         headers["Content-Type"] = "application/json"
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    if cookie:
+        headers["Cookie"] = cookie
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -186,6 +196,267 @@ class HttpAuthGateTests(unittest.TestCase):
         self.assertIsInstance(resp, dict)
         self.assertEqual(resp.get("id"), 7)
         self.assertIn("result", resp)
+
+
+class PasskeyGateTests(unittest.TestCase):
+    def test_gate_default_off_and_cli_toggle(self) -> None:
+        from port_registry_app.webauthn import http_passkey_gate_enabled
+
+        with IsolatedConfig() as iso:
+            self.assertFalse(http_passkey_gate_enabled())
+            shown = iso.run_cli(["http-auth", "gate", "show"])
+            self.assertEqual(shown.returncode, 0, shown.stderr)
+            payload = parse_cli_json(shown)
+            self.assertFalse(payload.get("passkey_gate"))
+            on = iso.run_cli(["http-auth", "gate", "on"])
+            self.assertEqual(on.returncode, 0, on.stderr)
+            self.assertTrue(parse_cli_json(on).get("passkey_gate"))
+            self.assertTrue(http_passkey_gate_enabled())
+            off = iso.run_cli(["http-auth", "gate", "off"])
+            self.assertEqual(off.returncode, 0, off.stderr)
+            self.assertFalse(parse_cli_json(off).get("passkey_gate"))
+            self.assertFalse(http_passkey_gate_enabled())
+
+    def test_gate_on_fails_closed_without_session_or_bearer(self) -> None:
+        from port_registry_app.webauthn import set_http_passkey_gate
+
+        with IsolatedConfig() as iso:
+            iso.write_registry({
+                "projects": {
+                    "/tmp/portskill-demo": {
+                        "ranges": [{
+                            "id": "r-demo",
+                            "start": 20001,
+                            "end": 20001,
+                            "state": "reserved",
+                            "note": "demo range",
+                            "tailnet": {"mode": "none"},
+                            "default_state": "off",
+                        }],
+                    }
+                }
+            })
+            set_http_passkey_gate(True)
+            httpd, port = _start_handler()
+            try:
+                init = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "passkey-gate-test", "version": "0"},
+                    },
+                }
+                code, payload = _http_json(f"http://127.0.0.1:{port}/mcp", method="POST", body=init)
+                self.assertEqual(code, 401)
+                self.assertEqual((payload or {}).get("error"), "unauthorized")
+
+                code, payload = _http_json(f"http://127.0.0.1:{port}/api/state")
+                self.assertEqual(code, 401)
+
+                code, payload = _http_json(
+                    f"http://127.0.0.1:{port}/port-registry/actions",
+                    method="POST",
+                    body={"action": "status"},
+                )
+                self.assertEqual(code, 401)
+
+                code, payload = _http_json(f"http://127.0.0.1:{port}/health")
+                self.assertEqual(code, 200)
+                self.assertTrue((payload or {}).get("ok"))
+
+                req = urllib.request.Request(f"http://127.0.0.1:{port}/")
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    html = resp.read().decode("utf-8")
+                    self.assertEqual(int(getattr(resp, "status", None) or resp.getcode()), 200)
+                self.assertIn("Passkey required", html)
+                self.assertNotIn("r-demo", html)
+                self.assertNotIn("demo range", html)
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+
+    def test_gate_on_accepts_bearer_or_session(self) -> None:
+        from port_registry_app.cli import ensure_http_auth_token
+        from port_registry_app.webauthn import (
+            HTTP_SESSION_COOKIE_NAME,
+            mint_http_session,
+            set_http_passkey_gate,
+        )
+
+        with IsolatedConfig() as iso:
+            iso.write_registry()
+            auth, _minted = ensure_http_auth_token()
+            token = auth.get("token")
+            set_http_passkey_gate(True)
+            session = mint_http_session()
+            httpd, port = _start_handler()
+            try:
+                code, payload = _http_json(f"http://127.0.0.1:{port}/api/state")
+                self.assertEqual(code, 401)
+
+                code, payload = _http_json(
+                    f"http://127.0.0.1:{port}/api/state",
+                    token=token,
+                )
+                self.assertEqual(code, 200)
+                self.assertIsInstance(payload, dict)
+
+                cookie = f"{HTTP_SESSION_COOKIE_NAME}={session['token']}"
+                code, payload = _http_json(
+                    f"http://127.0.0.1:{port}/api/state",
+                    cookie=cookie,
+                )
+                self.assertEqual(code, 200)
+                self.assertIsInstance(payload, dict)
+
+                init = {
+                    "jsonrpc": "2.0",
+                    "id": 9,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "passkey-session-test", "version": "0"},
+                    },
+                }
+                code, payload = _http_json(
+                    f"http://127.0.0.1:{port}/mcp",
+                    method="POST",
+                    body=init,
+                    cookie=cookie,
+                )
+                self.assertEqual(code, 200)
+                self.assertIn("result", payload or {})
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+
+    def test_webauthn_register_and_assert_sets_session_cookie(self) -> None:
+        import hashlib
+
+        from port_registry_app import cbor_lite, p256
+        from port_registry_app.webauthn import (
+            HTTP_SESSION_COOKIE_NAME,
+            b64url_encode,
+            encode_der_signature,
+            set_http_passkey_gate,
+        )
+
+        with IsolatedConfig() as iso:
+            iso.write_registry()
+            httpd, port = _start_handler()
+            host = f"127.0.0.1:{port}"
+            origin = f"http://{host}"
+            rp_id = "127.0.0.1"
+            try:
+                code, opt = _http_json(
+                    f"http://{host}/api/webauthn/register/options",
+                    method="POST",
+                    body={},
+                )
+                self.assertEqual(code, 200, opt)
+                challenge = (opt or {}).get("challenge")
+                self.assertTrue(challenge)
+                priv, pub = p256.generate_keypair()
+                cred_id = b"test-cred-001"
+                x, y = pub[0].to_bytes(32, "big"), pub[1].to_bytes(32, "big")
+                cose = cbor_lite.dumps({1: 2, 3: -7, -1: 1, -2: x, -3: y})
+                flags = 0x41
+                auth = (
+                    hashlib.sha256(rp_id.encode("utf-8")).digest()
+                    + bytes([flags])
+                    + (0).to_bytes(4, "big")
+                    + (b"\x00" * 16)
+                    + len(cred_id).to_bytes(2, "big")
+                    + cred_id
+                    + cose
+                )
+                att = cbor_lite.dumps({"fmt": "none", "authData": auth, "attStmt": {}})
+                client = json.dumps({
+                    "type": "webauthn.create",
+                    "challenge": challenge,
+                    "origin": origin,
+                    "crossOrigin": False,
+                }, separators=(",", ":")).encode("utf-8")
+                body = {
+                    "id": b64url_encode(cred_id),
+                    "rawId": b64url_encode(cred_id),
+                    "clientDataJSON": b64url_encode(client),
+                    "attestationObject": b64url_encode(att),
+                    "name": "Test key",
+                }
+                code, payload = _http_json(
+                    f"http://{host}/api/webauthn/register",
+                    method="POST",
+                    body=body,
+                )
+                self.assertEqual(code, 200, payload)
+                self.assertEqual((payload or {}).get("count"), 1)
+
+                set_http_passkey_gate(True)
+                code, _closed = _http_json(f"http://{host}/api/state")
+                self.assertEqual(code, 401)
+
+                code, aopt = _http_json(
+                    f"http://{host}/api/webauthn/authenticate/options",
+                    method="POST",
+                    body={},
+                )
+                self.assertEqual(code, 200, aopt)
+                achallenge = (aopt or {}).get("challenge")
+                aclient = json.dumps({
+                    "type": "webauthn.get",
+                    "challenge": achallenge,
+                    "origin": origin,
+                    "crossOrigin": False,
+                }, separators=(",", ":")).encode("utf-8")
+                aflags = 0x01
+                aauth = (
+                    hashlib.sha256(rp_id.encode("utf-8")).digest()
+                    + bytes([aflags])
+                    + (1).to_bytes(4, "big")
+                )
+                signed = aauth + hashlib.sha256(aclient).digest()
+                r, s = p256.sign(priv, signed)
+                assertion = {
+                    "id": b64url_encode(cred_id),
+                    "rawId": b64url_encode(cred_id),
+                    "clientDataJSON": b64url_encode(aclient),
+                    "authenticatorData": b64url_encode(aauth),
+                    "signature": b64url_encode(encode_der_signature(r, s)),
+                }
+                data = json.dumps(assertion).encode("utf-8")
+                req = urllib.request.Request(
+                    f"http://{host}/api/webauthn/authenticate",
+                    data=data,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    self.assertEqual(int(getattr(resp, "status", None) or resp.getcode()), 200)
+                    set_cookie = resp.headers.get("Set-Cookie") or ""
+                    self.assertIn(HTTP_SESSION_COOKIE_NAME, set_cookie)
+                    self.assertIn("HttpOnly", set_cookie)
+                    payload = json.loads(resp.read().decode("utf-8"))
+                self.assertTrue(payload.get("ok"))
+                cookie_token = ""
+                for part in set_cookie.split(";"):
+                    name, _, value = part.strip().partition("=")
+                    if name == HTTP_SESSION_COOKIE_NAME:
+                        cookie_token = value
+                self.assertTrue(cookie_token)
+                code, state = _http_json(
+                    f"http://{host}/api/state",
+                    cookie=f"{HTTP_SESSION_COOKIE_NAME}={cookie_token}",
+                )
+                self.assertEqual(code, 200)
+                self.assertIsInstance(state, dict)
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
 
 
 class FunnelListenRefuseTests(unittest.TestCase):
