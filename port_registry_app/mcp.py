@@ -12,6 +12,21 @@ from typing import Any
 from . import __version__
 from .handoff import HANDOFF_TOOL_DEFS, HANDOFF_TOOL_NAMES, call_handoff_tool
 
+# Named settings.mcp_tools profiles. Apply writes the existing enable map
+# (missing key = enabled). Default is full so existing installs stay unchanged
+# until the user or agent opts into lean.
+MCP_TOOLS_PROFILES = ("full", "lean")
+LEAN_MCP_TOOLS_ENABLED = frozenset(
+    {
+        "portskill_path",
+        "status",
+        "settings_get",
+        "stop",
+        "release",
+        "allocate",
+    }
+)
+
 SERVER_NAME = "portskill"
 SERVER_VERSION = __version__
 PROTOCOL_VERSION = "2024-11-05"
@@ -326,15 +341,26 @@ TOOL_DEFS = [
     },
     {
         "name": "settings_get",
-        "description": "Read registry settings (auto_apply_preset, auto_apply_on_launch, auto_exit_on_shutdown, require_compat).",
+        "description": "Read registry settings (auto_apply_preset, auto_apply_on_launch, auto_exit_on_shutdown, require_compat, mcp_tools, mcp_tools_profile).",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "settings_set",
-        "description": "Update auto-apply settings. Use auto_apply as shortcut (name enables launch apply; off clears).",
+        "description": "Update auto-apply settings or apply mcp_tools_profile lean|full. Use auto_apply as shortcut (name enables launch apply; off clears).",
         "inputSchema": {
             "type": "object",
             "properties": {
+                "mcp_tools_profile": {
+                    "type": "string",
+                    "enum": ["full", "lean"],
+                    "description": (
+                        "Apply named MCP tools profile into settings.mcp_tools. "
+                        "full = all tools enabled (empty map). "
+                        "lean = portskill_path, status, settings_get, plus escape hatches "
+                        "allocate/stop/release; other CRUD and handoff_* stay off until toggled. "
+                        "Opt-in: existing installs stay full until this is applied."
+                    ),
+                },
                 "auto_apply_preset": {
                     "type": "string",
                     "description": "Preset name, or none/off to clear",
@@ -550,6 +576,34 @@ def _system_tool_names() -> set[str]:
         for t in TOOL_DEFS
         if isinstance(t, dict) and isinstance(t.get("name"), str)
     }
+
+
+def normalize_mcp_tools_profile(value) -> str:
+    """Return full|lean. Missing or unknown values default to full (opt-in lean)."""
+    if isinstance(value, str) and value.strip().lower() in MCP_TOOLS_PROFILES:
+        return value.strip().lower()
+    return "full"
+
+
+def mcp_tools_map_for_profile(profile: str, existing: dict | None = None) -> dict[str, bool]:
+    """Expand a named profile into the settings.mcp_tools enable map.
+
+    full: drop known system-tool keys (missing = enabled). User-command keys stay.
+    lean: enable LEAN_MCP_TOOLS_ENABLED; disable other system tools including handoff_*.
+    """
+    token = normalize_mcp_tools_profile(profile)
+    current = existing if isinstance(existing, dict) else {}
+    system = _system_tool_names()
+    preserved = {
+        key: bool(val)
+        for key, val in current.items()
+        if isinstance(key, str) and key.strip() and key.strip() not in system
+    }
+    if token == "full":
+        return preserved
+    applied = {name: name in LEAN_MCP_TOOLS_ENABLED for name in sorted(system)}
+    applied.update(preserved)
+    return applied
 
 
 def _load_user_commands(registry_or_settings=None) -> dict:
@@ -826,6 +880,8 @@ def tool_argv(name: str, arguments: dict) -> list[str]:
             argv += ["--open-tab", str(args["open_tab"])]
         if args.get("close_tab") is not None:
             argv += ["--close-tab", str(args["close_tab"])]
+        if args.get("mcp_tools_profile") is not None:
+            argv += ["--mcp-tools-profile", str(args["mcp_tools_profile"])]
         return argv
     if name == "set_tailnet":
         argv = ["set-tailnet", "--range-id", str(args["range_id"]), "--mode", str(args["mode"])]

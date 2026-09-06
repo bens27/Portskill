@@ -2,7 +2,7 @@
 
 Cut-0: mode start|stop|release|restart|status. Fine primitives stay callable.
 Skip predicates are deterministic Python rules. Remotes remain HOLD.
-Never Funnel Portskill's listen/UI/MCP port. Lean mcp_tools preset is not here.
+Never Funnel Portskill's listen/UI/MCP port. Lean vs full mcp_tools profiles live in settings.
 """
 from __future__ import annotations
 

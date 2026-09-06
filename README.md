@@ -151,6 +151,8 @@ See **[SECURITY.md](SECURITY.md)** for reporting and trust boundaries.
 
 Tools: `allocate`, `activate`, `start`, `stop`, `release`, `status`, `portskill_path`, `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults`, `deactivate`, `compat_check`, `preset_save`, `preset_list`, `preset_apply`, `preset_delete`, `settings_get`, `settings_set`. (`exit_house` remains as a deactivate alias.) `portskill_path` is the skip-aware happy-path orchestrator (`mode` start|stop|release|restart|status); fine primitives stay callable and `mcp_tools` can hide the path tool.
 
+Named `mcp_tools` profiles (`settings.mcp_tools_profile`): default **`full`** (all tools enabled; existing installs stay here). Opt-in **`lean`** enables `portskill_path`, `status`, `settings_get`, plus escape hatches `allocate` / `stop` / `release`; other CRUD and flat `handoff_*` tools stay off until you toggle them. Switch with `./scripts/cli.sh settings set --mcp-tools-profile lean|full` or MCP `settings_set` `{ "mcp_tools_profile": "lean"|"full" }`. The enable map remains `settings.mcp_tools` (missing key = enabled).
+
 Session Handoff (vendored kit, default on in `tools/list`): flat names `handoff_status`, `handoff_skill`, `handoff_template`, `handoff_list`, `handoff_resolve`, `handoff_new_path`, `handoff_resume`, `handoff_supersede`, `handoff_install_help` — not nested `session-handoff/*`. Ledger writes go only through `vendor/session-handoff-kit/codex/hooks/handoff_ledger.py`.
 
 ## CLI
@@ -174,6 +176,8 @@ Wrappers set `PYTHONPATH` (`./scripts/cli.sh`, `./scripts/doctor.sh`). After `pi
 ./scripts/cli.sh compat check --preset ui-work --preset api-stack
 ./scripts/cli.sh preset list
 ./scripts/cli.sh settings get
+./scripts/cli.sh settings set --mcp-tools-profile lean
+./scripts/cli.sh settings set --mcp-tools-profile full
 ./scripts/cli.sh http-auth show
 ./scripts/cli.sh http-auth regenerate
 ```
