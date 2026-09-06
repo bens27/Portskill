@@ -119,6 +119,17 @@ Printed on launch (example shape; port varies):
 
 Runs the friend smoke plus the expanded stdlib suite under `tests/test_*.py`. Exit 0 on pass. GitHub Actions runs the same script on every push/PR to `main` (`.github/workflows/ci.yml`) — Linux offline, no Mac `.app` required.
 
+## Doctor exit contract
+
+`./scripts/doctor.sh` and `portskill-cli doctor` / `python3 -m port_registry_app.cli doctor` share one contract (the script `exec`s the CLI). JSON is always printed first; the process then exits.
+
+| Exit | When |
+|------|------|
+| **0** | Healthy offline / default: registry absent (cold) or readable object; listen.json absent or valid; not listening, or listening and UI/MCP GET 200; skill files present; Session Handoff kit present. Non-loopback `bind_host` **with** `allow_non_loopback` recorded warns (`message` + `checks[].warning`, `ok: true`). Tailscale missing, placeholder start script, and default-state counts are informational. |
+| **2** | Fail-closed: corrupt `registry.json` or `listen.json` (never wiped), missing skill files (`port_registry_app/{__init__,cli,server,mcp}.py` + `SKILL.md` + `ui/` or `static/`), `listening: true` with a missing UI/MCP URL or non-200 GET, non-loopback bind without `--allow-non-loopback`, or invalid Session Handoff kit override. Payload `status=error`, `reason=doctor_failed`. |
+
+Doctor is **read-only and idempotent** — running it twice does not create, rewrite, or delete registry/listen files. Default bind remains loopback; remotes HOLD.
+
 ## UI highlights
 
 - **Compose** is first-class (topbar jump + MCP panel composer).

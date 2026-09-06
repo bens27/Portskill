@@ -25,6 +25,19 @@ VERSION = 1
 DEFAULT_REGISTRY_PATH = "~/.config/port-registry/registry.json"
 LISTEN_FILENAME = "listen.json"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+# Doctor exit contract (main): 0 = healthy / informational warnings; 2 = fail-closed.
+# Hard checks only; informational checks never flip the exit code.
+# scripts/doctor.sh execs the same CLI and must return these codes.
+DOCTOR_FAIL_CLOSED_EXIT = 2
+DOCTOR_HARD_CHECKS = frozenset({
+    "registry",
+    "listen",
+    "skill_files",
+    "ui_reachability",
+    "mcp_reachability",
+    "handoff_kit",
+    "bind_host",
+})
 DEFAULT_TAILSCALE_BIN = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
 DEFAULT_POOL_START = 20000
 DEFAULT_POOL_END = 29999
@@ -4814,7 +4827,18 @@ def cmd_tailscale(args):
 
 
 def cmd_doctor(args):
-    """Health check for install + live UI/MCP. Fail-closed on hard faults (exit 2)."""
+    """Health check for install + live UI/MCP.
+
+    Exit contract (idempotent, read-only — never wipes files):
+    - 0 when healthy offline (absent/cold registry + listen, loopback / default bind)
+    - 0 when only informational warnings fail (Tailscale missing; non-loopback
+      bind_host with allow_non_loopback recorded)
+    - DOCTOR_FAIL_CLOSED_EXIT (2) when a DOCTOR_HARD_CHECKS item is not ok:
+      corrupt registry/listen, missing skill files, listening=true but UI/MCP
+      unreachable, non-loopback bind without --allow-non-loopback, or invalid
+      Session Handoff kit override
+    scripts/doctor.sh must return the same codes (it execs this command).
+    """
     checks = []
     path = registry_path()
     registry_ok = False
@@ -5097,16 +5121,7 @@ def cmd_doctor(args):
 
     # Hard fail-closed: corrupt registry/listen, broken install, claimed-but-unreachable UI/MCP,
     # missing Session Handoff kit or invalid kit override, non-loopback bind without allow.
-    hard_names = {
-        "registry",
-        "listen",
-        "skill_files",
-        "ui_reachability",
-        "mcp_reachability",
-        "handoff_kit",
-        "bind_host",
-    }
-    ok = all(item["ok"] for item in checks if item.get("name") in hard_names)
+    ok = all(item["ok"] for item in checks if item.get("name") in DOCTOR_HARD_CHECKS)
     focused_hist = None
     if registry_ok:
         try:
@@ -5147,7 +5162,7 @@ def cmd_doctor(args):
         "handoff_kit": handoff_info,
     })
     if not ok:
-        raise SystemExit(2)
+        raise SystemExit(DOCTOR_FAIL_CLOSED_EXIT)
 
 
 def cmd_history_list(args):

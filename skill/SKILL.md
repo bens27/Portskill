@@ -159,13 +159,22 @@ Key flags:
 
 ### `doctor`
 
-Run environment checks and report JSON. Use this when install looks wrong, Tailscale cannot be found, the registry file may be corrupt, or start scripts are still placeholders.
+Run environment checks and report JSON. Prefer `./scripts/doctor.sh` (same exit codes as this CLI). Use this when install looks wrong, Tailscale cannot be found, the registry file may be corrupt, or start scripts are still placeholders.
+
+**Exit contract** (idempotent, never wipes files):
+
+- **0** — healthy offline / default bind. Absent registry or listen is OK (cold). Non-loopback `bind_host` with `allow_non_loopback` recorded warns only (`message` + `warning`, still exit 0). Tailscale / start-script / `default_state` are informational.
+- **2** — fail-closed: corrupt `registry.json` or `listen.json`, missing skill files, `listening: true` but UI/MCP URL missing or GET ≠ 200, non-loopback bind without `--allow-non-loopback`, or invalid Session Handoff kit override. `status=error`, `reason=doctor_failed`.
 
 Checks:
 
-- Registry path exists and parses as JSON (fail-closed: corrupt files are reported; never wiped)
-- Tailscale binary resolution: `PORT_REGISTRY_TAILSCALE_BIN` → `tailscale` on `PATH` → Mac app bundle default
-- Skill files present beside this CLI (`SKILL.md`, `port_registry.py`, `serve_ui.py`, `app.py`, `ui/`)
+- Registry path exists and parses as a JSON object (fail-closed: corrupt files are reported; never wiped)
+- Listen path / sticky `listen.json` (fail-closed if corrupt)
+- Bind host: loopback default; off-loopback fails closed unless `--allow-non-loopback` is recorded (then warns)
+- Session Handoff kit present/configured (fail-closed on a bad override)
+- UI / MCP reachability (skipped when not listening; fail-closed when listening but unreachable)
+- Tailscale binary resolution: `PORT_REGISTRY_TAILSCALE_BIN` → `tailscale` on `PATH` → Mac app bundle default (informational)
+- Skill files present beside this CLI (`port_registry_app/{__init__,cli,server,mcp}.py`, `skill/SKILL.md` or `SKILL.md`, `ui/` or `port_registry_app/static/`)
 - Placeholder detection for `.port-registry/start.sh` under `--project` (defaults to cwd)
 - `default_state` counts for non-released ranges (`on` / `off`)
 
