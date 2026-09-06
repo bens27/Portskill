@@ -129,6 +129,9 @@ See **[SECURITY.md](SECURITY.md)** for reporting and trust boundaries.
 - `--host` other than `127.0.0.1` / `::1` / `localhost` is **refused at start** unless you pass `--allow-non-loopback` (documented footgun; no allowlist). The UI banner/chip stays and `doctor` warns. Without the flag, `doctor` fails closed (exit 2) if `listen.json` still shows a non-loopback host.
 - Agents auto-invoke registry lifecycle tools. Humans use the HTML UI for maintenance and defaults. HTTP MCP uses the same local listener as the UI. Access does not require a token unless the optional passkey gate is enabled. Sharing Portskill’s listen port with Tailscale Serve or Funnel is not a substitute for authentication, and Funnel of Portskill’s own listen port is blocked. Stdio MCP (`--mcp-stdio` / `examples/mcp.stdio.json`) is an available agent install option.
 - Funnel of the Portskill listen/UI/MCP port is **refused in code**. Funnel on *user* claimed service ports stays a deliberate user action.
+- **Serve Portskill listen** (`settings.serve_portskill_on_tailscale`) defaults **off** for new installs. The toolbar toggle remains. Existing registries that already store `true` keep Serve on; upgrading does not silently flip that key.
+- Mutating HTTP (`POST`) rejects a cross-origin `Origin` (it must match `Host`). JSON API bodies require `Content-Type: application/json`. Browser posts that omit Origin and send `Sec-Fetch-Site: cross-site` are refused. Same-origin loopback UI and non-browser JSON clients that omit Origin still work.
+- While the passkey gate is off, **gate enable and the first passkey register are loopback-only**. Non-loopback bootstrap is refused. That is not a substitute for Funnel-of-listen refuse, which still stands.
 - Remote machines remain **HOLD** (not implemented).
 
 **Distribution / code signing:** Portskill does not ship a notarized or signed binary. Personal Mac packaging is `./scripts/build-app.sh` plus `./scripts/install-keepalive.sh` (same `port_registry_app` under the app/CLI/MCP). App Store Connect / notarization remain HOLD. There is no friend installer or signed-app distribution path.
@@ -207,7 +210,7 @@ An **opt-in** WebAuthn/passkey gate (default **off**) can lock the personal HTTP
 ```
 
 - Default personal listen path: no `Authorization: Bearer` and no passkey required
-- Settings → HTTP auth: enable the gate and register/manage passkeys
+- Settings → HTTP auth: enable the gate and register/manage passkeys from loopback. First enable and the first passkey cannot be bootstrapped from a non-loopback client.
 - Optional helper endpoints (`/api/http-auth`, regenerate) still check a bearer if you use them
 - Stdio MCP (`--mcp-stdio`) is unchanged and does not read this token or a passkey
 - OAuth / SSO / multi-user is not in this cut

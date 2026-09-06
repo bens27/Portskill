@@ -336,7 +336,7 @@ def default_settings():
         "mcp_tools_profile": "full",  # named preset: full|lean; apply writes mcp_tools
         "stop_also_release": True,  # stop also frees the range; false keeps reserved
         "mcp_user_commands": {},  # name -> {name, description, steps[{tool,arguments,mode}]}
-        "serve_portskill_on_tailscale": True,  # default ON — Serve Portskill listen port (never Funnel)
+        "serve_portskill_on_tailscale": False,  # new installs OFF; existing true is preserved by normalize
         "handoff_enabled": False,  # Session Handoff section opt-in
         "handoff_kit": None,  # optional override; default is vendored kit
         "handoff_skill": None,  # optional custom Write-a-Handoff SKILL.md path
@@ -436,7 +436,8 @@ def normalize_settings(settings):
     else:
         normalized["stop_also_release"] = bool(stop_rel)
     # Optional preference: Tailscale Serve the Portskill UI/MCP listen port (not Funnel).
-    serve_ps = settings.get("serve_portskill_on_tailscale", True)
+    # Missing key follows the new-install default (false). An explicit true stays true.
+    serve_ps = settings.get("serve_portskill_on_tailscale", False)
     if isinstance(serve_ps, bool):
         normalized["serve_portskill_on_tailscale"] = serve_ps
     elif isinstance(serve_ps, str):
@@ -6236,7 +6237,10 @@ def parser():
         "--serve-portskill-on-tailscale",
         choices=["on", "off"],
         default=None,
-        help="Persist preference to Tailscale-Serve the Portskill listen port (never Funnel)",
+        help=(
+            "Persist preference to Tailscale-Serve the Portskill listen port "
+            "(never Funnel). New installs default off."
+        ),
     )
     settings_set.add_argument(
         "--mcp-user-commands-json",
@@ -6311,7 +6315,10 @@ def parser():
     ts_logout.set_defaults(func=cmd_tailscale)
     ts_serve_ps = ts_sub.add_parser(
         "serve-portskill",
-        help="Tailscale Serve the Portskill listen port from listen.json (never Funnel)",
+        help=(
+            "Tailscale Serve the Portskill listen port from listen.json (never Funnel). "
+            "New installs default off."
+        ),
     )
     ts_serve_ps.add_argument(
         "--state",
