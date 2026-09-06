@@ -97,9 +97,8 @@ def main() -> int:
     ok("friend UI: no Coming soon chrome; Settings + Actions + disclosures present; stdio preferred")
 
     for script in (
-        "scripts/install-mac.sh",
-        "scripts/notarize-mac.sh",
         "scripts/build-app.sh",
+        "scripts/install-keepalive.sh",
         "scripts/mac-bundle.sh",
         "scripts/smoke_test.sh",
         "scripts/doctor.sh",
@@ -112,40 +111,10 @@ def main() -> int:
         syn = subprocess.run(["bash", "-n", str(path)], capture_output=True, text=True)
         if syn.returncode != 0:
             fail(f"bash -n {script}: {syn.stderr or syn.stdout}")
-    creds = subprocess.run(
-        ["bash", str(ROOT / "scripts/notarize-mac.sh")],
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
-    if creds.returncode == 0:
-        fail("notarize-mac.sh succeeded without credentials (must fail closed)")
-    hint = (creds.stderr or "") + (creds.stdout or "")
-    for need in (
-        "APP_STORE_CONNECT_API_KEY_PATH",
-        "APP_STORE_CONNECT_ISSUER_ID",
-        "APP_STORE_CONNECT_KEY_ID",
-    ):
-        if need not in hint:
-            fail(f"notarize-mac.sh missing-creds hint omitted {need}")
-    if "APPLE_ID" in hint or "APPLE_APP_SPECIFIC_PASSWORD" in hint:
-        fail("notarize-mac.sh still advertises Apple ID password auth")
-    help_proc = subprocess.run(
-        ["bash", str(ROOT / "scripts/notarize-mac.sh"), "--help"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    help_text = (help_proc.stdout or "") + (help_proc.stderr or "")
-    for need in (
-        "APP_STORE_CONNECT_KEY_ID",
-        "APP_STORE_CONNECT_ISSUER_ID",
-        "APP_STORE_CONNECT_API_KEY_PATH",
-        "PORTSKILL_SIGN_IDENTITY",
-    ):
-        if need not in help_text:
-            fail(f"notarize-mac.sh --help omitted {need}")
-    ok("install-mac.sh + notarize-mac.sh present; notarize fails closed without API key env")
+    for gone in ("scripts/install-mac.sh", "scripts/notarize-mac.sh"):
+        if (ROOT / gone).exists():
+            fail(f"{gone} must not be on the product surface")
+    ok("personal Mac packaging scripts present; install-mac/notarize stripped")
 
     # 2) CLI status + doctor (isolated; leftover home listen.json must not flake offline)
     from tests.helpers import IsolatedConfig, parse_cli_json

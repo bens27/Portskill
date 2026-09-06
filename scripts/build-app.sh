@@ -9,11 +9,8 @@
 # Codesign (Darwin only — never fail the build on Linux CI for missing codesign):
 #   1. PORTSKILL_SIGN_IDENTITY if set
 #   2. First "Developer ID Application" identity in the keychain
-#   3. Ad-hoc (`codesign --force --deep --sign -`) so Gatekeeper is less angry
-#      for local friend installs
-# Ad-hoc ≠ notarized. install-mac.sh still strips quarantine; right-click Open
-# remains the zip / Gatekeeper fallback. Notarize stays PARKED
-# (see scripts/notarize-mac.sh) — this script never asks for ASC creds.
+#   3. Ad-hoc (`codesign --force --deep --sign -`) for a personal local .app
+# Ad-hoc ≠ notarized. This script never asks for ASC creds. Remotes/ASC HOLD.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -143,9 +140,8 @@ done
 
 # --- codesign (Darwin only; never fail the build for missing tools) -----------
 # Prefer Developer ID / PORTSKILL_SIGN_IDENTITY. Otherwise ad-hoc sign so a
-# trusted local friend build is less likely to trip Gatekeeper. Ad-hoc is not
-# notarization. install-mac.sh still strips com.apple.quarantine; right-click
-# Open is the remaining zip fallback.
+# personal local build is less likely to trip Gatekeeper. Ad-hoc is not
+# notarization. ASC / notarize remain HOLD.
 sign_dist_app() {
   if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "codesign: skipped (not Darwin — Linux CI / non-Mac build is unsigned)"
@@ -175,8 +171,7 @@ sign_dist_app() {
   echo "codesign: no Developer ID — ad-hoc (not notarized)"
   if codesign --force --deep --sign - "${DIST_APP}"; then
     echo "Ad-hoc signed ${DIST_APP}"
-    echo "Ad-hoc ≠ notarized. install-mac.sh still strips quarantine;"
-    echo "right-click Open remains the zip / Gatekeeper fallback."
+    echo "Ad-hoc ≠ notarized. Personal path: install-keepalive.sh + this script."
   else
     echo "WARN: ad-hoc codesign failed; leaving unsigned (build continues)" >&2
   fi

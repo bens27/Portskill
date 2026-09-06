@@ -182,8 +182,14 @@ class PlaybookTests(unittest.TestCase):
         self.assertIn("Quick start", readme)
         self.assertNotIn("Mac friends", readme)
         self.assertIn("does not ship a notarized or signed binary", readme.lower())
+        self.assertIn("./scripts/build-app.sh", readme)
+        self.assertIn("./scripts/install-keepalive.sh", readme)
+        self.assertNotIn("install-mac.sh", readme)
+        self.assertNotIn("notarize-mac.sh", readme)
         security = (root / "SECURITY.md").read_text(encoding="utf-8")
         self.assertIn("No signed / notarized distribution", security)
+        self.assertNotIn("install-mac.sh", security)
+        self.assertNotIn("notarize-mac.sh", security)
 
 
 if __name__ == "__main__":

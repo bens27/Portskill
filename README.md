@@ -133,7 +133,7 @@ See **[SECURITY.md](SECURITY.md)** for reporting and trust boundaries.
 - Funnel of the Portskill listen/UI/MCP port is **refused in code**. Funnel on *user* claimed service ports stays a deliberate user action.
 - Remote machines remain **HOLD** (not implemented).
 
-**Distribution / code signing:** Portskill does not ship a notarized or signed binary for end users. Developers who need a signed `.app` for their own environment should use their own Apple signing workflow. Scripts such as `build-app.sh` / `notarize-mac.sh` may exist for maintainers; they are not a supported distribution path.
+**Distribution / code signing:** Portskill does not ship a notarized or signed binary. Personal Mac packaging is `./scripts/build-app.sh` plus `./scripts/install-keepalive.sh` (same `port_registry_app` under the app/CLI/MCP). App Store Connect / notarization remain HOLD. There is no friend installer or signed-app distribution path.
 
 ## Connect MCP
 
@@ -199,16 +199,17 @@ Local high-entropy token at `~/.config/port-registry/http_auth.json` (minted on 
 
 ## Keep-alive (macOS, optional)
 
-LaunchAgent + Dock/menubar so the server survives Terminal close / login:
+Personal up-to-date `Portskill.app` on this Mac: **keepalive + `build-app.sh` only**. LaunchAgent + Dock/menubar so the server survives Terminal close / login:
 
 ```bash
+./scripts/build-app.sh                    # optional; keepalive install also builds when needed
 ./scripts/install-keepalive.sh install
 ./scripts/install-keepalive.sh status
 ./scripts/install-keepalive.sh stop
 ./scripts/install-keepalive.sh uninstall   # plist only; registry untouched
 ```
 
-May build or reuse `dist/Portskill.app` when available; writes `~/Library/LaunchAgents/local.portskill.plist`. Logs: `~/Library/Logs/Portskill/`. **Never** wipes `~/.config/port-registry/registry.json`.
+May build or reuse `dist/Portskill.app` via `build-app.sh`; writes `~/Library/LaunchAgents/local.portskill.plist`. Logs: `~/Library/Logs/Portskill/`. **Never** wipes `~/.config/port-registry/registry.json`.
 
 ## Remote machines
 
