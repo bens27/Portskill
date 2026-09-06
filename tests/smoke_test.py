@@ -116,11 +116,19 @@ def main() -> int:
         fail("require_compat lock missing from Settings")
     if 'class="pr-disclose"' not in html and "pr-mcp-system-details" not in html:
         fail("disclosure chevron markup missing")
-    if "stdio preferred" not in html.lower() and "preferred for agents" not in html.lower():
-        fail("UI MCP panel missing stdio preference")
-    if "--mcp-stdio" not in html or "local-trust dogfood" not in html.lower():
-        fail("UI missing copyable stdio MCP / HTTP dogfood label")
-    ok("friend UI: no Coming soon chrome; Settings + Actions + disclosures present; stdio preferred")
+    if "stdio preferred" in html.lower() or "preferred for agents" in html.lower():
+        fail("UI MCP panel still ranks stdio above HTTP or the UI")
+    if "local-trust dogfood" in html.lower() or "dogfood" in html.lower():
+        fail("UI still uses retired dogfood copy")
+    if "--mcp-stdio" not in html:
+        fail("UI missing copyable stdio MCP command")
+    if "same local listener" not in html.lower():
+        fail("UI HTTP MCP panel missing shared-listener copy")
+    if 'id="pr-mcp-http-hint"' not in html:
+        fail("UI missing HTTP MCP hint")
+    if "funnel of portskill" not in html.lower() and "funnel of portskill's own listen" not in html.lower():
+        fail("UI HTTP MCP panel missing Funnel-of-listen fact")
+    ok("friend UI: no Coming soon chrome; Settings + Actions + disclosures present; surface copy")
 
     for script in (
         "scripts/build-app.sh",

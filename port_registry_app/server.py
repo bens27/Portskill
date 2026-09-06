@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Portskill server: light HTML UI + MCP HTTP (stdlib-only).
 
-Default: select a listen port (sticky listen.json → dogfood allocate → bind),
+Default: select a listen port (sticky listen.json → registry allocate → bind),
 then serve UI + MCP. Historical default was 127.0.0.1:8765.
 Also: --mcp-stdio for MCP clients; UI helpers live in this module.
 """
@@ -195,12 +195,15 @@ def build_listen_payload(host: str, port: int) -> dict:
         "started_at": utc_now_iso(),
         "setup": {
             "cursor_mcp_stdio_hint": (
-                "Preferred for agents: stdio MCP — examples/mcp.stdio.json "
-                "or python3 -m port_registry_app --mcp-stdio"
+                "Stdio MCP is one agent connection option. Use "
+                "examples/mcp.stdio.json or python3 -m port_registry_app --mcp-stdio."
             ),
             "cursor_mcp_http_hint": (
-                "HTTP MCP is local-trust dogfood only. Prefer stdio for agents. "
-                "Tailscale is not authentication. Funnel of this listen port is refused."
+                "HTTP MCP uses the same local listener as the UI. "
+                "Access on this local listener does not require a token. "
+                "Sharing Portskill's listen port with Tailscale Serve or Funnel "
+                "is not a substitute for authentication, and Funnel of "
+                "Portskill's own listen port is blocked."
             ),
             "tools_endpoint": "initialize / tools/list / tools/call via JSON-RPC on /mcp",
         },
@@ -211,8 +214,8 @@ def print_listen_banner(payload: dict) -> None:
     print("", flush=True)
     print("======== Portskill ========", flush=True)
     print(f"UI:            {payload.get('ui_url')}", flush=True)
-    print(f"Stdio MCP:     {payload.get('stdio')}  (preferred for agents)", flush=True)
-    print(f"HTTP MCP:      {payload.get('mcp_post')}  (stdio preferred; no bearer required)", flush=True)
+    print(f"Stdio MCP:     {payload.get('stdio')}", flush=True)
+    print(f"HTTP MCP:      {payload.get('mcp_post')}  (same local listener as the UI; no token required)", flush=True)
     print(f"MCP discovery: {payload.get('mcp_get_discovery')}", flush=True)
     print("HTTP auth:     optional helper (http-auth show|regenerate; does not gate this UI)", flush=True)
     print(f"listen.json:   {payload.get('listen_path') or listen_path()}", flush=True)
@@ -275,7 +278,7 @@ def _dogfood_allocate_port(prefer_start: int | None = None) -> int | None:
     code, payload, stdout = run_cli(argv)
     if code != 0:
         print(
-            f"dogfood allocate failed ({code}): {payload or stdout}",
+            f"registry allocate failed ({code}): {payload or stdout}",
             flush=True,
         )
         return None
@@ -2190,10 +2193,10 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         f'<div class="pr-mcp-connect" id="pr-mcp-connect">'
         f'<div class="pr-mcp-section">Agent connection</div>'
         f'<details class="pr-mcp-system-details pr-mcp-connect-details" id="pr-mcp-connect-stdio">'
-        f'<summary>Stdio preferred <span class="tag">preferred for agents</span>'
+        f'<summary>Stdio MCP <span class="tag">agent connection</span>'
         f'<span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
         f'<div class="pr-mcp-connect-body">'
-        f'<p class="pr-mcp-meta" style="margin:0">Preferred path for Cursor / Claude / Codex. '
+        f'<p class="pr-mcp-meta" style="margin:0">Stdio MCP is one way an agent can attach to this process. '
         f'Copy this stdio config (same as <code>examples/mcp.stdio.json</code>). '
         f'Command: <code id="pr-mcp-stdio-cmd">{esc(stdio)}</code></p>'
         f'<pre class="pr-mcp-stdio-config" id="pr-mcp-stdio-config">{esc(stdio_config)}</pre>'
@@ -2202,13 +2205,15 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         f'</div>'
         f'</div></details>'
         f'<details class="pr-mcp-system-details pr-mcp-connect-details" id="pr-mcp-connect-http">'
-        f'<summary>HTTP MCP <span class="tag">local-trust dogfood</span>'
+        f'<summary>HTTP MCP <span class="tag">same listener as this UI</span>'
         f'<span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
         f'<div class="pr-mcp-connect-body">'
-        f'<p class="pr-mcp-meta" style="margin:0" id="pr-mcp-http-dogfood">'
-        f'HTTP MCP is <strong>local-trust dogfood only</strong> (no bearer required on this listen path). '
+        f'<p class="pr-mcp-meta" style="margin:0" id="pr-mcp-http-hint">'
+        f'HTTP MCP uses the same local listener as this UI. The endpoint is '
         f'<a class="pr-port-link" href="{esc(mcp_url)}" target="_blank" rel="noopener"><code>{esc(mcp_url)}</code></a>. '
-        f'Tailscale is not authentication. Funnel of this listen port is refused.</p>'
+        f'Access on this local listener does not require a token. '
+        f"Sharing Portskill's listen port with Tailscale Serve or Funnel is not a substitute for authentication, "
+        f"and Funnel of Portskill's own listen port is blocked.</p>"
         f'</div></details>'
         f'</div>'
     )
@@ -2219,8 +2224,11 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         f'<div class="pr-mcp-jump-row">'
         f'<a class="pr-compose-jump" href="#pr-mcp-user-composer">Compose</a>'
         f'<span class="tag">user command composer</span></div>'
-        f'<p class="pr-mcp-meta">Live <code>tools/list</code> surface. Agents should use '
-        f'<strong>stdio MCP</strong> (<code>{esc(stdio)}</code>). HTTP MCP is local-trust dogfood only. '
+        f'<p class="pr-mcp-meta">This is the live <code>tools/list</code> surface. '
+        f'Agents usually invoke registry lifecycle tools such as allocate, start, and stop automatically. '
+        f'Use this HTML UI for maintenance, defaults, and other operator work. '
+        f'Agents can attach over <strong>stdio MCP</strong> (<code>{esc(stdio)}</code>) '
+        f'or over HTTP MCP on this same listener. '
         f'Toggles filter live <code>tools/list</code> + <code>tools/call</code> (disabled tools stay listed here so you can re-enable).</p>'
         f"{system_body}"
         f"{stdio_block}"
@@ -3769,8 +3777,8 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
 <footer class="pr-mcp-footer" style="position:fixed;bottom:0;left:0;right:0;padding:6px 14px;
 background:#fafbf9;border-top:1px solid var(--line);font-size:11px;color:var(--muted);
 font-family:ui-monospace,Menlo,monospace;z-index:20">
-  Stdio MCP (preferred): <code>python3 -m port_registry_app --mcp-stdio</code>
-  · HTTP MCP (local-trust dogfood): <a href="{mcp_footer_url}" style="color:var(--cobalt)">{mcp_footer_label}</a>
+  Stdio MCP: <code>python3 -m port_registry_app --mcp-stdio</code>
+  · HTTP MCP: <a href="{mcp_footer_url}" style="color:var(--cobalt)">{mcp_footer_label}</a>
   · listen: <span title="Sticky broadcast">{mcp_listen_path}</span>
 </footer>
 </body>
@@ -4934,7 +4942,7 @@ def main(argv=None) -> int:
         help=(
             "FOOTGUN: allow --host that is not 127.0.0.1 / ::1 / localhost. "
             "Exposes the HTTP UI and MCP listener beyond this machine. "
-            "Bearer auth is still mandatory (no open LAN dogfood). "
+            "This override does not add authentication. "
             "Without this flag, non-loopback bind is refused."
         ),
     )
@@ -4945,7 +4953,7 @@ def main(argv=None) -> int:
         help=(
             "Bind port (explicit; wins over sticky/allocate). "
             "Also: env PORTSKILL_PORT or PORT_REGISTRY_APP_PORT. "
-            "Default: sticky ~/.config/port-registry/listen.json or dogfood allocate."
+            "Default: sticky ~/.config/port-registry/listen.json or a registry allocate."
         ),
     )
     parser.add_argument(

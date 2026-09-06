@@ -127,23 +127,26 @@ class CollapsedMarkupTests(unittest.TestCase):
         self.assertIn("not loopback", html.lower())
         self.assertIn("--allow-non-loopback", html)
 
-    def test_mcp_panel_prefers_stdio_and_labels_http_dogfood(self) -> None:
+    def test_mcp_panel_documents_stdio_and_http_without_preference(self) -> None:
         from tests.helpers import IsolatedConfig
 
         with IsolatedConfig() as iso:
             iso.write_registry()
             html = self._render_with_project()
         self.assertIn('id="pr-mcp-connect"', html)
-        self.assertIn("stdio preferred", html.lower())
-        self.assertIn("preferred for agents", html.lower())
+        self.assertNotIn("stdio preferred", html.lower())
+        self.assertNotIn("preferred for agents", html.lower())
+        self.assertNotIn("dogfood", html.lower())
         self.assertIn("--mcp-stdio", html)
         self.assertIn("mcpServers", html)
         self.assertIn('id="pr-mcp-stdio-config"', html)
         self.assertIn('id="pr-mcp-stdio-copy"', html)
         self.assertIn("Copy stdio config", html)
-        self.assertIn("local-trust dogfood", html.lower())
-        self.assertIn('id="pr-mcp-http-dogfood"', html)
-        self.assertIn("Stdio MCP (preferred)", html)
+        self.assertIn("same local listener", html.lower())
+        self.assertIn('id="pr-mcp-http-hint"', html)
+        self.assertIn("Stdio MCP", html)
+        self.assertNotIn("Stdio MCP (preferred)", html)
+        self.assertIn("Funnel of Portskill", html)
         markup = html.split("</style>", 1)[-1]
         connect = _details_tags(markup, "pr-mcp-connect-details")
         self.assertTrue(connect, "Agent Connection details missing")

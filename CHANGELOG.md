@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- Public copy matches the surface model: the HTML UI is first-class for humans (maintenance, defaults, operator work); agents usually invoke registry lifecycle commands automatically. Stdio MCP is documented as one agent connection option, not a preferred hierarchy over HTTP or the UI. The HTTP MCP panel and listen hints describe the shared local listener, no-token local access, and that Funnel of Portskill's own listen port is blocked. Removed "dogfood" / "stdio preferred" public wording.
 - Local HTTP UI and ordinary HTTP APIs on the personal listen path no longer require `Authorization: Bearer`. `GET /` serves the registry UI (no login wall). Funnel of Portskill’s own listen port remains refused. Stdio MCP is unchanged. `http-auth` CLI / `http_auth.json` remain optional helpers and do not gate default UI routes.
 - MCP Tools panel order is System tools → Agent connection (each setup instruction is a start-collapsed disclosure) → User commands → Command composer.
 - Session Handoff flat tool-name copy (`handoff_status`, `handoff_list`, … — not nested `session-handoff/*`) lives in the Session Handoff section. The user-command enable-map sentence stays next to User commands.
@@ -22,6 +23,7 @@
 - PLAYBOOK.md retired (friend-share / installer path unsupported).
 - SECURITY.md: no signed/notarized distribution claim; personal packaging is keepalive + `build-app.sh`; ASC/notarize HOLD.
 - HTTP `http-auth` CLI / `http_auth.json` documented as optional helpers (not a default UI/API gate). Human-written README preamble left verbatim.
+- README, SECURITY.md, SKILL.md, and skill/SKILL.md no longer rank stdio above HTTP or the UI. Funnel of Portskill's own listen port remains documented in complete sentences.
 
 All notable changes to **Portskill** are documented here.
 

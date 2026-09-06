@@ -1,4 +1,4 @@
-"""Wave C: refuse non-loopback bind; stdio preference in UI/docs."""
+"""Wave C: refuse non-loopback bind; surface-model copy in UI/docs."""
 from __future__ import annotations
 
 import io
@@ -65,21 +65,55 @@ class NonLoopbackRefuseTests(unittest.TestCase):
         self.assertIn("FOOTGUN", text)
 
 
-class StdioPreferenceDocTests(unittest.TestCase):
-    def test_readme_and_security_prefer_stdio(self) -> None:
+class SurfaceCopyDocTests(unittest.TestCase):
+    def test_readme_and_security_document_surfaces_without_stdio_hierarchy(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
-        for blob, name in ((readme, "README.md"), (security, "SECURITY.md"), (skill, "SKILL.md")):
+        sidecar = (ROOT / "skill" / "SKILL.md").read_text(encoding="utf-8")
+        for blob, name in (
+            (readme, "README.md"),
+            (security, "SECURITY.md"),
+            (skill, "SKILL.md"),
+            (sidecar, "skill/SKILL.md"),
+        ):
             low = blob.lower()
             self.assertIn("stdio", low, f"{name} missing stdio")
-            self.assertIn("preferred", low, f"{name} missing preferred")
-            self.assertIn("local-trust", low, f"{name} missing local-trust")
+            self.assertNotIn("dogfood", low, f"{name} still says dogfood")
+            self.assertNotIn("prefer stdio", low, f"{name} still ranks stdio")
+            self.assertNotIn("stdio preferred", low, f"{name} still says stdio preferred")
+            self.assertNotIn("preferred agent path", low, f"{name} still prefers stdio")
+            self.assertNotIn("preferred for agents", low, f"{name} still prefers stdio for agents")
+            self.assertIn("funnel", low, f"{name} missing Funnel-of-listen fact")
+        self.assertIn("first-class surface", readme.lower())
+        self.assertIn("same local listener", readme.lower())
         self.assertIn("--allow-non-loopback", readme)
         self.assertIn("--allow-non-loopback", security)
         self.assertIn("refused", readme.lower())
         self.assertIn("refused", security.lower())
         self.assertIn("examples/mcp.stdio.json", readme)
+        self.assertIn("*Human-written pre-amble*", readme)
+        self.assertIn("*End of human-written pre-amble*", readme)
+
+    def test_listen_hints_do_not_rank_stdio(self) -> None:
+        from port_registry_app.mcp import discovery_payload
+        from port_registry_app.server import build_listen_payload
+
+        with IsolatedConfig() as iso:
+            iso.write_registry()
+            payload = build_listen_payload("127.0.0.1", 20000)
+            fallback = discovery_payload()["setup"]
+        stdio = str(payload["setup"]["cursor_mcp_stdio_hint"]).lower()
+        http = str(payload["setup"]["cursor_mcp_http_hint"]).lower()
+        self.assertIn("one agent connection option", stdio)
+        self.assertNotIn("prefer", stdio)
+        self.assertNotIn("preferred", stdio)
+        self.assertNotIn("dogfood", http)
+        self.assertIn("same local listener", http)
+        self.assertIn("blocked", http)
+        self.assertNotIn("dogfood", str(fallback["cursor_mcp_http_hint"]).lower())
+        self.assertNotIn("prefer stdio", str(fallback["cursor_mcp_http_hint"]).lower())
+        self.assertIn("one agent connection option", fallback["cursor_mcp_stdio_hint"].lower())
 
 
 if __name__ == "__main__":

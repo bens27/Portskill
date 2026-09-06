@@ -14,7 +14,7 @@ Do **not** Funnel or publicly expose the Portskill listen port while testing a r
 
 - **Default bind is loopback** (`127.0.0.1`). Local HTTP UI and ordinary HTTP APIs (`GET /`, `GET /api/state`, UI `/api/*`, `POST /mcp`) open without `Authorization: Bearer`. `http_auth.json` is an optional helper and does not gate this listen path. `GET /health` stays open. Stdio MCP does not use a token.
 - **Non-loopback `--host` is refused** at start unless `--allow-non-loopback` (documented footgun). `doctor` fails closed (exit 2) if `listen.json` shows a non-loopback host without that override recorded.
-- **Stdio MCP** is the preferred agent path (`--mcp-stdio` / `examples/mcp.stdio.json`). HTTP MCP is local-trust dogfood only. Tailscale Serve/Funnel is **not** authentication.
+- **HTTP MCP** uses the same local listener as the HTML UI. Access on this local listener does not require a token. **Stdio MCP** (`--mcp-stdio` / `examples/mcp.stdio.json`) is another agent connection option and also does not use a token. Sharing Portskill's listen port with Tailscale Serve or Funnel is not a substitute for authentication.
 - **Tailscale trust boundary:** Serve can map *your* claimed service ports onto your tailnet when logged in. Funnel of the Portskill listen/UI/MCP port is **refused in code**. Funnel on user service ports stays a deliberate user action.
 
 ## What we do **not** claim yet
@@ -32,14 +32,14 @@ Do **not** Funnel or publicly expose the Portskill listen port while testing a r
 - Codex `install.sh` writes `$CODEX_HOME` (default `~/.codex`): hook scripts, a skill copy, and a `hooks.json` merge. It does **not** enable the hooks feature flag or approve hook trust. Portskill does not edit `config.toml`.
 - The Chrome extension is loaded in the user's browser (typically against `claude.ai`). Portskill only points at `chrome-extension/`; it does not inject into other sites.
 - Handoff MCP tools use **flat** names (`handoff_status`, `handoff_list`, …) on `tools/list` — not nested `session-handoff/*`. The kit’s nested SKILL folders stay as vendored layout.
-- Those tools share the **same HTTP listener** as the HTML UI and `POST /mcp`. Prefer stdio MCP for agents. Widening `--host` is still a documented footgun, not an open LAN dogfood path.
+- Those tools share the **same HTTP listener** as the HTML UI and `POST /mcp`. Widening `--host` is still a documented footgun; it does not add authentication.
 - Remotes remain HOLD. This kit does not talk to remote Portskill instances.
 
 ## Safe defaults
 
 1. Keep sticky listen on loopback; read `~/.config/port-registry/listen.json` for the live port (not hard-coded `8765`).
-2. Prefer stdio MCP for agents.
-3. Never Funnel the Portskill listen/UI port — the CLI refuses Funnel of that port. Tailscale is not HTTP authentication.
+2. Agents can connect with stdio MCP or HTTP MCP on the local listener. Do not treat Tailscale as HTTP authentication.
+3. Never Funnel Portskill's own listen/UI port — the CLI blocks Funnel of that port. Sharing the listen port with Tailscale Serve or Funnel is not a substitute for authentication.
 4. Corrupt `registry.json` / `listen.json` fails closed — Portskill will not wipe them silently.
 
 ## Soft-restart note

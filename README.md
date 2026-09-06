@@ -60,10 +60,12 @@ portskill-cli --help
 
 ## Surfaces
 
+The HTML UI is the first-class surface for humans. Use it for maintenance, defaults, and other operator work. Agents usually invoke registry lifecycle commands (allocate, start, stop, and related tools) automatically. MCP (stdio or HTTP) and the CLI are how those commands are invoked.
+
 | Surface | Role | Entry |
 |---------|------|-------|
-| **UI** | HTML console on the sticky listen port | `./scripts/run.sh` or `python3 -m port_registry_app` |
-| **MCP** | Same process: stdio or `POST /mcp` | `--mcp-stdio` or `mcp_url` from `listen.json` |
+| **UI** | HTML console for maintenance, defaults, and operator work | `./scripts/run.sh` or `python3 -m port_registry_app` |
+| **MCP** | Agent connection on the same process: stdio or `POST /mcp` | `--mcp-stdio` or `mcp_url` from `listen.json` |
 | **CLI** | Stdlib CLI (+ optional `skill/SKILL.md`) | `./scripts/cli.sh …` / `portskill-cli` |
 
 One version string everywhere: `pyproject.toml` ↔ package `__version__` ↔ UI ↔ MCP `initialize` ↔ `doctor`.
@@ -73,7 +75,7 @@ One version string everywhere: `pyproject.toml` ↔ package `__version__` ↔ UI
 On launch the server chooses a bind port in this order:
 
 1. Sticky port from `~/.config/port-registry/listen.json` (if still bindable)
-2. Existing Portskill dogfood claim in the registry
+2. Existing Portskill listen claim in the registry
 3. Fresh allocate from the pool
 
 After bind it rewrites `listen.json` with live URLs. **Always read that file** for current UI/MCP addresses.
@@ -125,15 +127,15 @@ See **[SECURITY.md](SECURITY.md)** for reporting and trust boundaries.
 - Default bind is `127.0.0.1`.
 - Local HTTP UI and ordinary HTTP APIs (`GET /`, `GET /api/state`, UI `/api/*`, `/port-registry/actions`, `GET /mcp`, `POST /mcp`) open without `Authorization: Bearer`. `http-auth` / `http_auth.json` are optional helpers and do not gate this listen path. Stdio MCP does **not** use a token.
 - `--host` other than `127.0.0.1` / `::1` / `localhost` is **refused at start** unless you pass `--allow-non-loopback` (documented footgun; no allowlist). The UI banner/chip stays and `doctor` warns. Without the flag, `doctor` fails closed (exit 2) if `listen.json` still shows a non-loopback host.
-- Prefer **stdio MCP** for agents (`--mcp-stdio` / `examples/mcp.stdio.json`). HTTP MCP is **local-trust dogfood only**. Tailscale Serve/Funnel is **not** authentication.
-- Funnel of the Portskill listen/UI/MCP port is **refused in code**. Funnel on *user* claimed service ports stays a deliberate user action.
+- Agents can connect with **stdio MCP** (`--mcp-stdio` / `examples/mcp.stdio.json`) or **HTTP MCP** on the same local listener as the UI. Access on this local listener does not require a token. Sharing Portskill's listen port with Tailscale Serve or Funnel is not a substitute for authentication.
+- Funnel of Portskill's own listen/UI/MCP port is blocked in code. Funnel on user-claimed service ports stays a deliberate user action.
 - Remote machines remain **HOLD** (not implemented).
 
 **Distribution / code signing:** Portskill does not ship a notarized or signed binary. Personal Mac packaging is `./scripts/build-app.sh` plus `./scripts/install-keepalive.sh` (same `port_registry_app` under the app/CLI/MCP). App Store Connect / notarization remain HOLD. There is no friend installer or signed-app distribution path.
 
 ## Connect MCP
 
-**Stdio is the preferred agent path** (Cursor / Claude / Codex). Copy `examples/mcp.stdio.json` or the stdio block in the UI MCP / Compose panel.
+**Stdio MCP** is one agent connection option (Cursor / Claude / Codex). Copy `examples/mcp.stdio.json` or the stdio block in the UI MCP / Compose panel.
 
 ```json
 {
@@ -147,7 +149,7 @@ See **[SECURITY.md](SECURITY.md)** for reporting and trust boundaries.
 }
 ```
 
-**HTTP MCP (local-trust only):** same loopback listener as the UI — no bearer required on the personal listen path. Prefer stdio for agent install. If dogfooding HTTP: run the app, then `POST` JSON-RPC to the `mcp_url` from `listen.json` (also `GET /mcp` discovery). Do not Funnel the listen port; Tailscale is not authentication.
+**HTTP MCP** uses the same local listener as the UI. Run the app, then `POST` JSON-RPC to the `mcp_url` from `listen.json` (`GET /mcp` is discovery). Access on this local listener does not require a token. Sharing Portskill's listen port with Tailscale Serve or Funnel is not a substitute for authentication, and Funnel of Portskill's own listen port is blocked.
 
 Tools: `allocate`, `activate`, `start`, `stop`, `release`, `status`, `portskill_path`, `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults`, `deactivate`, `compat_check`, `preset_save`, `preset_list`, `preset_apply`, `preset_delete`, `settings_get`, `settings_set`. (`exit_house` remains as a deactivate alias.) `portskill_path` is the skip-aware happy-path orchestrator (`mode` start|stop|release|restart|status); fine primitives stay callable and `mcp_tools` can hide the path tool.
 

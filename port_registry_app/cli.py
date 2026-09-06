@@ -127,7 +127,7 @@ def non_loopback_refuse_message(host):
         "The HTTP UI and MCP listener would be reachable beyond this machine. "
         f"Default bind is 127.0.0.1. Pass {ALLOW_NON_LOOPBACK_FLAG} only if you "
         "intentionally accept that exposure (documented footgun). "
-        "Bearer auth is mandatory even with the override (no open LAN dogfood)."
+        "This override does not add authentication."
     )
 
 
