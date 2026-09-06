@@ -144,6 +144,64 @@ class CollapsedMarkupTests(unittest.TestCase):
         self.assertIn("local-trust dogfood", html.lower())
         self.assertIn('id="pr-mcp-http-dogfood"', html)
         self.assertIn("Stdio MCP (preferred)", html)
+        markup = html.split("</style>", 1)[-1]
+        connect = _details_tags(markup, "pr-mcp-connect-details")
+        self.assertTrue(connect, "Agent Connection details missing")
+        for tag in connect:
+            self.assertFalse(_has_open_attr(tag), f"Agent Connection details not collapsed: {tag}")
+        self.assertIn('id="pr-mcp-connect-stdio"', html)
+        self.assertIn('id="pr-mcp-connect-http"', html)
+
+    def test_collapsed_project_summary_shows_counts(self) -> None:
+        from port_registry_app.server import build_view, render_page
+
+        from tests.helpers import IsolatedConfig
+
+        raw = {
+            "version": 1,
+            "pool": {"start": 20000, "end": 29999},
+            "projects": {
+                "/tmp/portskill-counts": {
+                    "ranges": [
+                        {
+                            "id": "r-active-serve",
+                            "start": 20001,
+                            "end": 20001,
+                            "state": "active",
+                            "note": "served",
+                            "tailnet": {"mode": "serve"},
+                            "default_state": "on",
+                        },
+                        {
+                            "id": "r-reserved",
+                            "start": 20002,
+                            "end": 20002,
+                            "state": "reserved",
+                            "note": "idle",
+                            "tailnet": {"mode": "none"},
+                            "default_state": "off",
+                        },
+                    ],
+                }
+            },
+            "presets": {},
+            "settings": {},
+        }
+        with IsolatedConfig() as iso:
+            iso.write_registry(raw)
+            html = render_page(
+                build_view(raw),
+                tailscale={"chip": "Needs login", "state": "needs_login", "logged_in": False},
+            )
+        markup = html.split("</style>", 1)[-1]
+        tags = _details_tags(markup, "pr-project")
+        self.assertTrue(tags)
+        for tag in tags:
+            self.assertFalse(_has_open_attr(tag), f"project details not collapsed: {tag}")
+        self.assertIn("2 registered", html)
+        self.assertIn("1 active", html)
+        self.assertIn("1 Tailnet-served", html)
+        self.assertIn("data-pr-project-counts", html)
 
 
 class AdHocCodesignScriptTests(unittest.TestCase):

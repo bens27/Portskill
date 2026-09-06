@@ -76,6 +76,32 @@ def main() -> int:
         fail("friend UI still renders Workspaces/Remotes/Presets Coming soon markup")
     if "System tools" not in html:
         fail("System tools disclosure missing from rendered UI")
+    mcp_html = html
+    try:
+        from port_registry_app.server import handoff_panel_html, mcp_tools_panel_html
+
+        mcp_html = mcp_tools_panel_html(view)
+        handoff_html = handoff_panel_html(view)
+    except Exception as exc:  # pragma: no cover
+        fail(f"import MCP/handoff panel helpers: {exc}")
+    order = (
+        mcp_html.find('id="pr-mcp-system-details"'),
+        mcp_html.find('id="pr-mcp-connect"'),
+        mcp_html.find('id="pr-mcp-user-commands-section"'),
+        mcp_html.find('id="pr-mcp-user-composer"'),
+    )
+    if any(i < 0 for i in order) or order != tuple(sorted(order)):
+        fail(f"MCP Tools section order is not System → Agent Connection → User Commands → Composer: {order}")
+    if 'id="pr-mcp-connect-stdio"' not in mcp_html or 'id="pr-mcp-connect-http"' not in mcp_html:
+        fail("Agent Connection options missing expandable stdio/HTTP details")
+    if "session-handoff/*" in mcp_html or "not nested" in mcp_html:
+        fail("Session Handoff tool-name copy still lives in MCP Tools")
+    if "session-handoff/*" not in handoff_html or "handoff_status" not in handoff_html:
+        fail("Session Handoff tool-name copy missing from Session Handoff")
+    if "Write-a-Handoff skill" not in handoff_html or 'data-pr-action="handoff-skill-download"' not in handoff_html:
+        fail("Write-a-Handoff skill download/upload controls missing")
+    if "data-pr-project-counts" not in html and "registered" not in html:
+        fail("collapsed project summaries missing registered/active/Tailnet counts")
     if "Session Handoff" not in html or 'id="pr-handoff-details"' not in html:
         fail("Session Handoff section missing from rendered UI")
     if "Coming soon" in html.split("Session Handoff", 1)[-1][:800]:

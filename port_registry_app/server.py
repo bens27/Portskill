@@ -25,7 +25,9 @@ from urllib.parse import urlparse, unquote
 
 from . import __version__
 from .handoff import (
+    bundled_skill_text,
     install_help_text,
+    persist_custom_skill,
     run_codex_install,
     run_package_sh,
     status_payload,
@@ -578,6 +580,7 @@ def load_registry() -> dict:
             "serve_portskill_on_tailscale": True,
             "handoff_enabled": False,
             "handoff_kit": None,
+            "handoff_skill": None,
         },
         "machines": default_machines(),
     }
@@ -651,6 +654,11 @@ def load_registry() -> dict:
         handoff_kit = handoff_kit.strip()
     else:
         handoff_kit = None
+    handoff_skill = settings.get("handoff_skill")
+    if isinstance(handoff_skill, str) and handoff_skill.strip():
+        handoff_skill = handoff_skill.strip()
+    else:
+        handoff_skill = None
     data["settings"] = {
         "auto_apply_preset": preset,
         "auto_apply_on_launch": flag,
@@ -663,6 +671,7 @@ def load_registry() -> dict:
         "serve_portskill_on_tailscale": serve_ps,
         "handoff_enabled": handoff_enabled,
         "handoff_kit": handoff_kit,
+        "handoff_skill": handoff_skill,
     }
     data["machines"] = normalize_machines(data.get("machines"))
     return data
@@ -927,6 +936,7 @@ def build_view(raw: dict) -> dict:
             "servePortskillOnTailscale": bool(settings.get("serve_portskill_on_tailscale")),
             "handoffEnabled": bool(settings.get("handoff_enabled")),
             "handoffKit": settings.get("handoff_kit"),
+            "handoffSkill": settings.get("handoff_skill"),
         },
         "workspaceDraft": {
             "editMode": edit_mode,
@@ -1107,15 +1117,37 @@ def range_html(project: str, rng: dict) -> str:
 </div>"""
 
 
+def project_range_counts(ranges: list) -> tuple[int, int, int]:
+    """Registered / active / Tailnet-served counts for a collapsed project summary."""
+    registered = 0
+    active = 0
+    served = 0
+    for rng in ranges or []:
+        if not isinstance(rng, dict):
+            continue
+        registered += 1
+        if (rng.get("state") or "") == "active":
+            active += 1
+        if (rng.get("tailnetMode") or "none") in ("serve", "funnel"):
+            served += 1
+    return registered, active, served
+
+
 def project_html(project: dict) -> str:
-    ranges = "".join(range_html(project["project"], r) for r in project["ranges"])
-    n = len(project.get("ranges") or [])
+    ranges_list = project.get("ranges") or []
+    ranges = "".join(range_html(project["project"], r) for r in ranges_list)
+    registered, active, served = project_range_counts(ranges_list)
     label = esc(project["projectLabel"])
     full = esc(project["project"])
     return (
         f'<details class="pr-project pr-disclose" data-project="{full}">'
         f'<summary class="pr-project-name" title="{full}">'
-        f'{label} <span class="tag">{n}</span>'
+        f"{label}"
+        f'<span class="pr-project-counts" data-pr-project-counts>'
+        f'<span class="tag" title="Registered total">{registered} registered</span>'
+        f'<span class="tag" title="Active total">{active} active</span>'
+        f'<span class="tag" title="Tailnet-served total">{served} Tailnet-served</span>'
+        f"</span>"
         f'<span class="pr-disclose-hint" aria-hidden="true">Show</span>'
         f"</summary>"
         f'<div class="pr-ranges">{ranges}</div>'
@@ -1215,8 +1247,8 @@ def console_css() -> str:
         ".pr-mcp-toggle .pr-switch-label{font-size:11px;color:var(--muted)}"
         ".pr-defaults-head{display:flex;align-items:baseline;gap:10px;margin:0 0 10px}"
         ".pr-defaults-head h3{margin:0;font-size:15px}"
-        ".pr-defaults-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}"
-        ".pr-defaults-item{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:#fafbf9}"
+        ".pr-defaults-list{list-style:none;margin:0;padding:0;display:grid;gap:3px}"
+        ".pr-defaults-item{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:#fafbf9}"
         ".pr-defaults-note{font-weight:600}"
         ".pr-defaults-proj{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:28ch}"
         ".pr-defaults-jump{margin-left:auto;font-size:12px;color:var(--cobalt);text-decoration:none}"
@@ -1227,14 +1259,17 @@ def console_css() -> str:
         "display:flex;align-items:center;gap:8px;padding:10px 12px;user-select:none;font-weight:600}"
         ".pr-project>summary.pr-project-name::-webkit-details-marker{display:none}"
         ".pr-project[open]>summary.pr-project-name{border-bottom:1px solid var(--line)}"
-        ".pr-project .pr-ranges{padding:12px}"
+        ".pr-project .pr-ranges{padding:8px}"
+        ".pr-project-counts{display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;"
+        "text-transform:none;letter-spacing:0;font-weight:500}"
+        ".pr-project-counts .tag{color:var(--muted)}"
         ".pr-project>summary .pr-disclose-hint{margin-left:auto;font-size:11px;font-weight:500;"
         "text-transform:none;letter-spacing:0;color:var(--cobalt);opacity:.85}"
         ".pr-project[open]>summary .pr-disclose-hint{font-size:0}"
         ".pr-project>summary .pr-disclose-hint::after{content:\" services\"}"
         ".pr-project[open]>summary .pr-disclose-hint::after{content:\"Hide\";font-size:11px;opacity:.55}"
-        ".pr-ranges{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}"
-        ".pr-range{position:relative;border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:#fafbf9}"
+        ".pr-ranges{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px}"
+        ".pr-range{position:relative;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fafbf9}"
         ".pr-card-pencil{position:absolute;top:8px;right:8px;z-index:2;border:1px solid var(--line);"
         "background:#fff;border-radius:6px;width:28px;height:28px;padding:0;cursor:pointer;"
         "color:var(--muted);font-size:14px;line-height:1;display:inline-flex;align-items:center;justify-content:center}"
@@ -1330,7 +1365,8 @@ def console_css() -> str:
         ".pr-mcp-system-details[open]>summary .pr-disclose-hint{font-size:0}"
         ".pr-mcp-system-details[open]>summary .pr-disclose-hint::after{content:\"Hide\";font-size:11px;opacity:.55}"
         ".pr-mcp-system-details .pr-mcp-list{padding:8px;max-height:none}"
-        ".pr-handoff-details>summary .pr-disclose-hint::after{content:\"\"}"
+        ".pr-handoff-details>summary .pr-disclose-hint::after,.pr-mcp-connect-details>summary .pr-disclose-hint::after{content:\"\"}"
+        ".pr-mcp-connect-details .pr-mcp-connect-body{padding:10px 12px;display:grid;gap:8px}"
         ".pr-handoff-body{padding:12px;display:flex;flex-direction:column;gap:10px;font-size:13px}"
         ".pr-handoff-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}"
         ".pr-handoff-matrix{width:100%;border-collapse:collapse;font-size:12px}"
@@ -2123,11 +2159,13 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
     else:
         system_body = '<div class="empty">No MCP tools registered.</div>'
     user_body = (
-        f'<div class="pr-mcp-section">User commands</div>'
+        f'<div class="pr-mcp-section" id="pr-mcp-user-commands-section">User commands</div>'
+        f'<p class="pr-mcp-meta">User commands are marked <code>x-portskill-kind: user-command</code> '
+        f"and respect the same enable map.</p>"
         + (
             f'<ul class="pr-mcp-list">{"".join(user_rows)}</ul>'
             if user_rows
-            else '<div class="empty">No user commands yet — compose one above.</div>'
+            else '<div class="empty">No user commands yet — compose one below.</div>'
         )
     )
     count = len(system_rows) + len(user_rows)
@@ -2143,20 +2181,29 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
     )
     stdio_block = (
         f'<div class="pr-mcp-connect" id="pr-mcp-connect">'
-        f'<h4>Connect an agent — stdio preferred</h4>'
+        f'<div class="pr-mcp-section">Agent connection</div>'
+        f'<details class="pr-mcp-system-details pr-mcp-connect-details" id="pr-mcp-connect-stdio">'
+        f'<summary>Stdio preferred <span class="tag">preferred for agents</span>'
+        f'<span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
+        f'<div class="pr-mcp-connect-body">'
         f'<p class="pr-mcp-meta" style="margin:0">Preferred path for Cursor / Claude / Codex. '
         f'Copy this stdio config (same as <code>examples/mcp.stdio.json</code>). '
         f'Command: <code id="pr-mcp-stdio-cmd">{esc(stdio)}</code></p>'
         f'<pre class="pr-mcp-stdio-config" id="pr-mcp-stdio-config">{esc(stdio_config)}</pre>'
         f'<div class="pr-mcp-connect-row">'
         f'<button type="button" class="pr-btn" id="pr-mcp-stdio-copy">Copy stdio config</button>'
-        f'<span class="tag">preferred for agents</span>'
         f'</div>'
+        f'</div></details>'
+        f'<details class="pr-mcp-system-details pr-mcp-connect-details" id="pr-mcp-connect-http">'
+        f'<summary>HTTP MCP <span class="tag">local-trust dogfood</span>'
+        f'<span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
+        f'<div class="pr-mcp-connect-body">'
         f'<p class="pr-mcp-meta" style="margin:0" id="pr-mcp-http-dogfood">'
         f'HTTP MCP is <strong>local-trust dogfood only</strong> and requires '
         f'<code>Authorization: Bearer</code> (even on loopback). '
         f'<a class="pr-port-link" href="{esc(mcp_url)}" target="_blank" rel="noopener"><code>{esc(mcp_url)}</code></a>. '
         f'Tailscale is not authentication. Funnel of this listen port is refused.</p>'
+        f'</div></details>'
         f'</div>'
     )
     return (
@@ -2168,13 +2215,11 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         f'<span class="tag">user command composer</span></div>'
         f'<p class="pr-mcp-meta">Live <code>tools/list</code> surface. Agents should use '
         f'<strong>stdio MCP</strong> (<code>{esc(stdio)}</code>). HTTP MCP is local-trust dogfood only and needs a bearer token. '
-        f'Toggles filter live <code>tools/list</code> + <code>tools/call</code> (disabled tools stay listed here so you can re-enable). '
-        f'Session Handoff tools are flat names (<code>handoff_status</code>, <code>handoff_list</code>, …) — not nested <code>session-handoff/*</code>. '
-        f'User commands are marked <code>x-portskill-kind: user-command</code> and respect the same enable map.</p>'
-        f"{stdio_block}"
-        f"{composer}"
-        f"{user_body}"
+        f'Toggles filter live <code>tools/list</code> + <code>tools/call</code> (disabled tools stay listed here so you can re-enable).</p>'
         f"{system_body}"
+        f"{stdio_block}"
+        f"{user_body}"
+        f"{composer}"
         f"</div>"
     )
 
@@ -2185,6 +2230,7 @@ def handoff_panel_html(view: dict | None = None) -> str:
     raw_settings = {
         "handoff_enabled": bool(settings.get("handoffEnabled")),
         "handoff_kit": settings.get("handoffKit"),
+        "handoff_skill": settings.get("handoffSkill"),
     }
     status = status_payload(settings=raw_settings)
     enabled = bool(status.get("handoff_enabled"))
@@ -2266,12 +2312,18 @@ def handoff_panel_html(view: dict | None = None) -> str:
     else:
         kit_status = "Point at a Session Handoff kit checkout (or restore vendor/session-handoff-kit)."
     override = esc(settings.get("handoffKit") or "")
+    skill_src = esc(status.get("skill_source") or "vendored")
+    skill_override = esc(status.get("skill_override") or "")
+    skill_current = esc(status.get("skill_path") or "")
     return (
         f'<div class="panel pr-panel pr-handoff" id="pr-handoff">'
         f'<details class="pr-mcp-system-details pr-handoff-details" id="pr-handoff-details">'
         f'<summary>Session Handoff <span class="tag">{esc("on" if enabled else "off")}</span>'
         f'<span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
         f'<div class="pr-handoff-body">'
+        f'<p class="pr-mcp-meta" style="margin:0">Session Handoff tools are flat names '
+        f'(<code>handoff_status</code>, <code>handoff_list</code>, …) — not nested '
+        f'<code>session-handoff/*</code>.</p>'
         f'<p>{esc(kit_status)}</p>'
         f'<div class="pr-handoff-row">'
         f'<label class="pr-switch" title="Persist settings.handoff_enabled">'
@@ -2290,6 +2342,22 @@ def handoff_panel_html(view: dict | None = None) -> str:
         f'<button type="submit" class="pr-btn" data-pr-action="handoff-set-kit">Set kit path</button>'
         f"</form>"
         f"{err_html}"
+        f"<h4>Write-a-Handoff skill</h4>"
+        f'<p class="pr-mcp-meta" style="margin:0">Download the bundled skill to review, then upload a replacement. '
+        f"The choice persists under <code>~/.config/port-registry/</code> (reload keeps it). "
+        f"HTTP bearer is required for upload; stdio MCP is unchanged.</p>"
+        f'<div class="pr-handoff-row" id="pr-handoff-skill">'
+        f'<span class="tag" id="pr-handoff-skill-source">skill: {skill_src}</span>'
+        f'<code class="pr-handoff-kit" id="pr-handoff-skill-path" title="Current skill file">{skill_current}</code>'
+        f'<button type="button" class="pr-btn" data-pr-action="handoff-skill-download">'
+        f"Download bundled skill</button>"
+        f'<label class="pr-btn" style="display:inline-flex;align-items:center;cursor:pointer">'
+        f'Upload replacement'
+        f'<input type="file" id="pr-handoff-skill-file" accept=".md,text/markdown,text/plain" hidden>'
+        f"</label>"
+        f'<button type="button" class="pr-btn" data-pr-action="handoff-skill-clear"'
+        f'{" disabled" if not skill_override else ""}>Use bundled</button>'
+        f"</div>"
         f"<h4>Install matrix</h4>"
         f"<p>Add or manage each surface from the kit README. Cowork and chat share "
         f"<code>package.sh</code>; Claude Code and Chrome are copy-the-path (Portskill "
@@ -2576,10 +2644,12 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
   function handleResult(result, btn){{
     if(result.ok){{
       if(result.body&&result.body.download){{
-        var blob=new Blob([result.body.download],{{type:'application/json'}});
+        var fname=result.body.filename||'port-registry-workspace.json';
+        var mime=result.body.mime||(/\\.md$/i.test(fname)?'text/markdown;charset=utf-8':'application/json');
+        var blob=new Blob([result.body.download],{{type:mime}});
         var a=document.createElement('a');
         a.href=URL.createObjectURL(blob);
-        a.download=result.body.filename||'port-registry-workspace.json';
+        a.download=fname;
         a.click();
         URL.revokeObjectURL(a.href);
       }}
@@ -3099,6 +3169,20 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
       postAction({{action:'handoff-set-kit', path:path||'none'}})
         .then(function(result){{handleResult(result,null);}})
         .catch(function(){{alert('Set kit path failed');}});
+    }});
+  }}
+  var skillFile=document.getElementById('pr-handoff-skill-file');
+  if(skillFile){{
+    skillFile.addEventListener('change',function(){{
+      var file=skillFile.files&&skillFile.files[0];
+      if(!file)return;
+      var reader=new FileReader();
+      reader.onload=function(){{
+        postAction({{action:'handoff-skill-upload', filename:file.name, content:String(reader.result||'')}})
+          .then(function(result){{handleResult(result,null);}})
+          .catch(function(){{alert('Skill upload failed');}});
+      }};
+      reader.readAsText(file);
     }});
   }}
 
@@ -4047,6 +4131,43 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             return 400, {"ok": False, "message": "expected path"}
         token = path.strip() or "none"
         argv = ["settings", "set", "--handoff-kit", token]
+        code, payload, stdout = run_cli(argv)
+        return _cli_result(code, payload, stdout)
+
+    if action == "handoff-skill-download":
+        settings = load_registry().get("settings") or {}
+        result = bundled_skill_text(settings)
+        if not result.get("ok"):
+            return 422, result
+        return 0, {
+            "ok": True,
+            "download": result.get("text") or "",
+            "filename": result.get("filename") or "SKILL.md",
+            "mime": "text/markdown; charset=utf-8",
+            "path": result.get("path"),
+            "source": result.get("source"),
+        }
+
+    if action == "handoff-skill-upload":
+        content = body.get("content")
+        if not isinstance(content, str):
+            return 400, {"ok": False, "message": "expected skill file content"}
+        written = persist_custom_skill(content)
+        if not written.get("ok"):
+            return 422, written
+        path = written.get("path") or ""
+        argv = ["settings", "set", "--handoff-skill", path]
+        code, payload, stdout = run_cli(argv)
+        if code != 0:
+            return _cli_result(code, payload, stdout)
+        out = dict(payload) if isinstance(payload, dict) else {}
+        out["ok"] = True
+        out["handoff_skill"] = path
+        out["skill_source"] = "custom"
+        return 0, out
+
+    if action == "handoff-skill-clear":
+        argv = ["settings", "set", "--handoff-skill", "none"]
         code, payload, stdout = run_cli(argv)
         return _cli_result(code, payload, stdout)
 

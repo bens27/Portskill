@@ -69,6 +69,38 @@ class HandoffMarkupTests(unittest.TestCase):
         self.assertIn("handoff_status", html)
         self.assertIn("not nested", html)
         self.assertIn("session-handoff/*", html)
+        self.assertIn("Write-a-Handoff skill", html)
+        self.assertIn('data-pr-action="handoff-skill-download"', html)
+        self.assertIn('id="pr-handoff-skill-file"', html)
+        self.assertIn("~/.config/port-registry/", html)
+
+    def test_flat_tool_names_live_in_handoff_not_mcp_panel(self) -> None:
+        from port_registry_app.server import (
+            build_view,
+            handoff_panel_html,
+            mcp_tools_panel_html,
+        )
+
+        with IsolatedConfig() as iso:
+            iso.write_registry()
+            view = build_view({})
+        mcp = mcp_tools_panel_html(view)
+        handoff = handoff_panel_html(view)
+        self.assertNotIn("session-handoff/*", mcp)
+        self.assertNotIn("not nested", mcp)
+        self.assertIn("session-handoff/*", handoff)
+        self.assertIn("handoff_status", handoff)
+        self.assertIn("not nested", handoff)
+        self.assertIn("x-portskill-kind: user-command", mcp)
+        self.assertIn("same enable map", mcp)
+        sys_i = mcp.find('id="pr-mcp-system-details"')
+        conn_i = mcp.find('id="pr-mcp-connect"')
+        user_i = mcp.find('id="pr-mcp-user-commands-section"')
+        comp_i = mcp.find('id="pr-mcp-user-composer"')
+        self.assertTrue(0 <= sys_i < conn_i < user_i < comp_i, (sys_i, conn_i, user_i, comp_i))
+        self.assertIn('id="pr-mcp-connect-stdio"', mcp)
+        self.assertIn('id="pr-mcp-connect-http"', mcp)
+        self.assertNotIn(" open", mcp.split('id="pr-mcp-connect-stdio"', 1)[0][-80:])
 
 
 class HandoffMcpTests(unittest.TestCase):
@@ -319,6 +351,138 @@ class HandoffMcpTests(unittest.TestCase):
         self.assertTrue(result.get("isError"))
         body = result.get("structuredContent") or {}
         self.assertEqual(body.get("error"), "kit_missing")
+
+
+class HandoffCustomSkillTests(unittest.TestCase):
+    def test_upload_persists_and_mcp_reads_custom_skill(self) -> None:
+        from port_registry_app.handoff import default_custom_skill_path
+        from port_registry_app.mcp import mcp_handle
+        from port_registry_app.server import (
+            build_view,
+            dispatch_ui_action,
+            handoff_panel_html,
+            load_registry,
+        )
+
+        custom = (
+            "---\nname: session-handoff\nmetadata:\n  version: \"custom-test\"\n---\n"
+            "# Custom Write-a-Handoff\n\nreplacement skill body\n"
+        )
+        with IsolatedConfig() as iso:
+            iso.write_registry()
+            code, body = dispatch_ui_action({
+                "action": "handoff-skill-upload",
+                "filename": "SKILL.md",
+                "content": custom,
+            })
+            self.assertEqual(code, 0, body)
+            self.assertTrue(body.get("ok"), body)
+            stored = default_custom_skill_path()
+            self.assertTrue(stored.is_file(), stored)
+            self.assertIn("replacement skill body", stored.read_text(encoding="utf-8"))
+            shown = iso.run_cli(["settings", "get"])
+            self.assertEqual(shown.returncode, 0, shown.stderr)
+            settings = json.loads(shown.stdout).get("settings") or {}
+            self.assertEqual(settings.get("handoff_skill"), str(stored))
+
+            skill = mcp_handle({
+                "jsonrpc": "2.0",
+                "id": 40,
+                "method": "tools/call",
+                "params": {"name": "handoff_skill", "arguments": {}},
+            })
+            text = skill["result"]["structuredContent"].get("text") or ""
+            self.assertIn("replacement skill body", text)
+            self.assertIn("custom-test", text)
+
+            html = handoff_panel_html(build_view(load_registry()))
+            self.assertIn("skill: custom", html)
+            self.assertIn(str(stored), html)
+
+    def test_download_bundled_skill_for_review(self) -> None:
+        from port_registry_app.server import dispatch_ui_action
+
+        with IsolatedConfig() as iso:
+            iso.write_registry()
+            code, body = dispatch_ui_action({"action": "handoff-skill-download"})
+        self.assertEqual(code, 0, body)
+        self.assertTrue(body.get("ok"), body)
+        self.assertIn("name: session-handoff", body.get("download") or "")
+        self.assertEqual(body.get("filename"), "SKILL.md")
+        self.assertEqual(body.get("source"), "vendored")
+
+    def test_clear_restores_bundled_skill(self) -> None:
+        from port_registry_app.mcp import mcp_handle
+        from port_registry_app.server import dispatch_ui_action
+
+        with IsolatedConfig() as iso:
+            iso.write_registry()
+            dispatch_ui_action({
+                "action": "handoff-skill-upload",
+                "content": "# custom only\n",
+            })
+            code, body = dispatch_ui_action({"action": "handoff-skill-clear"})
+            self.assertEqual(code, 0, body)
+            skill = mcp_handle({
+                "jsonrpc": "2.0",
+                "id": 41,
+                "method": "tools/call",
+                "params": {"name": "handoff_skill", "arguments": {}},
+            })
+        text = skill["result"]["structuredContent"].get("text") or ""
+        self.assertIn("name: session-handoff", text)
+        self.assertNotIn("# custom only", text)
+
+    def test_skill_upload_requires_http_bearer(self) -> None:
+        import threading
+        import urllib.error
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+
+        from port_registry_app.cli import ensure_http_auth_token
+        from port_registry_app.server import Handler
+        from tests.helpers import free_loopback_port
+
+        with IsolatedConfig() as iso:
+            iso.write_registry()
+            auth, _minted = ensure_http_auth_token()
+            token = auth["token"]
+            port = free_loopback_port()
+            httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            url = f"http://127.0.0.1:{port}/port-registry/actions"
+            payload = json.dumps({
+                "action": "handoff-skill-upload",
+                "content": "# noauth\n",
+            }).encode("utf-8")
+            try:
+                req = urllib.request.Request(
+                    url,
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    urllib.request.urlopen(req, timeout=5)
+                self.assertEqual(ctx.exception.code, 401)
+
+                req = urllib.request.Request(
+                    url,
+                    data=payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {token}",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    self.assertEqual(int(getattr(resp, "status", None) or resp.getcode()), 200)
+                    body = json.loads(resp.read().decode("utf-8"))
+                self.assertTrue(body.get("ok"), body)
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
 
 
 class HandoffVendorTests(unittest.TestCase):

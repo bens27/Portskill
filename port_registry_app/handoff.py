@@ -45,6 +45,8 @@ SKILL_REL_PLUGIN = (
 TEMPLATE_REL = pathlib.Path("codex") / "skills" / "session-handoff" / "handoff-template.md"
 LEDGER_REL = pathlib.Path("codex") / "hooks" / "handoff_ledger.py"
 PACKAGE_SH_REL = pathlib.Path("scripts") / "package.sh"
+HANDOFF_SKILL_FILENAME = "handoff-skill.md"
+HANDOFF_SKILL_MAX_BYTES = 256 * 1024
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:
@@ -100,13 +102,96 @@ def kit_error(settings: dict | None = None) -> str:
     return "vendored Session Handoff kit missing (vendor/session-handoff-kit)"
 
 
-def skill_path(settings: dict | None = None) -> pathlib.Path | None:
+def _registry_parent() -> pathlib.Path:
+    """Directory of registry.json (same convention as listen.json / http_auth.json)."""
+    configured = os.environ.get("PORT_REGISTRY_PATH", "~/.config/port-registry/registry.json")
+    return pathlib.Path(configured).expanduser().parent
+
+
+def default_custom_skill_path() -> pathlib.Path:
+    return _registry_parent() / HANDOFF_SKILL_FILENAME
+
+
+def configured_skill_override(settings: dict | None = None) -> str:
+    if isinstance(settings, dict):
+        raw = settings.get("handoff_skill")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return ""
+
+
+def kit_skill_path(settings: dict | None = None) -> pathlib.Path | None:
+    """Bundled Write-a-Handoff SKILL.md from the vendored kit (or kit override)."""
     root = kit_root(settings)
     for rel in (SKILL_REL, SKILL_REL_PLUGIN):
         path = root / rel
         if path.is_file():
             return path
     return None
+
+
+def skill_path(settings: dict | None = None) -> pathlib.Path | None:
+    override = configured_skill_override(settings)
+    if override:
+        path = pathlib.Path(override).expanduser()
+        return path if path.is_file() else None
+    return kit_skill_path(settings)
+
+
+def skill_source(settings: dict | None = None) -> str:
+    override = configured_skill_override(settings)
+    if override:
+        return "custom"
+    return "vendored"
+
+
+def _atomic_write_text(path: pathlib.Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+
+
+def persist_custom_skill(text: str) -> dict:
+    """Write a replacement Write-a-Handoff skill beside the registry."""
+    if not isinstance(text, str):
+        return {"ok": False, "error": "invalid_skill", "message": "expected skill text"}
+    payload = text.replace("\r\n", "\n")
+    if not payload.strip():
+        return {"ok": False, "error": "invalid_skill", "message": "skill file is empty"}
+    encoded = payload.encode("utf-8")
+    if len(encoded) > HANDOFF_SKILL_MAX_BYTES:
+        return {
+            "ok": False,
+            "error": "invalid_skill",
+            "message": f"skill file exceeds {HANDOFF_SKILL_MAX_BYTES} bytes",
+        }
+    path = default_custom_skill_path()
+    try:
+        _atomic_write_text(path, payload if payload.endswith("\n") else payload + "\n")
+    except OSError as exc:
+        return {"ok": False, "error": "skill_write_failed", "message": str(exc)}
+    return {"ok": True, "path": str(path), "source": "custom"}
+
+
+def bundled_skill_text(settings: dict | None = None) -> dict:
+    path = kit_skill_path(settings)
+    if path is None:
+        return {"ok": False, "error": "skill_missing", "message": "bundled SKILL.md not found in kit"}
+    return {
+        "ok": True,
+        "path": str(path),
+        "text": _read_text(path),
+        "filename": "SKILL.md",
+        "source": "vendored",
+    }
 
 
 def template_path(settings: dict | None = None) -> pathlib.Path | None:
@@ -481,8 +566,10 @@ def status_payload(project_dir: str | None = None, settings: dict | None = None)
     err = kit_error(settings)
     present = kit_present(settings)
     skill = skill_path(settings)
+    kit_skill = kit_skill_path(settings)
     ledger = ledger_script(settings)
     pkg = package_script(settings)
+    skill_override = configured_skill_override(settings)
     opened = open_handoff_count(project_dir, settings) if ledger is not None else {
         "ok": False,
         "count": None,
@@ -494,6 +581,9 @@ def status_payload(project_dir: str | None = None, settings: dict | None = None)
         "kit_source": "override" if configured_kit_override(settings) else "vendored",
         "installed": bool(skill and skill.is_file()),
         "skill_path": str(skill) if skill else None,
+        "skill_source": skill_source(settings),
+        "skill_override": skill_override or None,
+        "bundled_skill_path": str(kit_skill) if kit_skill else None,
         "ledger_path": str(ledger) if ledger else None,
         "package_sh": str(pkg) if pkg else None,
         "error": err or None,
@@ -694,7 +784,10 @@ HANDOFF_TOOL_DEFS = [
     },
     {
         "name": "handoff_skill",
-        "description": "Return session-handoff SKILL.md text from the vendored kit (or override).",
+        "description": (
+            "Return Write-a-Handoff SKILL.md text from the custom file under "
+            "~/.config/port-registry/ when set, else the vendored kit (or kit override)."
+        ),
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
