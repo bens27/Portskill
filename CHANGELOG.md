@@ -3,22 +3,23 @@
 ## Unreleased
 
 ### Changed
+- Local HTTP UI and ordinary HTTP APIs on the personal listen path no longer require `Authorization: Bearer`. `GET /` serves the registry UI (no login wall). Funnel of Portskill’s own listen port remains refused. Stdio MCP is unchanged. `http-auth` CLI / `http_auth.json` remain optional helpers and do not gate default UI routes.
 - MCP Tools panel order is System tools → Agent connection (each setup instruction is a start-collapsed disclosure) → User commands → Command composer.
 - Session Handoff flat tool-name copy (`handoff_status`, `handoff_list`, … — not nested `session-handoff/*`) lives in the Session Handoff section. The user-command enable-map sentence stays next to User commands.
 - Settings → Services list is denser (tighter padding/gap between service entries). Collapsed project disclosures show registered / active / Tailnet-served counts.
 - Personal Mac `.app` path is keepalive + `build-app.sh` only. `scripts/install-mac.sh` and `scripts/notarize-mac.sh` removed from the product surface. Remotes/ASC remain HOLD.
 
 ### Added
-- Write-a-Handoff skill file control in Session Handoff: download the bundled skill, upload a replacement, persist `settings.handoff_skill` under `~/.config/port-registry/`. Reload keeps the choice. HTTP bearer still required for UI/API mutations; stdio MCP is unchanged.
+- Write-a-Handoff skill file control in Session Handoff: download the bundled skill, upload a replacement, persist `settings.handoff_skill` under `~/.config/port-registry/`. Reload keeps the choice. Stdio MCP is unchanged.
 
 ### Security
-- HTTP mutating and inventory surfaces require a local bearer token (`~/.config/port-registry/http_auth.json`) even on loopback. Unauthenticated `POST /mcp` fails closed with 401. Stdio MCP is unchanged. Funnel of Portskill’s own listen/UI/MCP port is refused. Tailscale is not HTTP authentication. Passkeys/OAuth are not in this cut.
+- Local HTTP UI and APIs on the personal listen path are open without a bearer token. Funnel of Portskill’s own listen/UI/MCP port is refused. Tailscale is not HTTP authentication. `http-auth` / `http_auth.json` remain optional helpers (not a default gate). Passkeys/OAuth are not in this cut.
 
 ### Docs
 - README rewritten for developers: clone then ./scripts/run.sh; removed Mac-friends cold path, installer-first narrative, and notarization-as-distribution sections.
 - PLAYBOOK.md retired (friend-share / installer path unsupported).
 - SECURITY.md: no signed/notarized distribution claim; personal packaging is keepalive + `build-app.sh`; ASC/notarize HOLD.
-- HTTP bearer auth documented for developers (CLI `http-auth show|regenerate`; doctor reports configured without printing the secret). Human-written README preamble left verbatim.
+- HTTP `http-auth` CLI / `http_auth.json` documented as optional helpers (not a default UI/API gate). Human-written README preamble left verbatim.
 
 All notable changes to **Portskill** are documented here.
 

@@ -219,16 +219,6 @@ def main() -> int:
     except urllib.error.URLError as exc:
         fail(f"GET ui_url {ui_url}: {exc}")
 
-    mcp_headers = {}
-    token = None
-    auth_path = pathlib.Path.home() / ".config" / "port-registry" / "http_auth.json"
-    if auth_path.is_file():
-        try:
-            token = (json.loads(auth_path.read_text(encoding="utf-8")) or {}).get("token")
-        except Exception:
-            token = None
-        if isinstance(token, str) and token.strip():
-            mcp_headers["Authorization"] = f"Bearer {token.strip()}"
     try:
         req = urllib.request.Request(mcp_url, method="GET")
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -238,19 +228,7 @@ def main() -> int:
             else:
                 fail(f"GET mcp_url {mcp_url} -> HTTP {code}")
     except urllib.error.HTTPError as exc:
-        if int(exc.code) != 401:
-            fail(f"GET mcp_url {mcp_url}: HTTP {exc.code}")
-        if not mcp_headers:
-            fail(f"GET mcp_url {mcp_url} -> 401 without local http_auth.json token")
-        req = urllib.request.Request(mcp_url, headers=mcp_headers, method="GET")
-        try:
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                code = int(getattr(resp, "status", None) or resp.getcode())
-                if code != 200:
-                    fail(f"GET mcp_url with bearer {mcp_url} -> HTTP {code}")
-                ok(f"GET mcp_url with bearer -> HTTP {code} ({mcp_url})")
-        except urllib.error.URLError as retry_exc:
-            fail(f"GET mcp_url with bearer {mcp_url}: {retry_exc}")
+        fail(f"GET mcp_url {mcp_url}: HTTP {exc.code}")
     except urllib.error.URLError as exc:
         fail(f"GET mcp_url {mcp_url}: {exc}")
 

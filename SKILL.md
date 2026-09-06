@@ -43,7 +43,7 @@ python3 -m port_registry_app --mcp-stdio
 
 - UI: open the printed URL (default `http://127.0.0.1:8765/`). Mirrors the Roster Port Registry view (sidebar, stats, range cards, Start/Stop/Release, Default On/Off, Export/Import environment, Apply defaults). Actions POST to `/port-registry/actions`.
 - MCP stdio (**preferred for agents**): newline-delimited JSON-RPC on stdin/stdout — `python3 -m port_registry_app --mcp-stdio` (see `examples/mcp.stdio.json`).
-- MCP HTTP (**local-trust dogfood only**): same loopback listener as the UI — `POST http://127.0.0.1:<port>/mcp` JSON-RPC with `Authorization: Bearer`; `GET /mcp` discovery also requires bearer. Do not bind `0.0.0.0` casually. Funnel of the Portskill listen port is refused. Tailscale is not authentication.
+- MCP HTTP (**local-trust dogfood only**): same loopback listener as the UI — `POST http://127.0.0.1:<port>/mcp` JSON-RPC; `GET /mcp` discovery. No bearer required on the personal listen path. Do not bind `0.0.0.0` casually. Funnel of the Portskill listen port is refused. Tailscale is not authentication.
 
 MCP tools (all map to CLI subcommands): `allocate`, `activate`, `start`, `stop`, `release`, `status`, `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults` (activate), `deactivate` (safe stop, keep reserved; `exit_house` alias), `compat_check`, presets/settings tools. Exit-code-3 needs_input (Tailnet) is returned as a tool error with structured `needs_input` / `prompt` / `options` / `resume_hint` (`--tailnet`) so the agent can resume.
 
@@ -62,8 +62,8 @@ Portable TypeScript modules for hosts wiring into a larger console live under `u
 ## Local trust / security
 
 - Default bind is `127.0.0.1`.
-- HTTP mutating and inventory surfaces require `Authorization: Bearer` (even on loopback), including `GET /api/state` and `POST /mcp`. Stdio MCP does not use this token.
-- `--host` other than loopback is **refused** unless `--allow-non-loopback` (documented footgun; no allowlist). Bearer auth stays mandatory with the override. Do not use `0.0.0.0` casually.
+- Local HTTP UI and ordinary HTTP APIs (`GET /`, `GET /api/state`, `POST /mcp`) open without `Authorization: Bearer`. `http-auth` / `http_auth.json` are optional helpers and do not gate this listen path. Stdio MCP does not use a token.
+- `--host` other than loopback is **refused** unless `--allow-non-loopback` (documented footgun; no allowlist). Do not use `0.0.0.0` casually.
 - Prefer **stdio MCP** for agents (`python3 -m port_registry_app --mcp-stdio` / `examples/mcp.stdio.json`). HTTP MCP is **local-trust dogfood only**. Tailscale is not authentication.
 - Funnel of the Portskill listen/UI port is refused in code. Funnel on user services is a separate deliberate choice.
 - **Remotes** — HOLD (not implemented).

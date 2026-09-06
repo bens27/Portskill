@@ -1,4 +1,4 @@
-"""Cut-0: local HTTP bearer auth + Funnel-of-listen refuse."""
+"""HTTP auth plumbing (optional) + Funnel-of-listen refuse."""
 from __future__ import annotations
 
 import json
@@ -107,13 +107,26 @@ class HttpAuthTokenTests(unittest.TestCase):
 
 
 class HttpAuthGateTests(unittest.TestCase):
-    def test_unauthenticated_post_mcp_401_valid_bearer_works(self) -> None:
+    def test_personal_listen_ui_and_apis_open_without_bearer(self) -> None:
         from port_registry_app.cli import ensure_http_auth_token
 
         with IsolatedConfig() as iso:
-            iso.write_registry()
-            auth, _minted = ensure_http_auth_token()
-            token = auth["token"]
+            iso.write_registry({
+                "projects": {
+                    "/tmp/portskill-demo": {
+                        "ranges": [{
+                            "id": "r-demo",
+                            "start": 20001,
+                            "end": 20001,
+                            "state": "reserved",
+                            "note": "demo range",
+                            "tailnet": {"mode": "none"},
+                            "default_state": "off",
+                        }],
+                    }
+                }
+            })
+            ensure_http_auth_token()
             httpd, port = _start_handler()
             try:
                 mcp = f"http://127.0.0.1:{port}/mcp"
@@ -128,28 +141,17 @@ class HttpAuthGateTests(unittest.TestCase):
                     },
                 }
                 code, payload = _http_json(mcp, method="POST", body=init)
-                self.assertEqual(code, 401)
-                self.assertEqual((payload or {}).get("error"), "unauthorized")
-                self.assertNotIn("result", payload or {})
-
-                code, payload = _http_json(mcp, method="POST", body=init, token="wrong-token")
-                self.assertEqual(code, 401)
-
-                code, payload = _http_json(mcp, method="POST", body=init, token=token)
                 self.assertEqual(code, 200)
                 self.assertEqual((payload or {}).get("jsonrpc"), "2.0")
                 self.assertIn("result", payload or {})
 
                 code, payload = _http_json(mcp)
-                self.assertEqual(code, 401)
-                code, payload = _http_json(mcp, token=token)
                 self.assertEqual(code, 200)
                 self.assertTrue((payload or {}).get("ok"))
 
                 code, payload = _http_json(f"http://127.0.0.1:{port}/api/state")
-                self.assertEqual(code, 401)
-                code, payload = _http_json(f"http://127.0.0.1:{port}/api/state", token=token)
                 self.assertEqual(code, 200)
+                self.assertIsInstance(payload, dict)
 
                 code, payload = _http_json(f"http://127.0.0.1:{port}/health")
                 self.assertEqual(code, 200)
@@ -159,9 +161,9 @@ class HttpAuthGateTests(unittest.TestCase):
                 with urllib.request.urlopen(req, timeout=5) as resp:
                     html = resp.read().decode("utf-8")
                     self.assertEqual(int(getattr(resp, "status", None) or resp.getcode()), 200)
-                self.assertIn("HTTP auth", html)
-                self.assertNotIn("r-demo", html)
-                self.assertNotIn("demo range", html)
+                self.assertNotIn("This listener requires a local bearer token", html)
+                self.assertIn("r-demo", html)
+                self.assertIn("demo range", html)
             finally:
                 httpd.shutdown()
                 httpd.server_close()

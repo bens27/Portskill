@@ -1191,9 +1191,8 @@ def _listen_enrichment() -> dict:
                 "or python3 -m port_registry_app --mcp-stdio"
             ),
             "cursor_mcp_http_hint": (
-                "HTTP MCP is local-trust dogfood only and requires "
-                "Authorization: Bearer (even on loopback). Prefer stdio for agents. "
-                "Tailscale is not authentication."
+                "HTTP MCP is local-trust dogfood only. Prefer stdio for agents. "
+                "Tailscale is not authentication. Funnel of this listen port is refused."
             ),
             "tools_endpoint": "initialize / tools/list / tools/call via JSON-RPC on /mcp",
         }
