@@ -16,9 +16,15 @@ from .handoff import HANDOFF_TOOL_DEFS, HANDOFF_TOOL_NAMES, call_handoff_tool
 # (missing key = enabled). Default is full so existing installs stay unchanged
 # until the user or agent opts into lean.
 MCP_TOOLS_PROFILES = ("full", "lean")
+PORTSKILL_TOOL_NAME = "portskill"
+PORTSKILL_TOOL_ALIASES = frozenset({"portskill_path"})
+PORTSKILL_TOOL_DESCRIPTION = (
+    "One MCP tool for your agent to handle all port management functions."
+)
+
 LEAN_MCP_TOOLS_ENABLED = frozenset(
     {
-        "portskill_path",
+        PORTSKILL_TOOL_NAME,
         "status",
         "settings_get",
         "stop",
@@ -67,7 +73,11 @@ TOOL_DEFS = [
     },
     {
         "name": "activate",
-        "description": "Mark an allocated range active (port-registry activate).",
+        "description": (
+            "Internal primitive: mark an allocated range active without running start.sh. "
+            "Prefer start or the portskill orchestrator. Off in the lean profile; "
+            "not a happy-path peer. Enable with settings set --mcp-tool activate=on."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -93,12 +103,21 @@ TOOL_DEFS = [
     },
     {
         "name": "stop",
-        "description": "Stop tracked process group and release the range (port-registry stop).",
+        "description": (
+            "Stop the tracked process group (stop.sh / pgid). "
+            "Whether the range is released follows settings.stop_also_release (default true). "
+            "When false, the range stays reserved and release is the explicit free. "
+            "Optional also_release overrides the setting for this call."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "range_id": {"type": "string"},
                 "project": {"type": "string"},
+                "also_release": {
+                    "type": "boolean",
+                    "description": "Override settings.stop_also_release for this call",
+                },
             },
             "required": ["range_id"],
         },
@@ -129,22 +148,15 @@ TOOL_DEFS = [
         },
     },
     {
-        "name": "portskill_path",
-        "description": (
-            "Happy-path orchestrator: mode start|stop|release|restart|status. "
-            "start phases: allocate → wire (defaults/commands if needed) → activate → start → "
-            "optional Tailnet Serve of user service ports (never Funnel Portskill listen). "
-            "Returns {ran, skipped, result, needs_input?}; skips are inspectable. "
-            "Fine primitives (allocate/activate/start/stop/release/status) stay callable. "
-            "CLI mirror: path --mode …"
-        ),
+        "name": "portskill",
+        "description": PORTSKILL_TOOL_DESCRIPTION,
         "inputSchema": {
             "type": "object",
             "properties": {
                 "mode": {
                     "type": "string",
                     "enum": ["start", "stop", "release", "restart", "status"],
-                    "description": "Path mode",
+                    "description": "start, stop, release, restart, or status",
                 },
                 "project": {"type": "string", "description": "Project directory (default .)"},
                 "count": {
@@ -229,7 +241,7 @@ TOOL_DEFS = [
     },
     {
         "name": "apply_defaults",
-        "description": "Activate environment: start services marked default_state=on. Optional also_stop_off stops Off services that are running.",
+        "description": "Start Default Services: start services marked default_state=on. Optional also_stop_off stops Off services that are running.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -341,7 +353,7 @@ TOOL_DEFS = [
     },
     {
         "name": "settings_get",
-        "description": "Read registry settings (auto_apply_preset, auto_apply_on_launch, auto_exit_on_shutdown, require_compat, mcp_tools, mcp_tools_profile).",
+        "description": "Read registry settings (auto_apply_preset, auto_apply_on_launch, auto_exit_on_shutdown, stop_also_release, require_compat, mcp_tools, mcp_tools_profile).",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
@@ -356,9 +368,16 @@ TOOL_DEFS = [
                     "description": (
                         "Apply named MCP tools profile into settings.mcp_tools. "
                         "full = all tools enabled (empty map). "
-                        "lean = portskill_path, status, settings_get, plus escape hatches "
-                        "allocate/stop/release; other CRUD and handoff_* stay off until toggled. "
+                        "lean = portskill, status, settings_get, plus escape hatches "
+                        "allocate/stop/release; activate and other CRUD and handoff_* stay off until toggled. "
                         "Opt-in: existing installs stay full until this is applied."
+                    ),
+                },
+                "stop_also_release": {
+                    "type": "boolean",
+                    "description": (
+                        "When true (default), stop also releases the range. "
+                        "When false, stop keeps the range reserved; use release to free it."
                     ),
                 },
                 "auto_apply_preset": {
@@ -563,11 +582,27 @@ def _mcp_tools_prefs(registry_or_settings=None) -> dict:
     return out
 
 
+def canonical_mcp_tool_name(name: str) -> str:
+    """Map one-cut aliases (portskill_path) to the tools/list name (portskill)."""
+    if isinstance(name, str) and name.strip() in PORTSKILL_TOOL_ALIASES:
+        return PORTSKILL_TOOL_NAME
+    return name.strip() if isinstance(name, str) else name
+
+
 def _tool_enabled(prefs: dict, name: str) -> bool:
-    """Missing key = enabled (default true)."""
-    if name not in prefs:
+    """Missing key = enabled (default true). Dual-read portskill / portskill_path."""
+    if not isinstance(name, str) or not name.strip():
         return True
-    return bool(prefs[name])
+    canonical = canonical_mcp_tool_name(name)
+    if canonical in prefs:
+        return bool(prefs[canonical])
+    if canonical == PORTSKILL_TOOL_NAME:
+        for alias in PORTSKILL_TOOL_ALIASES:
+            if alias in prefs:
+                return bool(prefs[alias])
+    if name in prefs:
+        return bool(prefs[name])
+    return True
 
 
 def _system_tool_names() -> set[str]:
@@ -594,10 +629,11 @@ def mcp_tools_map_for_profile(profile: str, existing: dict | None = None) -> dic
     token = normalize_mcp_tools_profile(profile)
     current = existing if isinstance(existing, dict) else {}
     system = _system_tool_names()
+    alias_or_system = set(system) | set(PORTSKILL_TOOL_ALIASES)
     preserved = {
         key: bool(val)
         for key, val in current.items()
-        if isinstance(key, str) and key.strip() and key.strip() not in system
+        if isinstance(key, str) and key.strip() and key.strip() not in alias_or_system
     }
     if token == "full":
         return preserved
@@ -735,6 +771,8 @@ def tool_argv(name: str, arguments: dict) -> list[str]:
         argv = ["stop", "--range-id", str(args["range_id"])]
         if args.get("project"):
             argv += ["--project", str(args["project"])]
+        if "also_release" in args and args.get("also_release") is not None:
+            argv += ["--also-release", "on" if args.get("also_release") else "off"]
         return argv
     if name == "release":
         argv = ["release", "--range-id", str(args["range_id"])]
@@ -746,7 +784,7 @@ def tool_argv(name: str, arguments: dict) -> list[str]:
         if args.get("project"):
             argv += ["--project", str(args["project"])]
         return argv
-    if name == "portskill_path":
+    if name in (PORTSKILL_TOOL_NAME, *sorted(PORTSKILL_TOOL_ALIASES)):
         argv = ["path", "--mode", str(args["mode"])]
         if args.get("project"):
             argv += ["--project", str(args["project"])]
@@ -882,6 +920,8 @@ def tool_argv(name: str, arguments: dict) -> list[str]:
             argv += ["--close-tab", str(args["close_tab"])]
         if args.get("mcp_tools_profile") is not None:
             argv += ["--mcp-tools-profile", str(args["mcp_tools_profile"])]
+        if "stop_also_release" in args and args.get("stop_also_release") is not None:
+            argv += ["--stop-also-release", "on" if args.get("stop_also_release") else "off"]
         return argv
     if name == "set_tailnet":
         argv = ["set-tailnet", "--range-id", str(args["range_id"]), "--mode", str(args["mode"])]
@@ -965,7 +1005,8 @@ def _run_one_chain_step(step: dict, prefs: dict, system_names: set[str]) -> dict
     tool = step.get("tool")
     arguments = step.get("arguments") if isinstance(step.get("arguments"), dict) else {}
     mode = step.get("mode") or "series"
-    if not isinstance(tool, str) or tool not in system_names:
+    dispatch = canonical_mcp_tool_name(tool) if isinstance(tool, str) else tool
+    if not isinstance(tool, str) or (tool not in system_names and dispatch not in system_names):
         return {
             "ok": False,
             "tool": tool,
@@ -981,7 +1022,7 @@ def _run_one_chain_step(step: dict, prefs: dict, system_names: set[str]) -> dict
             "error": "nested_user_command_forbidden",
             "message": "v1: user commands cannot nest other user commands",
         }
-    if not _tool_enabled(prefs, tool):
+    if not _tool_enabled(prefs, dispatch):
         return {
             "ok": False,
             "tool": tool,
@@ -989,7 +1030,7 @@ def _run_one_chain_step(step: dict, prefs: dict, system_names: set[str]) -> dict
             "error": "tool_disabled",
             "message": f"Step tool disabled in settings.mcp_tools: {tool}",
         }
-    result = call_tool(tool, arguments)
+    result = call_tool(dispatch if dispatch in system_names else tool, arguments)
     is_err = bool(result.get("isError"))
     structured = result.get("structuredContent")
     return {
@@ -1171,8 +1212,15 @@ def mcp_handle(message: dict) -> dict | None:
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
                 "instructions": (
-                    "Portskill MCP: tools allocate/activate/start/stop/release/status/portskill_path/doctor/environment_export/environment_import/set_default/apply_defaults/deactivate/compat_check/preset_save/preset_list/preset_apply/preset_delete/settings_get/settings_set/set_tailnet/tailscale_status/tailscale_login/history_list/history_restore/history_reset/ports_discover/ports_import "
-                    "wrap the Portskill CLI against ~/.config/port-registry/registry.json "
+                    "Portskill MCP. portskill is one MCP tool for your agent to handle all port management functions. "
+                    "Happy path: portskill, start, stop, release, and status. "
+                    "allocate remains available. activate is an internal primitive the orchestrator may call; "
+                    "it is off in lean and is not a happy-path peer (settings set --mcp-tool activate=on). "
+                    "Other tools: doctor/environment_export/environment_import/set_default/apply_defaults/"
+                    "deactivate/compat_check/preset_save/preset_list/preset_apply/preset_delete/"
+                    "settings_get/settings_set/set_tailnet/tailscale_status/tailscale_login/"
+                    "history_list/history_restore/history_reset/ports_discover/ports_import. "
+                    "These wrap the Portskill CLI against ~/.config/port-registry/registry.json "
                     "(or PORT_REGISTRY_PATH). Session Handoff tools use flat names "
                     "handoff_status/handoff_skill/handoff_template/handoff_list/handoff_resolve/"
                     "handoff_new_path/handoff_resume/handoff_supersede/handoff_install_help "
@@ -1180,7 +1228,7 @@ def mcp_handle(message: dict) -> dict | None:
                     "(vendor/session-handoff-kit). User commands (x-portskill-kind:user-command) chain "
                     "enabled system tools (series/parallel; no nesting). On needs_input (Tailnet), "
                     "re-call with tailnet=serve|funnel|none. Prefer stop over release when a process "
-                    "may still be running."
+                    "may still be running. stop honors settings.stop_also_release (default true)."
                 ),
             },
         }
@@ -1198,7 +1246,8 @@ def mcp_handle(message: dict) -> dict | None:
         arguments = params.get("arguments") or {}
         system_names = _system_tool_names()
         user_cmds = _load_user_commands()
-        known = set(system_names) | set(user_cmds.keys())
+        canonical = canonical_mcp_tool_name(name) if isinstance(name, str) else name
+        known = set(system_names) | set(user_cmds.keys()) | set(PORTSKILL_TOOL_ALIASES)
         if not isinstance(name, str) or name not in known:
             return {
                 "jsonrpc": "2.0",
@@ -1206,16 +1255,17 @@ def mcp_handle(message: dict) -> dict | None:
                 "error": {"code": -32602, "message": f"Unknown tool: {name}"},
             }
         enabled_names = {t["name"] for t in enabled_tool_defs()}
-        if name not in enabled_names:
+        if name not in enabled_names and canonical not in enabled_names:
             return {
                 "jsonrpc": "2.0",
                 "id": msg_id,
                 "error": {"code": -32001, "message": f"tool_disabled: {name}"},
             }
-        if name in user_cmds and name not in system_names:
-            result = call_user_command(name, user_cmds[name])
+        dispatch = canonical if canonical in system_names else name
+        if dispatch in user_cmds and dispatch not in system_names:
+            result = call_user_command(dispatch, user_cmds[dispatch])
         else:
-            result = call_tool(name, arguments if isinstance(arguments, dict) else {})
+            result = call_tool(dispatch, arguments if isinstance(arguments, dict) else {})
         return {"jsonrpc": "2.0", "id": msg_id, "result": result}
     if is_notification:
         return None

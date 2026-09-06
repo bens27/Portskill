@@ -74,6 +74,8 @@ class CollapsedMarkupTests(unittest.TestCase):
             self.assertFalse(_has_open_attr(tag), f"Settings details not collapsed: {tag}")
             self.assertIn("pr-subpanel", tag)
         self.assertIn('id="pr-settings"', html)
+        self.assertIn('id="pr-stop-also-release"', html)
+        self.assertIn("Stop also Release", html)
         self.assertIn("pr-disclose-hint", html)
 
     def test_serve_url_details_start_collapsed_with_chevron_hint(self) -> None:

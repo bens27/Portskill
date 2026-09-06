@@ -1,7 +1,7 @@
 <!-- Moved to skill/SKILL.md — optional agent sidecar. Product is Portskill / Port Registry app. -->
 ---
 name: port-registry
-description: Coordinate shared local development ports and managed project services with Portskill (`portskill` / `python3 -m port_registry_app` / `portskill-cli`) — light UI + MCP + CLI. Use when an agent needs to allocate, activate, start, stop, release, set-default, apply-defaults, preset save/list/apply/delete, settings get/set, environment export/import, inspect, doctor, or troubleshoot ports; open the Portskill console UI; avoid collisions between agent sessions; run a project's `.port-registry/start.sh` or `stop.sh`; expose a service with Tailscale Serve or Funnel; offer or launch Roster's seeded prototype frontend as a private Tailscale preview; answer requests such as "get me a port", "show port status", "show port registry UI", "open ports console", "connect MCP to port registry", "start my project service", "show me the Roster frontend", or "make this reachable on my tailnet"; or handle the CLI's exit-code-3 human-input protocol.
+description: Coordinate shared local development ports and managed project services with Portskill (`portskill` / `python3 -m port_registry_app` / `portskill-cli`) — light UI + MCP + CLI. The MCP `portskill` tool is one MCP tool for your agent to handle all port management functions. Use when an agent needs to allocate, start, stop, release, set-default, apply-defaults, preset save/list/apply/delete, settings get/set, environment export/import, inspect, doctor, or troubleshoot ports; open the Portskill console UI; avoid collisions between agent sessions; run a project's `.port-registry/start.sh` or `stop.sh`; expose a service with Tailscale Serve or Funnel; offer or launch Roster's seeded prototype frontend as a private Tailscale preview; answer requests such as "get me a port", "show port status", "show port registry UI", "open ports console", "connect MCP to port registry", "start my project service", "show me the Roster frontend", or "make this reachable on my tailnet"; or handle the CLI's exit-code-3 human-input protocol.
 ---
 
 # Portskill
@@ -45,12 +45,12 @@ python3 -m port_registry_app --mcp-stdio
 - MCP HTTP: uses the same local listener as the UI — `POST http://127.0.0.1:<port>/mcp` JSON-RPC; `GET /mcp` discovery. Access does not require a token unless the optional passkey gate is enabled. Sharing Portskill’s listen port with Tailscale Serve or Funnel is not a substitute for authentication, and Funnel of Portskill’s own listen port is blocked. Do not bind `0.0.0.0` casually.
 - MCP stdio (available agent install option): newline-delimited JSON-RPC on stdin/stdout — `python3 -m port_registry_app --mcp-stdio` (see `examples/mcp.stdio.json`).
 
-MCP tools (all map to CLI subcommands): `allocate`, `activate`, `start`, `stop`, `release`, `status`, `portskill_path`, `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults` (activate), `deactivate` (safe stop, keep reserved; `exit_house` alias), `compat_check`, presets/settings tools. `portskill_path` (`mode` start|stop|release|restart|status) orchestrates the happy path and returns `{ran, skipped, result, needs_input?}`; skips are inspectable; fine primitives stay callable. Exit-code-3 needs_input (Tailnet) is returned as a tool error with structured `needs_input` / `prompt` / `options` / `resume_hint` so the agent can resume.
+`portskill` is one MCP tool for your agent to handle all port management functions (`mode` start|stop|release|restart|status). Happy-path peers are `start`, `stop`, `release`, and `status`. `allocate` remains available. `activate` is an internal primitive (off in lean; `settings set --mcp-tool activate=on`). Other tools map to CLI subcommands: `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults` (Start Default Services), `deactivate` (safe stop, keep reserved; `exit_house` alias), `compat_check`, presets/settings tools. The orchestrator returns `{ran, skipped, result, needs_input?}`; skips are inspectable. Exit-code-3 needs_input (Tailnet) is returned as a tool error with structured `needs_input` / `prompt` / `options` / `resume_hint` so the agent can resume. `stop` honors `settings.stop_also_release` (default true).
 
 Named `settings.mcp_tools` profiles (stored as `settings.mcp_tools_profile`, applied into the existing `settings.mcp_tools` enable map; missing key = enabled):
 
 - **`full`** (default) — every system tool and `handoff_*` tool is listed. Existing installs stay here until you opt in.
-- **`lean`** — enables `portskill_path`, `status`, `settings_get`, plus escape hatches `allocate` / `stop` / `release`. Rarely used CRUD (`activate`, `start`, `doctor`, environment/preset/history/ports/tailscale helpers, `settings_set`, …) and flat `handoff_*` tools stay off until toggled (`settings set --mcp-tool NAME=on`).
+- **`lean`** — enables `portskill`, `status`, `settings_get`, plus escape hatches `allocate` / `stop` / `release`. Rarely used CRUD (`activate`, `start`, `doctor`, environment/preset/history/ports/tailscale helpers, `settings_set`, …) and flat `handoff_*` tools stay off until toggled (`settings set --mcp-tool NAME=on`).
 
 Switch: `settings set --mcp-tools-profile lean|full` (CLI) or MCP `settings_set` with `mcp_tools_profile`. After `lean`, `settings_set` itself is hidden until you re-enable it or apply `full` from the CLI. Individual `--mcp-tool` / HTML toggles still work; no UI reorder required.
 
@@ -91,7 +91,7 @@ Each project may also have a local mirror:
 
 Treat the global registry as the source of truth. Treat the local mirror as a convenience file for project context, status checks, and handoff between agent sessions.
 
-Additive root keys (normalize if missing; never wipe `projects`): `presets` (named environments) and `settings` (`auto_apply_preset`, `auto_apply_on_launch`, optional `auto_exit_on_shutdown`, `mcp_tools`, `mcp_tools_profile`).
+Additive root keys (normalize if missing; never wipe `projects`): `presets` (named environments) and `settings` (`auto_apply_preset`, `auto_apply_on_launch`, optional `auto_exit_on_shutdown`, `stop_also_release`, `mcp_tools`, `mcp_tools_profile`).
 
 ## CLI Commands
 
@@ -112,9 +112,9 @@ Key flags:
 - `--note TEXT`: Optional free-text note stored on the range (e.g. "web server").
 - `--tailnet serve|funnel|none`: Desired Tailnet exposure mode. Omit it to be asked (see the Exit-3 Needs-Input Protocol below).
 
-### `activate`
+### `activate` (internal primitive)
 
-Mark an allocated range as actively serving a process. Use this after a dev server starts and you know which reserved range is actually live.
+Mark an allocated range as actively serving a process without running `start.sh`. This is not the happy path. Prefer `start` or the `portskill` orchestrator. The orchestrator may call this internally. MCP `activate` is off in the lean profile; enable it with `settings set --mcp-tool activate=on`.
 
 Key flags:
 
@@ -148,9 +148,9 @@ Key flags:
 
 ### `stop`
 
-Run the project's `.port-registry/stop.sh` cleanup hook if it exists, forcibly terminate the tracked process group for the range, then do everything `release` does. Use this to stop services launched by `start` and free the registry allocation in one command.
+Run the project's `.port-registry/stop.sh` cleanup hook if it exists and forcibly terminate the tracked process group for the range. Whether the range is then released follows `settings.stop_also_release` (default true, matching historic stop). When that setting is false, the range stays reserved — same idea as `deactivate` without `--also-release` — and `release` is the explicit free.
 
-`stop` treats the cleanup hook as best effort and logs it to `.port-registry/stop.log`. After the hook, it terminates the tracked process and anything it spawned via its process group, tears down any live Tailnet `serve`/`funnel` mapping, and marks the range released. Calling `stop` again on an already-stopped or already-released range is a safe no-op.
+`stop` treats the cleanup hook as best effort and logs it to `.port-registry/stop.log`. After the hook, it terminates the tracked process and anything it spawned via its process group, and tears down any live Tailnet `serve`/`funnel` mapping. Optional `--also-release on|off` overrides the setting for one call. Calling `stop` again on an already-stopped or already-released range is a safe no-op.
 
 Key flags:
 
@@ -165,11 +165,11 @@ Key flags:
 
 - `--project PATH`: Show ranges for one project directory. Omit to show every project's ranges.
 
-### `path` / `portskill_path`
+### `path` / MCP `portskill`
 
-Skip-aware happy-path orchestrator (MCP `portskill_path`, CLI `path --mode …`). Modes: `start` | `stop` | `release` | `restart` | `status`.
+`portskill` is one MCP tool for your agent to handle all port management functions. CLI remains `path --mode …` (`portskill-path` / `portskill_path` aliases). Modes: `start` | `stop` | `release` | `restart` | `status`.
 
-`start` phases (server-side): allocate → wire (defaults/commands if needed) → activate → start → optional Tailnet Serve of **user** service ports. Never Funnels the Portskill listen port. Returns `{ran, skipped, result, needs_input?}`. Skips are deterministic (already reserved/active/running, Tailnet not requested / not logged in, Funnel-of-listen). Fine primitives stay callable. `settings.mcp_tools.portskill_path` can hide the tool.
+`start` phases (server-side): allocate → wire (defaults/commands if needed) → activate → start → optional Tailnet Serve of **user** service ports. Never Funnels the Portskill listen port. Returns `{ran, skipped, result, needs_input?}`. Skips are deterministic (already reserved/active/running, Tailnet not requested / not logged in, Funnel-of-listen). `stop` honors `settings.stop_also_release`. `settings.mcp_tools.portskill` can hide the tool; an older `portskill_path: false` key still hides it.
 
 If Tailnet Serve is requested and login is required, the path completes earlier phases, skips Tailnet, and exits 3 with `needs_input` so you can resume after `tailscale login`.
 
@@ -211,7 +211,8 @@ Per focused environment, Portskill keeps an undo stack (`registry.environment_hi
 ### `set-default` / `apply-defaults` / `environment` / `preset` / `settings`
 
 - `set-default --range-id ID --state on|off [--project PATH]` — per-range `default_state` (missing key ⇒ off).
-- `apply-defaults [--project PATH]...` — start non-released ranges with `default_state=on` (activate environment). Add `--also-stop-off` to stop Off ones that are running.
+- `apply-defaults [--project PATH]...` — Start Default Services: start non-released ranges with `default_state=on`. Add `--also-stop-off` to stop Off ones that are running.
+- `settings set --stop-also-release on|off` — when off, `stop` keeps the range reserved.
 - `environment export --name NAME [--out PATH] [--project PATH]... [--from-preset NAME]` — portable JSON (`kind: port-registry-environment`); `--from-preset` exports a saved in-registry preset as a file pack.
 - `environment import --file PATH [--apply-defaults]` — create/reuse allocations by note+project, set defaults; does not auto-start unless flagged.
 - `preset save --name NAME [--description TEXT] [--project PATH]... [--from-file PATH]` — snapshot live non-released ranges (or load from environment file) into `registry.presets[NAME]`.

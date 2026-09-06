@@ -1,4 +1,4 @@
-"""portskill_path: skip-predicate matrix + needs_input resume + MCP toggle."""
+"""portskill orchestrator: skip-predicate matrix + needs_input resume + MCP toggle."""
 from __future__ import annotations
 
 import unittest
@@ -179,13 +179,13 @@ class PathCliMcpTests(unittest.TestCase):
             stopped = parse_cli_json(stop)
             self.assertIn("stop", _ran_phases(stopped))
             item = (stopped.get("result") or {}).get("range") or {}
-            self.assertEqual(item.get("state"), "reserved")
+            # Default settings.stop_also_release is true — path stop releases.
+            self.assertEqual(item.get("state"), "released")
 
             release = iso.run_cli(["path", "--mode", "release", "--project", str(proj)])
             self.assertEqual(release.returncode, 0, release.stderr or release.stdout)
             released = parse_cli_json(release)
-            self.assertIn("release", _ran_phases(released))
-            self.assertEqual((released.get("result") or {}).get("range", {}).get("state"), "released")
+            self.assertEqual(_skip_map(released).get("release"), SKIP_RELEASE_ALREADY)
 
     def test_needs_input_resume_when_tailnet_login_required(self) -> None:
         with IsolatedConfig() as iso:
@@ -279,21 +279,28 @@ class PathCliMcpTests(unittest.TestCase):
             proj.mkdir()
             iso.write_registry({"settings": {"mcp_tools": {}}})
             names = [t["name"] for t in enabled_tool_defs()]
-            self.assertIn("portskill_path", names)
+            self.assertIn("portskill", names)
+            self.assertNotIn("portskill_path", names)
             for primitive in ("allocate", "activate", "start", "stop", "release", "status"):
                 self.assertIn(primitive, names)
 
             listed = mcp_handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
             rpc_names = [t["name"] for t in listed["result"]["tools"]]
-            self.assertIn("portskill_path", rpc_names)
+            self.assertIn("portskill", rpc_names)
+            self.assertNotIn("portskill_path", rpc_names)
             self.assertIn("allocate", rpc_names)
+            portskill_def = next(t for t in listed["result"]["tools"] if t["name"] == "portskill")
+            self.assertEqual(
+                portskill_def.get("description"),
+                "One MCP tool for your agent to handle all port management functions.",
+            )
 
             called = mcp_handle({
                 "jsonrpc": "2.0",
                 "id": 2,
                 "method": "tools/call",
                 "params": {
-                    "name": "portskill_path",
+                    "name": "portskill",
                     "arguments": {
                         "mode": "status",
                         "project": str(proj),
@@ -305,18 +312,44 @@ class PathCliMcpTests(unittest.TestCase):
             self.assertEqual(body.get("mode"), "status")
             self.assertIn("status", _ran_phases(body))
 
+            # Compat alias still dispatches while the tool is enabled.
+            aliased = mcp_handle({
+                "jsonrpc": "2.0",
+                "id": 21,
+                "method": "tools/call",
+                "params": {
+                    "name": "portskill_path",
+                    "arguments": {
+                        "mode": "status",
+                        "project": str(proj),
+                    },
+                },
+            })
+            self.assertNotIn("error", aliased)
+            alias_body = aliased["result"]["structuredContent"]
+            self.assertEqual(alias_body.get("mode"), "status")
+
             iso.write_registry({"settings": {"mcp_tools": {"portskill_path": False}}})
             hidden = [t["name"] for t in enabled_tool_defs()]
+            self.assertNotIn("portskill", hidden)
             self.assertNotIn("portskill_path", hidden)
             self.assertIn("allocate", hidden)
             rejected = mcp_handle({
                 "jsonrpc": "2.0",
                 "id": 3,
                 "method": "tools/call",
-                "params": {"name": "portskill_path", "arguments": {"mode": "status"}},
+                "params": {"name": "portskill", "arguments": {"mode": "status"}},
             })
             self.assertEqual(rejected["error"]["code"], -32001)
-            self.assertIn("portskill_path", rejected["error"]["message"])
+            self.assertIn("portskill", rejected["error"]["message"])
+            rejected_alias = mcp_handle({
+                "jsonrpc": "2.0",
+                "id": 31,
+                "method": "tools/call",
+                "params": {"name": "portskill_path", "arguments": {"mode": "status"}},
+            })
+            self.assertEqual(rejected_alias["error"]["code"], -32001)
+            self.assertIn("portskill_path", rejected_alias["error"]["message"])
 
             still = mcp_handle({
                 "jsonrpc": "2.0",

@@ -1,8 +1,12 @@
-"""portskill_path — skip-aware happy-path orchestrator (MCP + CLI).
+"""portskill — skip-aware happy-path orchestrator (MCP + CLI).
 
-Cut-0: mode start|stop|release|restart|status. Fine primitives stay callable.
+MCP tools/list name is portskill (compat alias portskill_path still dispatches).
+CLI remains path --mode … (aliases portskill-path / portskill_path).
+Modes: start|stop|release|restart|status. activate is an internal primitive.
 Skip predicates are deterministic Python rules. Remotes remain HOLD.
 Never Funnel Portskill's listen/UI/MCP port. Lean vs full mcp_tools profiles live in settings.
+Stop mode honors settings.stop_also_release (default true). Restart's stop phase
+keeps the range reserved so allocate can reuse it.
 """
 from __future__ import annotations
 
@@ -120,7 +124,7 @@ def _tailnet_needs_input(ran: list, skipped: list, result: dict) -> dict:
         "reason": "tailscale_auth_required",
         "prompt": (
             "Tailscale Serve requires login. Complete Browser Login "
-            "(or `portskill-cli tailscale login`), then resume portskill_path "
+            "(or `portskill-cli tailscale login`), then resume portskill "
             "with the same mode/tailnet."
         ),
         "options": ["retry_after_login", "resume_tailnet_none"],
@@ -429,6 +433,7 @@ def run_path(
         release_item,
         require_project_directory,
         resolve_history_env_name,
+        resolve_stop_also_release,
         ensure_baseline,
     )
 
@@ -556,7 +561,10 @@ def run_path(
                 if item is None:
                     skipped.append(_phase_entry(phase, skipped=SKIP_STOP_NOT_RUNNING))
                     continue
-                ok, detail = park_item_for_exit(item, project, also_release=False)
+                # Restart must keep the range so allocate can skip and reuse it.
+                # Mode stop honors settings.stop_also_release (default true).
+                also = False if mode == "restart" else resolve_stop_also_release(registry)
+                ok, detail = park_item_for_exit(item, project, also_release=also)
                 if not ok:
                     fail(detail.get("reason") or "stop_failed", detail.get("message"), **{
                         k: v for k, v in detail.items() if k not in ("reason", "message")

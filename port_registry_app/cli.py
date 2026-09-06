@@ -334,6 +334,7 @@ def default_settings():
         "focused_environment": None,
         "mcp_tools": {},  # tool_name -> bool; missing key = enabled
         "mcp_tools_profile": "full",  # named preset: full|lean; apply writes mcp_tools
+        "stop_also_release": True,  # stop also frees the range; false keeps reserved
         "mcp_user_commands": {},  # name -> {name, description, steps[{tool,arguments,mode}]}
         "serve_portskill_on_tailscale": True,  # default ON — Serve Portskill listen port (never Funnel)
         "handoff_enabled": False,  # Session Handoff section opt-in
@@ -421,6 +422,19 @@ def normalize_settings(settings):
         normalized["mcp_tools_profile"] = raw_profile.strip().lower()
     else:
         normalized["mcp_tools_profile"] = "full"
+    # Stop also Release (default true — preserves historic cmd_stop → release_item).
+    stop_rel = settings.get("stop_also_release", True)
+    if isinstance(stop_rel, bool):
+        normalized["stop_also_release"] = stop_rel
+    elif isinstance(stop_rel, str):
+        normalized["stop_also_release"] = stop_rel.strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+    else:
+        normalized["stop_also_release"] = bool(stop_rel)
     # Optional preference: Tailscale Serve the Portskill UI/MCP listen port (not Funnel).
     serve_ps = settings.get("serve_portskill_on_tailscale", True)
     if isinstance(serve_ps, bool):
@@ -460,6 +474,34 @@ def normalize_settings(settings):
     else:
         normalized["handoff_skill"] = None
     return normalized
+
+
+def resolve_stop_also_release(registry_or_settings=None, override=None) -> bool:
+    """Whether stop should also release. override True/False wins; else the setting (default true)."""
+    if override is not None:
+        return bool(override)
+    raw = {}
+    if isinstance(registry_or_settings, dict):
+        if "projects" in registry_or_settings or "pool" in registry_or_settings:
+            inner = registry_or_settings.get("settings")
+            raw = inner if isinstance(inner, dict) else {}
+        else:
+            raw = registry_or_settings
+    return bool(normalize_settings(raw).get("stop_also_release", True))
+
+
+def _also_release_override_from_args(args):
+    raw = getattr(args, "also_release", None)
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return raw
+    token = str(raw).strip().lower()
+    if token in ("on", "true", "1", "yes"):
+        return True
+    if token in ("off", "false", "0", "no"):
+        return False
+    return None
 
 
 
@@ -2735,8 +2777,8 @@ def run_start_all(also_defaults_only=False):
     return locked_registry(mutate)
 
 
-def run_stop_bulk(mode="all"):
-    """Stop running services. mode: all | non-default."""
+def run_stop_bulk(mode="all", also_release=None):
+    """Stop running services. mode: all | non-default. Release follows settings.stop_also_release."""
 
     def mutate(registry):
         hist_key = resolve_history_env_name(registry, None)
@@ -2745,6 +2787,7 @@ def run_stop_bulk(mode="all"):
         skipped = []
         errors = []
         changed = set()
+        also = resolve_stop_also_release(registry, override=also_release)
         for project, item in list(iter_project_ranges(registry, None)):
             if mode == "non-default" and normalize_default_state(item.get("default_state")) == "on":
                 skipped.append({
@@ -2762,7 +2805,7 @@ def run_stop_bulk(mode="all"):
                     "reason": "not_running",
                 })
                 continue
-            ok, detail = park_item_for_exit(item, project, also_release=False)
+            ok, detail = park_item_for_exit(item, project, also_release=also)
             detail = dict(detail)
             detail["project"] = project
             detail["range_id"] = item.get("id")
@@ -2784,6 +2827,7 @@ def run_stop_bulk(mode="all"):
             "skipped_count": len(skipped),
             "error_count": len(errors),
             "mode": mode,
+            "also_release": also,
         }, sorted(changed)
 
     return locked_registry(mutate)
@@ -2869,11 +2913,12 @@ def cmd_start(args):
 
 
 def cmd_stop(args):
+    override = _also_release_override_from_args(args)
     if bool(getattr(args, "all", False)):
-        emit(run_stop_bulk(mode="all"))
+        emit(run_stop_bulk(mode="all", also_release=override))
         return
     if bool(getattr(args, "non_default", False)):
-        emit(run_stop_bulk(mode="non-default"))
+        emit(run_stop_bulk(mode="non-default", also_release=override))
         return
     if not getattr(args, "range_id", None):
         fail("invalid_args", "stop requires --range-id, --all, or --non-default")
@@ -2887,21 +2932,20 @@ def cmd_stop(args):
         if item is None:
             fail("not_found", f"range id not found for project: {args.range_id}")
         if item.get("state") == "released":
-            return {"status": "ok", "range": item}, []
-        life = lifecycle(item)
-        has_live_pid = pid_alive(life.get("pid"))
-        live_group_pids = process_group_pids(life.get("pgid")) if life.get("pgid") else []
-        has_live_group = any(pid_alive(pid) for pid in live_group_pids)
-        if has_live_pid or has_live_group:
-            run_stop_script_if_ready(item, project)
-            terminate_lifecycle_processes(item)
-        else:
-            life["pid"] = None
-            life["pgid"] = None
-            life["stopped_at"] = utc_now()
-        release_item(item)
+            return {"status": "ok", "range": item, "also_release": resolve_stop_also_release(registry, override=override), "action": "already_released"}, []
+        also = resolve_stop_also_release(registry, override=override)
+        ok, detail = park_item_for_exit(item, project, also_release=also)
+        if not ok:
+            fail(
+                detail.get("reason") or "stop_failed",
+                detail.get("message") or "stop failed",
+                **{k: v for k, v in detail.items() if k not in ("reason", "message")},
+            )
         maybe_push_history(registry, "stop", hist_key)
-        return {"status": "ok", "range": item}, [project]
+        payload = {"status": "ok", "range": item, "also_release": also}
+        if isinstance(detail, dict) and detail.get("action"):
+            payload["action"] = detail["action"]
+        return payload, [project]
 
     emit(locked_registry(mutate))
 
@@ -3460,10 +3504,10 @@ def item_matches_preset_service(project, item, service):
 
 
 def park_item_for_exit(item, project, also_release=False):
-    """Safe stop for deactivate: stop.sh + tracked pgid terminate + tailnet off.
+    """Stop.sh + tracked pgid terminate + tailnet off.
 
-    Default keeps the range reserved (allocation retained). With also_release,
-    fully release via release_item (same as stop).
+    When also_release is false, the range stays reserved (deactivate / Stop
+    without Release). When true, fully release via release_item.
     """
     if item.get("state") == "released":
         return True, {"action": "already_released", "range": item}
@@ -3911,6 +3955,12 @@ def cmd_settings_set(args):
                 fail("invalid_args", "--auto-exit-on-shutdown must be on|off")
             settings["auto_exit_on_shutdown"] = token == "on"
             changed = True
+        if getattr(args, "stop_also_release", None) is not None:
+            token = str(args.stop_also_release).strip().lower()
+            if token not in ("on", "off"):
+                fail("invalid_args", "--stop-also-release must be on|off")
+            settings["stop_also_release"] = token == "on"
+            changed = True
         if getattr(args, "overlap_policy", None) is not None:
             token = str(args.overlap_policy).strip().lower()
             if token not in ("allow", "deny"):
@@ -3988,7 +4038,9 @@ def cmd_settings_set(args):
                     fail("invalid_args", "--mcp-tool requires a tool name")
                 if state not in ("on", "off"):
                     fail("invalid_args", "--mcp-tool state must be on|off")
-                tools[name] = state == "on"
+                from .mcp import canonical_mcp_tool_name  # noqa: PLC0415
+
+                tools[canonical_mcp_tool_name(name)] = state == "on"
             settings["mcp_tools"] = tools
             changed = True
         if getattr(args, "serve_portskill_on_tailscale", None) is not None:
@@ -4071,7 +4123,9 @@ def cmd_settings_set(args):
             for key, val in parsed.items():
                 if not isinstance(key, str) or not key.strip():
                     continue
-                name = key.strip()
+                from .mcp import canonical_mcp_tool_name  # noqa: PLC0415
+
+                name = canonical_mcp_tool_name(key.strip())
                 if isinstance(val, bool):
                     tools[name] = val
                 elif isinstance(val, str):
@@ -5552,7 +5606,7 @@ def enrich_range_for_status(registry, item, tailscale_self=None):
 
 
 def cmd_path(args):
-    """CLI mirror of MCP portskill_path. Implementation lives in .path."""
+    """CLI mirror of MCP portskill. Implementation lives in .path."""
     from .path import cmd_path_from_args
 
     cmd_path_from_args(args)
@@ -5844,6 +5898,15 @@ def parser():
     )
     stop.add_argument("--project", default=".")
     stop.add_argument("--environment", default=None, help="History env scope")
+    stop.add_argument(
+        "--also-release",
+        choices=["on", "off"],
+        default=None,
+        help=(
+            "Override settings.stop_also_release for this call. "
+            "on releases the range; off keeps it reserved."
+        ),
+    )
     stop.set_defaults(func=cmd_stop)
 
     status = subparsers.add_parser("status")
@@ -5854,8 +5917,8 @@ def parser():
         "path",
         aliases=["portskill-path", "portskill_path"],
         help=(
-            "Happy-path orchestrator (MCP portskill_path): start|stop|release|restart|status "
-            "with inspectable skips. Fine primitives stay callable."
+            "One MCP tool for your agent to handle all port management functions "
+            "(MCP portskill). Modes start|stop|release|restart|status with inspectable skips."
         ),
     )
     path_cmd.add_argument(
@@ -6107,6 +6170,15 @@ def parser():
         help="When on, Portskill UI attempts deactivate once on SIGINT/SIGTERM",
     )
     settings_set.add_argument(
+        "--stop-also-release",
+        choices=["on", "off"],
+        default=None,
+        help=(
+            "When on (default), stop also releases the range. "
+            "When off, stop keeps the range reserved; use release to free it."
+        ),
+    )
+    settings_set.add_argument(
         "--overlap-policy",
         choices=["allow", "deny"],
         default=None,
@@ -6156,8 +6228,8 @@ def parser():
         help=(
             "Apply named MCP tools profile into settings.mcp_tools. "
             "full = all tools enabled (empty map; default). "
-            "lean = portskill_path, status, settings_get, allocate/stop/release; "
-            "other CRUD and handoff_* stay off until toggled. Opt-in."
+            "lean = portskill, status, settings_get, allocate/stop/release; "
+            "activate and other CRUD and handoff_* stay off until toggled. Opt-in."
         ),
     )
     settings_set.add_argument(
