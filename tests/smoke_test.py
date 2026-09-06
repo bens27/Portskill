@@ -116,6 +116,10 @@ def main() -> int:
         fail("stacked section gap wrapper missing")
     if html.find('id="pr-settings"') < 0 or html.find('id="pr-services"') < html.find('id="pr-settings"'):
         fail("SERVICES should follow SETTINGS in the main panel")
+    if ".pr-services-body{padding:0" not in html or "border-radius:0" not in html:
+        fail("SERVICES rows are not full-bleed (padding/radius still inset)")
+    if "padding:5px 10px;line-height:1.25" not in html:
+        fail("SERVICES rows are not denser")
     if "Coming soon" in html.split("Session Handoff", 1)[-1][:800]:
         fail("Session Handoff section advertises Coming soon")
     if "Add / manage" not in html or 'data-pr-action="handoff-copy"' not in html:

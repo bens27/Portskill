@@ -1331,8 +1331,16 @@ def console_css() -> str:
         ".pr-toolbar input[type=text],.pr-toolbar input[type=file]{font-size:12px}"
         ".pr-subpanel{margin-top:16px;padding:0;border:1px solid var(--line);"
         "border-radius:8px;background:#fafbf9}"
-        ".pr-services-body{padding:12px 14px;display:flex;flex-direction:column;gap:12px}"
-        ".pr-services-body>.pr-project{margin-bottom:0}"
+        ".pr-services{overflow:hidden}"
+        ".pr-services-body{padding:0;display:flex;flex-direction:column;gap:0}"
+        ".pr-services-body>.empty,.pr-services-body>.pr-services-empty-actions{padding:10px 12px}"
+        ".pr-services-body>.pr-services-empty-actions{padding-top:0}"
+        ".pr-services-body>.pr-project{margin:0;width:100%;border:0;border-bottom:1px solid var(--line);"
+        "border-radius:0;background:var(--panel);overflow:hidden}"
+        ".pr-services-body>.pr-project:last-child{border-bottom:0;margin-bottom:0}"
+        ".pr-services-body>.pr-project>summary.pr-project-name{display:flex;align-items:center;width:100%;"
+        "box-sizing:border-box;border-radius:0;margin:0;padding:5px 10px;line-height:1.25;min-height:0}"
+        ".pr-services-body .pr-project-counts{gap:4px}"
         ".pr-subpanel h3{margin:0 0 10px;font-size:13px;text-transform:uppercase;"
         "letter-spacing:.08em;color:var(--muted)}"
         ".pr-preset-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;"
@@ -2609,7 +2617,7 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
         body = (
             '<div class="empty">No ports allocated yet. Allocate a range to get started '
             '(one workspace shows all services).</div>'
-            '<div style="margin-top:12px"><button type="button" class="pr-btn" data-pr-action="allocate-prompt" '
+            '<div class="pr-services-empty-actions"><button type="button" class="pr-btn" data-pr-action="allocate-prompt" '
             'title="Allocate a new port range">Allocate ports…</button></div>'
         )
     else:

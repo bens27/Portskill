@@ -111,7 +111,7 @@ Doctor is **read-only and idempotent** — running it twice does not create, rew
 ## UI highlights
 
 - **Compose** is first-class (topbar jump + MCP panel composer).
-- **System tools**, **repo**, **Settings**, **Session Handoff**, and **Serve URL** disclosures are **default-closed** (chevron + Show/Hide). **Services** is the same chrome around the project list and starts **open**.
+- **System tools**, **repo**, **Settings**, **Session Handoff**, and **Serve URL** disclosures are **default-closed** (chevron + Show/Hide). **Services** is the same chrome around the project list and starts **open**. Service rows are full-bleed (square, edge-to-edge hit target) and denser.
 - Stacked section containers (System tools / Agent connection; Settings / Services / Session Handoff) have a consistent vertical gap.
 - **One workspace** — all services in a single implicit workspace. Export/Import Workspace stay in ⚙ Actions. Named presets remain CLI/MCP.
 - **Defaults** — per-range Default On/Off; toolbar **Start Default Services** via `apply-defaults`; deactivate keeps reserved unless `--also-release`.

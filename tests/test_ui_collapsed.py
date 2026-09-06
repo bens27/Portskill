@@ -223,6 +223,17 @@ class CollapsedMarkupTests(unittest.TestCase):
         self.assertIn("1 Tailnet-served", html)
         self.assertIn("data-pr-project-counts", html)
 
+    def test_service_rows_are_full_bleed_and_dense(self) -> None:
+        from port_registry_app.server import console_css
+
+        css = console_css()
+        self.assertIn(".pr-services-body{padding:0", css)
+        self.assertIn(".pr-services-body>.pr-project{margin:0;width:100%;border:0", css)
+        self.assertIn("border-radius:0", css)
+        self.assertIn("padding:5px 10px;line-height:1.25", css)
+        self.assertNotIn(".pr-services-body{padding:12px 14px", css)
+        self.assertNotIn(".pr-services-body{padding:12px 14px;display:flex;flex-direction:column;gap:12px}", css)
+
 
 class AdHocCodesignScriptTests(unittest.TestCase):
     def test_build_app_documents_adhoc_and_darwin_gate(self) -> None:
