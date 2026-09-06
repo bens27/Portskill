@@ -35,6 +35,7 @@
 ### Docs
 - README rewritten for developers: clone then ./scripts/run.sh; removed Mac-friends cold path, installer-first narrative, and notarization-as-distribution sections.
 - PLAYBOOK.md retired (friend-share / installer path unsupported).
+- PLAYBOOK.md removed from the tracked tree. Local retired copies may live under gitignored `_retired/` (never published).
 - SECURITY.md: no signed/notarized distribution claim; personal packaging is keepalive + `build-app.sh`; ASC/notarize HOLD.
 - HTTP `http-auth` CLI / `http_auth.json` documented as optional helpers (not a default UI/API gate). Opt-in passkey gate documented (default off). Public copy no longer ranks stdio over the HTML UI / HTTP MCP or uses “dogfood”. Human-written README preamble left verbatim.
 
@@ -63,7 +64,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versioning f
 - MCP / Compose UI and README cold path prefer **stdio** for agents; HTTP MCP is labeled local-trust dogfood only.
 - `scripts/cli.sh`, `scripts/doctor.sh`, `scripts/run.sh` — PYTHONPATH wrappers for a cold clone.
 - Expanded stdlib tests: version identity, doctor offline, MCP tool toggles, listen.json sticky, collapsed Compose/System Tools markup.
-- Friend-share **[PLAYBOOK.md](PLAYBOOK.md)** (AirDrop/zip right-click Open vs clone + `install-mac.sh`). Linked from the README cold path. Remotes HOLD; no ASC/notarize claim.
+- Friend-share PLAYBOOK.md (AirDrop/zip right-click Open vs clone + `install-mac.sh`). Linked from the README cold path. Remotes HOLD; no ASC/notarize claim.
 - Disclosure chevrons: Settings is a start-collapsed details (same cobalt arrowhead + Show/Hide as System tools / repo). Serve URL gets the same Show hint. JS forces all of those closed on load.
 
 ## [0.1.0] — 2026-09-05
