@@ -72,6 +72,8 @@ Portable TypeScript modules for hosts wiring into a larger console live under `u
 - `--host` other than loopback is **refused** unless `--allow-non-loopback` (documented footgun; no allowlist). Do not use `0.0.0.0` casually.
 - Agents auto-invoke registry lifecycle tools. Humans use the HTML UI for maintenance and defaults. HTTP MCP uses the same local listener as the UI. Sharing Portskill’s listen port with Tailscale Serve or Funnel is not authentication. Stdio MCP (`--mcp-stdio` / `examples/mcp.stdio.json`) is an available agent install option.
 - Funnel of the Portskill listen/UI port is refused in code. Funnel on user services is a separate deliberate choice.
+- Serve of Portskill’s own listen port defaults **off** for new installs (`settings.serve_portskill_on_tailscale`). Existing registries that already store `true` stay on.
+- Mutating HTTP rejects cross-origin `Origin` and requires `Content-Type: application/json` for JSON API bodies. First passkey register and gate enable are loopback-only while the gate is off.
 - **Remotes** — HOLD (not implemented).
 
 ## Registry Files

@@ -6,6 +6,7 @@
 - Session Handoff Codex `SessionStart` hook: always emit valid SessionStart JSON (and use `context-watch:` prefix) so newer Codex no longer rejects stdout that looked like JSON (`[context-watch]…`).
 
 ### Changed
+- New installs default `settings.serve_portskill_on_tailscale` to **false**. The toolbar Serve toggle remains. Existing registries that already store `true` keep Serve on; normalize does not silently flip that key.
 - MCP tools/list name is **`portskill`** (was `portskill_path`). Description: “One MCP tool for your agent to handle all port management functions.” Compat: tools/call still accepts `portskill_path`; CLI keeps `path` / `portskill-path` / `portskill_path`. Lean enable list uses `portskill`. An older `settings.mcp_tools.portskill_path: false` key still hides the renamed tool.
 - `activate` is no longer presented as a happy-path peer. It stays off in lean, remains implemented, and can be re-enabled with `settings set --mcp-tool activate=on`. `apply-defaults` / **Start Default Services** are not rebranded as Activate.
 - `settings.stop_also_release` (bool, default **true**) controls whether `stop` also frees the range. When false, Stop keeps the range reserved and Release is the explicit free. Honored by CLI stop (single + bulk), UI Stop, MCP `stop`, and orchestrator mode `stop`. Restart’s stop phase still keeps the range so allocate can reuse it. Settings checkbox **Stop also Release**; CLI/MCP `settings get` / `settings set --stop-also-release on|off`. Optional per-call `--also-release on|off` / MCP `also_release`.
@@ -30,9 +31,12 @@
 - Write-a-Handoff skill file control in Session Handoff: download the bundled skill, upload a replacement, persist `settings.handoff_skill` under `~/.config/port-registry/`. Reload keeps the choice. Stdio MCP is unchanged.
 
 ### Security
+- Mutating HTTP (`POST`) rejects a cross-origin `Origin` (it must match `Host`). JSON API bodies require `Content-Type: application/json`. Browser posts that omit Origin and send `Sec-Fetch-Site: cross-site` are refused. Same-origin loopback UI and non-browser JSON clients that omit Origin still work.
+- While the passkey gate is off, enabling the gate and registering the first passkey are loopback-only. Non-loopback bootstrap is refused. Funnel of Portskill’s own listen port remains refused.
 - Local HTTP UI and APIs on the personal listen path are open without a bearer token unless the **opt-in** passkey gate is enabled. Funnel of Portskill’s own listen/UI/MCP port is refused. Tailscale is not HTTP authentication. `http-auth` / `http_auth.json` remain optional helpers (not a default gate). Passkeys are opt-in only; OAuth/SSO/multi-user are not in this cut.
 
 ### Docs
+- Serve of Portskill listen defaults off for new installs; Origin / Content-Type on mutating HTTP; passkey bootstrap is loopback-only. Human-written README preamble left verbatim.
 - README rewritten for developers: clone then ./scripts/run.sh; removed Mac-friends cold path, installer-first narrative, and notarization-as-distribution sections.
 - PLAYBOOK.md retired (friend-share / installer path unsupported).
 - SECURITY.md: no signed/notarized distribution claim; personal packaging is keepalive + `build-app.sh`; ASC/notarize HOLD.

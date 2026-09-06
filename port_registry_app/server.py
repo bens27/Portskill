@@ -48,6 +48,7 @@ from .cli import (
     apply_portskill_tailscale_serve,
     bind_host_warning,
     default_machines,
+    default_settings,
     ensure_http_auth_token,
     extract_tailscale_advertise_host,
     get_machine,
@@ -589,20 +590,7 @@ def load_registry() -> dict:
         "pool": {"start": 20000, "end": 29999},
         "projects": {},
         "presets": {},
-        "settings": {
-            "auto_apply_preset": None,
-            "auto_apply_on_launch": False,
-            "auto_exit_on_shutdown": False,
-            "require_compat": True,
-            "mcp_tools": {},
-            "mcp_tools_profile": "full",
-            "stop_also_release": True,
-            "mcp_user_commands": {},
-            "serve_portskill_on_tailscale": True,
-            "handoff_enabled": False,
-            "handoff_kit": None,
-            "handoff_skill": None,
-        },
+        "settings": default_settings(),
         "machines": default_machines(),
     }
     if not path.exists():
@@ -669,7 +657,7 @@ def load_registry() -> dict:
         mcp_tools_profile = raw_profile.strip().lower()
     else:
         mcp_tools_profile = "full"
-    serve_ps = settings.get("serve_portskill_on_tailscale", True)
+    serve_ps = settings.get("serve_portskill_on_tailscale", False)
     if isinstance(serve_ps, str):
         serve_ps = serve_ps.strip().lower() in ("1", "true", "yes", "on")
     else:
@@ -1612,6 +1600,10 @@ def settings_panel_html(view: dict) -> str:
         "This gate does not apply to stdio MCP. "
         "Tailscale Serve or Funnel is not authentication. "
         "CLI: <code>portskill-cli http-auth gate on|off</code></p>"
+        '<p class="pr-mcp-meta" style="margin:6px 0"><strong>Bootstrap:</strong> '
+        "enable the gate and register the first passkey from loopback only "
+        "(this machine at 127.0.0.1 / ::1). Non-loopback bootstrap is refused. "
+        "Do not treat a remote Serve URL as operator proof.</p>"
         f'<label><input type="checkbox" id="pr-passkey-gate" {gate_checked}> '
         "Require passkey (or bearer) for this HTTP UI</label>"
         '<p class="pr-mcp-meta" id="pr-passkey-status" style="margin:6px 0">'
@@ -1960,7 +1952,11 @@ def portskill_serve_toggle_html(view: dict, ts: dict, ps: dict | None = None) ->
     if ps.get("enabled_preference") is not None:
         pref = bool(ps.get("enabled_preference"))
     disabled = ""
-    title = "Tailscale Serve the Portskill UI/MCP listen port from listen.json (private; no Funnel)"
+    title = (
+        "Tailscale Serve the Portskill UI/MCP listen port from listen.json "
+        "(private; no Funnel). New installs default off; existing registries "
+        "that already have this on stay on."
+    )
     if (ts or {}).get("state") == "binary_missing":
         disabled = "disabled"
         title = "Install Tailscale to use Serve"
@@ -3994,7 +3990,7 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
   if(passGate){{
     passGate.addEventListener('change', async function(){{
       var enabled=!!passGate.checked;
-      if(enabled && !confirm('Turn on the passkey HTTP gate? This tab will keep a short-lived session. Default is off; enabling is opt-in.')){{
+      if(enabled && !confirm('Turn on the passkey HTTP gate from this loopback UI? First enable and the first passkey must be done on 127.0.0.1 / ::1. This tab will keep a short-lived session. Default is off; enabling is opt-in.')){{
         passGate.checked=false;
         return;
       }}
@@ -4708,6 +4704,89 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
     return 400, {"ok": False, "message": f"unsupported action: {action}"}
 
 
+def json_content_type_ok(content_type: str | None) -> bool:
+    """True for application/json, optionally with a charset parameter."""
+    if not content_type or not str(content_type).strip():
+        return False
+    media = str(content_type).split(";", 1)[0].strip().lower()
+    return media == "application/json"
+
+
+def same_origin_ok(origin: str | None, host_header: str | None) -> bool:
+    """True when Origin is http(s)://{Host} with no extra path."""
+    raw_origin = (origin or "").strip()
+    host = (host_header or "").strip()
+    if not raw_origin or raw_origin.lower() == "null" or not host:
+        return False
+    parsed = urlparse(raw_origin)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    if (parsed.netloc or "").lower() != host.lower():
+        return False
+    return parsed.path in ("", "/")
+
+
+def looks_like_cross_site_browser(headers) -> bool:
+    """True when Fetch Metadata says this mutating request is cross-site."""
+    if headers is None:
+        return False
+    site = (headers.get("Sec-Fetch-Site") or headers.get("sec-fetch-site") or "").strip().lower()
+    return site == "cross-site"
+
+
+def mutating_request_refusal(headers, host_header: str | None):
+    """Refuse cross-origin or non-JSON mutating POSTs. None when allowed.
+
+    Same-origin loopback UI (Origin matches Host + application/json) is allowed.
+    Non-browser clients (MCP, curl) that omit Origin but send JSON are allowed.
+    Browser posts that omit Origin and send Sec-Fetch-Site: cross-site are refused.
+    """
+    origin = ""
+    content_type = ""
+    if headers is not None:
+        origin = (headers.get("Origin") or headers.get("origin") or "").strip()
+        content_type = headers.get("Content-Type") or headers.get("content-type") or ""
+    if origin:
+        if not same_origin_ok(origin, host_header):
+            return 403, {
+                "ok": False,
+                "error": "origin_forbidden",
+                "message": "Cross-origin mutating requests are refused.",
+            }
+    elif looks_like_cross_site_browser(headers):
+        return 403, {
+            "ok": False,
+            "error": "origin_forbidden",
+            "message": "Browser mutating requests without a same-origin Origin are refused.",
+        }
+    if not json_content_type_ok(content_type):
+        return 415, {
+            "ok": False,
+            "error": "unsupported_media_type",
+            "message": "JSON API bodies require Content-Type: application/json.",
+        }
+    return None
+
+
+def request_client_is_loopback(client_host: str | None) -> bool:
+    """True only for a real loopback peer. Empty or unknown is not loopback."""
+    if not isinstance(client_host, str) or not client_host.strip():
+        return False
+    return is_loopback_host(client_host)
+
+
+def passkey_bootstrap_action(*, registering: bool = False, enabling_gate: bool = False) -> bool:
+    """True when this call would enable the gate or mint the first operator passkey."""
+    if enabling_gate and not http_passkey_gate_enabled():
+        return True
+    if registering:
+        if not http_passkey_gate_enabled():
+            return True
+        if int(passkey_public_status().get("count") or 0) == 0:
+            return True
+    return False
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = f"PortskillUI/{__version__}"
 
@@ -4802,6 +4881,52 @@ class Handler(BaseHTTPRequestHandler):
         self._send_unauthorized()
         return False
 
+    def _client_host(self) -> str:
+        try:
+            return str((self.client_address or ("", 0))[0] or "")
+        except (TypeError, IndexError):
+            return ""
+
+    def _client_is_loopback(self) -> bool:
+        return request_client_is_loopback(self._client_host())
+
+    def _refuse_non_loopback_bootstrap(
+        self,
+        *,
+        registering: bool = False,
+        enabling_gate: bool = False,
+        discard_body: bool = True,
+    ) -> bool:
+        """Refuse first passkey register / gate enable off loopback. True if blocked."""
+        if not passkey_bootstrap_action(registering=registering, enabling_gate=enabling_gate):
+            return False
+        if self._client_is_loopback():
+            return False
+        if discard_body:
+            self._discard_body()
+        self._send_json(
+            403,
+            {
+                "ok": False,
+                "error": "bootstrap_loopback_required",
+                "message": (
+                    "Enable the passkey gate and register the first passkey from "
+                    "loopback (127.0.0.1 / ::1) only. Non-loopback bootstrap is refused."
+                ),
+            },
+        )
+        return True
+
+    def _refuse_mutating_guard(self) -> bool:
+        """Refuse cross-origin or non-JSON POSTs. True if blocked."""
+        refused = mutating_request_refusal(self.headers, self.headers.get("Host") or "")
+        if not refused:
+            return False
+        self._discard_body()
+        status, payload = refused
+        self._send_json(status, payload)
+        return True
+
     def _auth_cookie_header(self, token: str | None = None):
         value = token if isinstance(token, str) and token else http_auth_token()
         if not value:
@@ -4883,6 +5008,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         path = urlparse(self.path).path.rstrip("/") or "/"
+        if self._refuse_mutating_guard():
+            return
         if path == "/api/webauthn/authenticate/options":
             self._discard_body()
             self._send_json(200, authentication_options(self.headers.get("Host") or ""))
@@ -4909,12 +5036,16 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         if path == "/api/webauthn/register/options":
+            if self._refuse_non_loopback_bootstrap(registering=True):
+                return
             if self._gate_required() and not self._require_http_access(discard_body=True):
                 return
             self._discard_body()
             self._send_json(200, registration_options(self.headers.get("Host") or ""))
             return
         if path == "/api/webauthn/register":
+            if self._refuse_non_loopback_bootstrap(registering=True):
+                return
             if self._gate_required() and not self._require_http_access(discard_body=True):
                 return
             try:
@@ -4952,9 +5083,13 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(enabled, bool):
                 self._send_json(400, {"ok": False, "message": "enabled bool required"})
                 return
+            if enabled and self._refuse_non_loopback_bootstrap(
+                enabling_gate=True, discard_body=False
+            ):
+                return
             set_http_passkey_gate(enabled)
             extra = None
-            if enabled and not self._session_ok():
+            if enabled and self._client_is_loopback() and not self._session_ok():
                 minted = mint_http_session()
                 extra = [session_cookie_header(minted["token"], ttl_sec=minted["ttl_sec"])]
             self._send_json(200, {"ok": True, **passkey_public_status()}, extra_headers=extra)

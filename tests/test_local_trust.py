@@ -84,6 +84,15 @@ class StdioPreferenceDocTests(unittest.TestCase):
         self.assertIn("refused", readme.lower())
         self.assertIn("refused", security.lower())
         self.assertIn("examples/mcp.stdio.json", readme)
+        self.assertIn("*Human-written pre-amble*", readme)
+        self.assertIn("*End of human-written pre-amble*", readme)
+        self.assertIn("serve_portskill_on_tailscale", readme)
+        self.assertIn("defaults **off** for new installs", readme)
+        self.assertIn("loopback-only", readme)
+        self.assertIn("Content-Type: application/json", readme)
+        self.assertIn("serve_portskill_on_tailscale", security)
+        self.assertIn("loopback-only", security)
+        self.assertIn("Content-Type: application/json", security)
 
 
 if __name__ == "__main__":

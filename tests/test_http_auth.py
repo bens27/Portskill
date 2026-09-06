@@ -30,6 +30,7 @@ def _http_json(
     token: str | None = None,
     cookie: str | None = None,
     body=None,
+    extra_headers=None,
     timeout: float = 5,
 ):
     data = None
@@ -41,6 +42,8 @@ def _http_json(
         headers["Authorization"] = f"Bearer {token}"
     if cookie:
         headers["Cookie"] = cookie
+    if extra_headers:
+        headers.update(extra_headers)
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -454,6 +457,218 @@ class PasskeyGateTests(unittest.TestCase):
                 )
                 self.assertEqual(code, 200)
                 self.assertIsInstance(state, dict)
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+
+
+class MutatingHttpGuardTests(unittest.TestCase):
+    def test_helper_origin_and_content_type(self) -> None:
+        from email.message import Message
+
+        from port_registry_app.server import (
+            json_content_type_ok,
+            looks_like_cross_site_browser,
+            mutating_request_refusal,
+            request_client_is_loopback,
+            same_origin_ok,
+        )
+
+        self.assertTrue(request_client_is_loopback("127.0.0.1"))
+        self.assertTrue(request_client_is_loopback("::1"))
+        self.assertFalse(request_client_is_loopback(""))
+        self.assertFalse(request_client_is_loopback("192.168.1.10"))
+        self.assertFalse(request_client_is_loopback("0.0.0.0"))
+
+        self.assertTrue(json_content_type_ok("application/json"))
+        self.assertTrue(json_content_type_ok("application/json; charset=utf-8"))
+        self.assertFalse(json_content_type_ok(""))
+        self.assertFalse(json_content_type_ok("text/plain"))
+        self.assertFalse(json_content_type_ok("application/x-www-form-urlencoded"))
+        self.assertTrue(same_origin_ok("http://127.0.0.1:8765", "127.0.0.1:8765"))
+        self.assertTrue(same_origin_ok("https://127.0.0.1:8765", "127.0.0.1:8765"))
+        self.assertFalse(same_origin_ok("http://evil.example", "127.0.0.1:8765"))
+        self.assertFalse(same_origin_ok("null", "127.0.0.1:8765"))
+        self.assertFalse(same_origin_ok("", "127.0.0.1:8765"))
+
+        cross = Message()
+        cross["Sec-Fetch-Site"] = "cross-site"
+        self.assertTrue(looks_like_cross_site_browser(cross))
+        same = Message()
+        same["Sec-Fetch-Site"] = "same-origin"
+        self.assertFalse(looks_like_cross_site_browser(same))
+
+        host = "127.0.0.1:20001"
+        ok_headers = Message()
+        ok_headers["Origin"] = f"http://{host}"
+        ok_headers["Content-Type"] = "application/json"
+        self.assertIsNone(mutating_request_refusal(ok_headers, host))
+
+        missing_origin = Message()
+        missing_origin["Content-Type"] = "application/json"
+        self.assertIsNone(mutating_request_refusal(missing_origin, host))
+
+        evil = Message()
+        evil["Origin"] = "http://evil.example"
+        evil["Content-Type"] = "application/json"
+        status, payload = mutating_request_refusal(evil, host)
+        self.assertEqual(status, 403)
+        self.assertEqual(payload.get("error"), "origin_forbidden")
+
+        browser_cross = Message()
+        browser_cross["Sec-Fetch-Site"] = "cross-site"
+        browser_cross["Content-Type"] = "application/json"
+        status, payload = mutating_request_refusal(browser_cross, host)
+        self.assertEqual(status, 403)
+        self.assertEqual(payload.get("error"), "origin_forbidden")
+
+        form = Message()
+        form["Origin"] = f"http://{host}"
+        form["Content-Type"] = "application/x-www-form-urlencoded"
+        status, payload = mutating_request_refusal(form, host)
+        self.assertEqual(status, 415)
+        self.assertEqual(payload.get("error"), "unsupported_media_type")
+
+    def test_http_refuses_cross_origin_and_bad_content_type(self) -> None:
+        with IsolatedConfig() as iso:
+            iso.write_registry()
+            httpd, port = _start_handler()
+            host = f"127.0.0.1:{port}"
+            url = f"http://{host}/port-registry/actions"
+            try:
+                code, payload = _http_json(
+                    url,
+                    method="POST",
+                    body={"action": "status"},
+                    extra_headers={"Origin": "http://evil.example"},
+                )
+                self.assertEqual(code, 403)
+                self.assertEqual((payload or {}).get("error"), "origin_forbidden")
+
+                code, payload = _http_json(
+                    url,
+                    method="POST",
+                    body={"action": "tailscale-status"},
+                    extra_headers={"Origin": f"http://{host}"},
+                )
+                self.assertNotIn(code, (403, 415), payload)
+                self.assertIsInstance(payload, dict)
+
+                req = urllib.request.Request(
+                    f"http://{host}/mcp",
+                    data=json.dumps({
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {},
+                            "clientInfo": {"name": "origin-guard-test", "version": "0"},
+                        },
+                    }).encode("utf-8"),
+                    headers={
+                        "Content-Type": "application/json",
+                        "Sec-Fetch-Site": "cross-site",
+                    },
+                    method="POST",
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=5) as resp:
+                        self.fail(f"cross-site POST should be refused, got {resp.status}")
+                except urllib.error.HTTPError as exc:
+                    self.assertEqual(int(exc.code), 403)
+                    raw = exc.read()
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                    self.assertEqual(body.get("error"), "origin_forbidden")
+
+                form = urllib.request.Request(
+                    url,
+                    data=b"action=status",
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    method="POST",
+                )
+                try:
+                    with urllib.request.urlopen(form, timeout=5) as resp:
+                        self.fail(f"form POST should be refused, got {resp.status}")
+                except urllib.error.HTTPError as exc:
+                    self.assertEqual(int(exc.code), 415)
+                    raw = exc.read()
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                    self.assertEqual(body.get("error"), "unsupported_media_type")
+
+                code, payload = _http_json(
+                    f"http://{host}/mcp",
+                    method="POST",
+                    body={
+                        "jsonrpc": "2.0",
+                        "id": 3,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {},
+                            "clientInfo": {"name": "origin-guard-test", "version": "0"},
+                        },
+                    },
+                )
+                self.assertEqual(code, 200)
+                self.assertIn("result", payload or {})
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+
+
+class PasskeyBootstrapTests(unittest.TestCase):
+    def test_loopback_can_register_and_enable_gate(self) -> None:
+        with IsolatedConfig() as iso:
+            iso.write_registry()
+            httpd, port = _start_handler()
+            try:
+                code, opt = _http_json(
+                    f"http://127.0.0.1:{port}/api/webauthn/register/options",
+                    method="POST",
+                    body={},
+                )
+                self.assertEqual(code, 200, opt)
+                self.assertTrue((opt or {}).get("challenge"))
+
+                code, payload = _http_json(
+                    f"http://127.0.0.1:{port}/api/http-auth/gate",
+                    method="POST",
+                    body={"enabled": True},
+                )
+                self.assertEqual(code, 200, payload)
+                self.assertTrue((payload or {}).get("gate"))
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+
+    def test_non_loopback_bootstrap_refused(self) -> None:
+        from unittest.mock import patch
+
+        from port_registry_app.server import Handler
+        from port_registry_app.webauthn import http_passkey_gate_enabled
+
+        with IsolatedConfig() as iso:
+            iso.write_registry()
+            httpd, port = _start_handler()
+            try:
+                with patch.object(Handler, "_client_is_loopback", return_value=False):
+                    code, payload = _http_json(
+                        f"http://127.0.0.1:{port}/api/webauthn/register/options",
+                        method="POST",
+                        body={},
+                    )
+                    self.assertEqual(code, 403)
+                    self.assertEqual((payload or {}).get("error"), "bootstrap_loopback_required")
+
+                    code, payload = _http_json(
+                        f"http://127.0.0.1:{port}/api/http-auth/gate",
+                        method="POST",
+                        body={"enabled": True},
+                    )
+                    self.assertEqual(code, 403)
+                    self.assertEqual((payload or {}).get("error"), "bootstrap_loopback_required")
+                self.assertFalse(http_passkey_gate_enabled())
             finally:
                 httpd.shutdown()
                 httpd.server_close()

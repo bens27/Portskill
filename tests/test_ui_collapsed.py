@@ -76,6 +76,8 @@ class CollapsedMarkupTests(unittest.TestCase):
         self.assertIn('id="pr-settings"', html)
         self.assertIn('id="pr-stop-also-release"', html)
         self.assertIn("Stop also Release", html)
+        self.assertIn("enable the gate and register the first passkey from loopback only", html)
+        self.assertIn("Non-loopback bootstrap is refused", html)
         self.assertIn("pr-disclose-hint", html)
 
         services = [t for t in _details_tags(markup, "pr-services") if 'id="pr-services"' in t]
@@ -157,6 +159,8 @@ class CollapsedMarkupTests(unittest.TestCase):
         self.assertNotIn("dogfood", html.lower())
         self.assertIn("HTTP MCP uses the same local listener as this UI", html)
         self.assertIn("does not require a token unless the optional passkey gate is enabled", html)
+        self.assertIn("enable the gate and register the first passkey from loopback only", html)
+        self.assertIn("Non-loopback bootstrap is refused", html)
         self.assertIn("--mcp-stdio", html)
         self.assertIn("mcpServers", html)
         self.assertIn('id="pr-mcp-stdio-config"', html)

@@ -132,6 +132,8 @@ def main() -> int:
         fail("require_compat lock missing from Settings")
     if "Stop also Release" not in html or 'id="pr-stop-also-release"' not in html:
         fail("Stop also Release setting missing from Settings")
+    if "first passkey from loopback only" not in html:
+        fail("passkey bootstrap loopback warning missing from Settings")
     if "one MCP tool for your agent to handle all port management functions" not in html:
         fail("portskill happy-path pitch missing from MCP UI")
     if 'class="pr-disclose"' not in html and "pr-mcp-system-details" not in html:
