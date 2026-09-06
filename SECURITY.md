@@ -19,7 +19,7 @@ Do **not** Funnel or publicly expose the Portskill listen port while testing a r
 
 ## What we do **not** claim yet
 
-- **No signed / notarized distribution.** Portskill does not ship an Apple-signed or notarized binary for other people. Developers who need a signed `.app` should use their own signing workflow. Maintainer helper scripts (`build-app.sh`, `notarize-mac.sh`, `install-mac.sh`) are optional and unsupported as a product distribution path.
+- **No signed / notarized distribution.** Portskill does not ship an Apple-signed or notarized binary. Personal Mac `.app` builds use `build-app.sh` (ad-hoc on Darwin) plus keepalive. App Store Connect / notarization remain HOLD. There is no friend installer or signed-app distribution path.
 - **No code-signing identity guarantee** in CI.
 - **No OAuth / passkeys / friend-installer / signed-app distribution.** HTTP uses a local high-entropy bearer only (`http_auth.json`). Non-loopback `--host` (e.g. `0.0.0.0`) is **refused at start** unless `--allow-non-loopback` is passed (documented footgun). Auth stays mandatory with the override. `doctor` fails closed (exit 2) when `listen.json` shows a non-loopback bind without that override recorded. With the override, start is allowed, the UI banner/chip stays, and `doctor` warns but exits 0. Default bind stays loopback.
 - **Remotes** (multi-machine registry) remain HOLD — not a security surface in this cut.

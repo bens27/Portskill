@@ -2,13 +2,16 @@
 
 ## Unreleased
 
+### Changed
+- Personal Mac `.app` path is keepalive + `build-app.sh` only. `scripts/install-mac.sh` and `scripts/notarize-mac.sh` removed from the product surface. Remotes/ASC remain HOLD.
+
 ### Security
 - HTTP mutating and inventory surfaces require a local bearer token (`~/.config/port-registry/http_auth.json`) even on loopback. Unauthenticated `POST /mcp` fails closed with 401. Stdio MCP is unchanged. Funnel of Portskill’s own listen/UI/MCP port is refused. Tailscale is not HTTP authentication. Passkeys/OAuth are not in this cut.
 
 ### Docs
 - README rewritten for developers: clone then ./scripts/run.sh; removed Mac-friends cold path, installer-first narrative, and notarization-as-distribution sections.
 - PLAYBOOK.md retired (friend-share / installer path unsupported).
-- SECURITY.md: no signed/notarized distribution claim; Apple signing left to developers who need it.
+- SECURITY.md: no signed/notarized distribution claim; personal packaging is keepalive + `build-app.sh`; ASC/notarize HOLD.
 - HTTP bearer auth documented for developers (CLI `http-auth show|regenerate`; doctor reports configured without printing the secret). Human-written README preamble left verbatim.
 
 All notable changes to **Portskill** are documented here.

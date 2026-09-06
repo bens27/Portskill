@@ -42,27 +42,24 @@ class MacBundleHelperTests(unittest.TestCase):
         self.assertTrue(HELPER.is_file())
         for rel in (
             "scripts/mac-bundle.sh",
-            "scripts/install-mac.sh",
             "scripts/build-app.sh",
-            "scripts/notarize-mac.sh",
+            "scripts/install-keepalive.sh",
         ):
             path = ROOT / rel
             text = path.read_text(encoding="utf-8")
             syn = subprocess.run(["bash", "-n", str(path)], capture_output=True, text=True)
             self.assertEqual(syn.returncode, 0, f"{rel}: {syn.stderr or syn.stdout}")
-            if rel != "scripts/mac-bundle.sh":
+            if rel == "scripts/build-app.sh":
                 self.assertIn("mac-bundle.sh", text)
-            if rel in ("scripts/build-app.sh", "scripts/notarize-mac.sh"):
                 self.assertIn("strip_finder_junk", text)
-            if rel in ("scripts/install-mac.sh", "scripts/build-app.sh"):
                 self.assertIn("replace_app_bundle", text)
             if rel == "scripts/mac-bundle.sh":
                 self.assertIn("flock", text)
                 self.assertIn("with_install_lock", text)
                 self.assertIn("purge_bundle_root_residue", text)
                 self.assertIn("bundle_stage_path", text)
-            if rel == "scripts/install-mac.sh":
-                self.assertIn("with_install_lock", text)
+        for gone in ("scripts/install-mac.sh", "scripts/notarize-mac.sh"):
+            self.assertFalse((ROOT / gone).exists(), f"{gone} must not be on the product surface")
 
     def test_stage_path_is_sibling_never_inside_dest(self) -> None:
         with tempfile.TemporaryDirectory(prefix="portskill-stage-") as tmp:

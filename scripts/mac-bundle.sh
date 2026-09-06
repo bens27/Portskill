@@ -1,10 +1,10 @@
 #!/bin/bash
-# Shared Mac bundle helpers (sourced by install-mac.sh / build-app.sh /
-# notarize-mac.sh). Safe on Linux — no Darwin requirement.
+# Shared Mac bundle helpers (sourced by build-app.sh). Safe on Linux —
+# no Darwin requirement.
 #
 # replace_app_bundle: copy src.app onto dest.app without a half-replaced
 # bundle. Stage as a *sibling* of dest (dirname/dest/.Portskill.app.new.$$),
-# never inside the .app. flock-serialize overlapping install-mac/keepalive
+# never inside the .app. flock-serialize overlapping keepalive / rebuild
 # replaces. rm -rf dest and verify it is gone (rename-aside if a first rm
 # leaves residue), then mv -f into place only if dest is absent (POSIX mv
 # into an existing dir would nest the stage and unseal codesign).
@@ -42,7 +42,7 @@ portskill_install_lock_path() {
   printf '%s' "${TMPDIR:-/tmp}/portskill-install.lock"
 }
 
-# Single-flight around replace / install-mac critical section.
+# Single-flight around replace / keepalive rebuild critical section.
 # Re-entrant in the same shell (nested replace under an outer lock).
 # flock(1) on Linux; python3 fcntl fallback on stock macOS.
 with_install_lock() {

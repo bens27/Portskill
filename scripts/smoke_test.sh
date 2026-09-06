@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Only documented smoke / test entry.
-# Sets PYTHONPATH and cwd so friends and CI never need
+# Sets PYTHONPATH and cwd so a cold clone and CI never need
 # `PYTHONPATH=. python3 tests/smoke_test.py`.
 #
-# Runs the friend smoke, then the expanded stdlib unittest suite (test_*.py).
+# Runs documented smoke, then the expanded stdlib unittest suite (test_*.py).
 # Linux offline; no Mac .app required.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
