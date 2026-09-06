@@ -159,6 +159,8 @@ class AdHocCodesignScriptTests(unittest.TestCase):
         self.assertIn("Darwin", text)
         self.assertIn("Ad-hoc", text)
         self.assertIn("not notarized", text.lower())
+        self.assertIn("strip_finder_junk", text)
+        self.assertIn("replace_app_bundle", text)
         syn = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)
         self.assertEqual(syn.returncode, 0, syn.stderr or syn.stdout)
 

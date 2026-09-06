@@ -7,6 +7,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PACKAGE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=mac-bundle.sh
+. "${SCRIPT_DIR}/mac-bundle.sh"
 DIST_APP="${PACKAGE_ROOT}/dist/Portskill.app"
 LISTEN_JSON="${HOME}/.config/port-registry/listen.json"
 
@@ -130,11 +132,7 @@ fi
 
 mkdir -p "${DEST}"
 INSTALLED="${DEST}/Portskill.app"
-if [[ -e "${INSTALLED}" ]]; then
-  echo "Replacing ${INSTALLED}"
-  rm -rf "${INSTALLED}"
-fi
-cp -R "${DIST_APP}" "${INSTALLED}"
+replace_app_bundle "${DIST_APP}" "${INSTALLED}"
 chmod +x "${INSTALLED}/Contents/MacOS/Portskill" 2>/dev/null || true
 chmod +x "${INSTALLED}/Contents/MacOS/Portskill.bash" 2>/dev/null || true
 

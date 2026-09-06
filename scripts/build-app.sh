@@ -18,6 +18,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PACKAGE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=mac-bundle.sh
+. "${SCRIPT_DIR}/mac-bundle.sh"
 DIST_APP="${PACKAGE_ROOT}/dist/Portskill.app"
 MACOS_APP="${PACKAGE_ROOT}/macos/Portskill.app"
 MENU_DIR="${PACKAGE_ROOT}/macos/PortskillMenu"
@@ -119,10 +121,9 @@ if [[ ! -f "${CONTENTS}/MacOS/Portskill.bash" ]]; then
   chmod +x "${CONTENTS}/MacOS/Portskill.bash"
 fi
 
-# Install dist/
+# Install dist/ (verified wipe + stage/mv — never half-replace)
 mkdir -p "${PACKAGE_ROOT}/dist"
-rm -rf "${DIST_APP}"
-cp -R "${STAGE}/Portskill.app" "${DIST_APP}"
+replace_app_bundle "${STAGE}/Portskill.app" "${DIST_APP}"
 
 # Also refresh macos/Portskill.app launchers + embed python there for consistency
 # (dev tree still has package-root fallback; embedded python makes either path work)
@@ -154,6 +155,7 @@ sign_dist_app() {
     echo "WARN: codesign not found; leaving unsigned" >&2
     return 0
   fi
+  strip_finder_junk "${DIST_APP}"
   local identity=""
   if [[ -n "${PORTSKILL_SIGN_IDENTITY:-}" ]]; then
     identity="${PORTSKILL_SIGN_IDENTITY}"
