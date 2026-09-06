@@ -1,5 +1,27 @@
 # Portskill
 
+*Human-written pre-amble*
+I made this tool after getting tired of juggling experiments and port problems on a single machine. There's also an additional Session Handoff skill bundled into this.
+
+Portskill is a port registry tool, with some bells and whistles:
+- Choose between an HTML dashboard, MCP, or stdlib CLI surfaces
+- Reserve a port range (per project), and assign ports from that range automatically
+- Authenticate with Tailscale to serve any registered service on your Tailnet
+- Provides commands for the whole life-cycle, and allows you to make a singular command out of a chain of commands for your own flow(s)
+- Allow or prohibit model invocation per-command 
+- Captures Start and Stop shell commands from your agents for any service, and triggers background sessions to execute them
+- Allows you to set default Start states (i.e. when you launch Portskill, turn on services X, Y, and Z)
+- Fully deterministic control plane
+
+- Additional skill included: Session Handoff. A hook views the session's context window after each turn. At a determined value (preset to 130,000 tokens), the session automatically creates a handoff document, and writes its "Open" status to a ledger. At that point, just /clear your session and ask your agent to retrieve its handoff. Keeps your agent out of the stupid zone.
+
+Coming soon:
+- Multiple workspaces - choose services you generally run for one 'mode' in your life, like UI Work Mode, Travel Advice mode, etc.
+- 
+
+*End of human-written pre-amble*
+
+
 Local port registry for developers and LLM agents. Allocate and manage shared development ports with an HTML UI, MCP tools, and a stdlib CLI.
 
 One data store: `~/.config/port-registry/registry.json`. No second store. No Node and no pip packages required to run.
