@@ -263,13 +263,7 @@ class PlaybookTests(unittest.TestCase):
         import pathlib
 
         root = pathlib.Path(__file__).resolve().parents[1]
-        text = (root / "PLAYBOOK.md").read_text(encoding="utf-8")
-        self.assertIn("retired", text.lower())
-        self.assertIn("not** a supported", text.lower())
-        self.assertIn("README.md", text)
-        self.assertIn("./scripts/run.sh", text)
-        self.assertNotIn("right-click", text.lower())
-        self.assertNotIn("AirDrop", text)
+        self.assertFalse((root / "PLAYBOOK.md").exists())
         readme = (root / "README.md").read_text(encoding="utf-8")
         self.assertIn("./scripts/run.sh", readme)
         self.assertIn("Quick start", readme)
@@ -279,10 +273,12 @@ class PlaybookTests(unittest.TestCase):
         self.assertIn("./scripts/install-keepalive.sh", readme)
         self.assertNotIn("install-mac.sh", readme)
         self.assertNotIn("notarize-mac.sh", readme)
+        self.assertNotIn("PLAYBOOK.md", readme)
         security = (root / "SECURITY.md").read_text(encoding="utf-8")
         self.assertIn("No signed / notarized distribution", security)
         self.assertNotIn("install-mac.sh", security)
         self.assertNotIn("notarize-mac.sh", security)
+        self.assertNotIn("PLAYBOOK.md", security)
 
 
 if __name__ == "__main__":

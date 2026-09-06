@@ -47,6 +47,9 @@ collab-last-seen.txt
 # macos/Portskill.app/
 # macos/Portskill.app/Contents/MacOS/Portskill
 
+# Local retired archive; keep on disk; never publish
+_retired/
+
 # Binary policy (Ben 2026-09-05): ship source + build scripts; ignore built apps
 dist/
 macos/Portskill.app/
