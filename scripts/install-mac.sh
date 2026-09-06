@@ -132,16 +132,20 @@ fi
 
 mkdir -p "${DEST}"
 INSTALLED="${DEST}/Portskill.app"
-replace_app_bundle "${DIST_APP}" "${INSTALLED}"
-chmod +x "${INSTALLED}/Contents/MacOS/Portskill" 2>/dev/null || true
-chmod +x "${INSTALLED}/Contents/MacOS/Portskill.bash" 2>/dev/null || true
 
-if command -v xattr >/dev/null 2>&1; then
-  xattr -dr com.apple.quarantine "${INSTALLED}" || true
-  echo "Stripped com.apple.quarantine on ${INSTALLED}"
-else
-  echo "WARN: xattr not found — if Gatekeeper blocks, right-click → Open once." >&2
-fi
+# Single-flight with keepalive / overlapping install-mac (same lock as replace).
+_install_mac_place() {
+  replace_app_bundle "${DIST_APP}" "${INSTALLED}"
+  chmod +x "${INSTALLED}/Contents/MacOS/Portskill" 2>/dev/null || true
+  chmod +x "${INSTALLED}/Contents/MacOS/Portskill.bash" 2>/dev/null || true
+  if command -v xattr >/dev/null 2>&1; then
+    xattr -dr com.apple.quarantine "${INSTALLED}" || true
+    echo "Stripped com.apple.quarantine on ${INSTALLED}"
+  else
+    echo "WARN: xattr not found — if Gatekeeper blocks, right-click → Open once." >&2
+  fi
+}
+with_install_lock _install_mac_place
 
 echo
 echo "Installed: ${INSTALLED}"
