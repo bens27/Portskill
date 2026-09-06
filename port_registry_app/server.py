@@ -2183,7 +2183,7 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         f'<div class="pr-mcp-connect" id="pr-mcp-connect">'
         f'<div class="pr-mcp-section">Agent connection</div>'
         f'<details class="pr-mcp-system-details pr-mcp-connect-details" id="pr-mcp-connect-stdio">'
-        f'<summary>Stdio (preferred) <span class="tag">preferred for agents</span>'
+        f'<summary>Stdio preferred <span class="tag">preferred for agents</span>'
         f'<span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
         f'<div class="pr-mcp-connect-body">'
         f'<p class="pr-mcp-meta" style="margin:0">Preferred path for Cursor / Claude / Codex. '

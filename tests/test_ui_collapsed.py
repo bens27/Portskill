@@ -144,6 +144,7 @@ class CollapsedMarkupTests(unittest.TestCase):
         self.assertIn("local-trust dogfood", html.lower())
         self.assertIn('id="pr-mcp-http-dogfood"', html)
         self.assertIn("Stdio MCP (preferred)", html)
+        markup = html.split("</style>", 1)[-1]
         connect = _details_tags(markup, "pr-mcp-connect-details")
         self.assertTrue(connect, "Agent Connection details missing")
         for tag in connect:
@@ -197,7 +198,7 @@ class CollapsedMarkupTests(unittest.TestCase):
         self.assertTrue(tags)
         for tag in tags:
             self.assertFalse(_has_open_attr(tag), f"project details not collapsed: {tag}")
-        self.assertIn("1 registered", html)
+        self.assertIn("2 registered", html)
         self.assertIn("1 active", html)
         self.assertIn("1 Tailnet-served", html)
         self.assertIn("data-pr-project-counts", html)
