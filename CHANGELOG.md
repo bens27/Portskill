@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- Session Handoff Codex `SessionStart` hook: always emit valid SessionStart JSON (and use `context-watch:` prefix) so newer Codex no longer rejects stdout that looked like JSON (`[context-watch]…`).
+
 ### Changed
 - MCP tools/list name is **`portskill`** (was `portskill_path`). Description: “One MCP tool for your agent to handle all port management functions.” Compat: tools/call still accepts `portskill_path`; CLI keeps `path` / `portskill-path` / `portskill_path`. Lean enable list uses `portskill`. An older `settings.mcp_tools.portskill_path: false` key still hides the renamed tool.
 - `activate` is no longer presented as a happy-path peer. It stays off in lean, remains implemented, and can be re-enabled with `settings set --mcp-tool activate=on`. `apply-defaults` / **Start Default Services** are not rebranded as Activate.
