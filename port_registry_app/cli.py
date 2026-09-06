@@ -5473,6 +5473,13 @@ def enrich_range_for_status(registry, item, tailscale_self=None):
     return out
 
 
+def cmd_path(args):
+    """CLI mirror of MCP portskill_path. Implementation lives in .path."""
+    from .path import cmd_path_from_args
+
+    cmd_path_from_args(args)
+
+
 def cmd_status(args):
     selected_project = status_project_from_context(args)
 
@@ -5764,6 +5771,36 @@ def parser():
     status = subparsers.add_parser("status")
     status.add_argument("--project", default=None)
     status.set_defaults(func=cmd_status)
+
+    path_cmd = subparsers.add_parser(
+        "path",
+        aliases=["portskill-path", "portskill_path"],
+        help=(
+            "Happy-path orchestrator (MCP portskill_path): start|stop|release|restart|status "
+            "with inspectable skips. Fine primitives stay callable."
+        ),
+    )
+    path_cmd.add_argument(
+        "--mode",
+        required=True,
+        choices=["start", "stop", "release", "restart", "status"],
+    )
+    path_cmd.add_argument("--project", default=".")
+    path_cmd.add_argument("--count", type=int, default=1, help="Ports to allocate when needed (default 1)")
+    path_cmd.add_argument("--range-id", default=None)
+    path_cmd.add_argument("--note", default=None)
+    path_cmd.add_argument("--tailnet", choices=["serve", "funnel", "none"], default=None)
+    path_cmd.add_argument("--command", default=None, help="Optional start command to wire onto the range")
+    path_cmd.add_argument("--cwd", default=None)
+    path_cmd.add_argument("--default-state", choices=["on", "off"], default=None)
+    path_cmd.add_argument(
+        "--start",
+        type=int,
+        default=None,
+        help="Optional explicit start port when allocate runs",
+    )
+    path_cmd.add_argument("--environment", default=None, help="History env scope")
+    path_cmd.set_defaults(func=cmd_path)
 
     doctor = subparsers.add_parser("doctor")
     doctor.add_argument("--project", default=".")

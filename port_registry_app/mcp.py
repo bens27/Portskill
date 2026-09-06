@@ -114,6 +114,49 @@ TOOL_DEFS = [
         },
     },
     {
+        "name": "portskill_path",
+        "description": (
+            "Happy-path orchestrator: mode start|stop|release|restart|status. "
+            "start phases: allocate → wire (defaults/commands if needed) → activate → start → "
+            "optional Tailnet Serve of user service ports (never Funnel Portskill listen). "
+            "Returns {ran, skipped, result, needs_input?}; skips are inspectable. "
+            "Fine primitives (allocate/activate/start/stop/release/status) stay callable. "
+            "CLI mirror: path --mode …"
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["start", "stop", "release", "restart", "status"],
+                    "description": "Path mode",
+                },
+                "project": {"type": "string", "description": "Project directory (default .)"},
+                "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Ports to allocate when start/restart needs a new range (default 1)",
+                },
+                "range_id": {"type": "string"},
+                "note": {"type": "string"},
+                "tailnet": {
+                    "type": "string",
+                    "enum": ["serve", "funnel", "none"],
+                    "description": (
+                        "Optional user-service Tailnet. Omit/none skips Serve. "
+                        "serve requires login (needs_input to resume). "
+                        "Never Funnels Portskill listen."
+                    ),
+                },
+                "command": {"type": "string", "description": "Optional start command to wire"},
+                "cwd": {"type": "string"},
+                "default_state": {"type": "string", "enum": ["on", "off"]},
+                "start": {"type": "integer", "description": "Optional explicit start port when allocating"},
+            },
+            "required": ["mode"],
+        },
+    },
+    {
         "name": "doctor",
         "description": "Environment checks: registry, Tailscale bin, app files, placeholder start.sh, default_state counts.",
         "inputSchema": {
@@ -649,6 +692,27 @@ def tool_argv(name: str, arguments: dict) -> list[str]:
         if args.get("project"):
             argv += ["--project", str(args["project"])]
         return argv
+    if name == "portskill_path":
+        argv = ["path", "--mode", str(args["mode"])]
+        if args.get("project"):
+            argv += ["--project", str(args["project"])]
+        if args.get("count") is not None:
+            argv += ["--count", str(int(args["count"]))]
+        if args.get("range_id"):
+            argv += ["--range-id", str(args["range_id"])]
+        if args.get("note"):
+            argv += ["--note", str(args["note"])]
+        if args.get("tailnet"):
+            argv += ["--tailnet", str(args["tailnet"])]
+        if args.get("command"):
+            argv += ["--command", str(args["command"])]
+        if args.get("cwd"):
+            argv += ["--cwd", str(args["cwd"])]
+        if args.get("default_state"):
+            argv += ["--default-state", str(args["default_state"])]
+        if args.get("start") is not None:
+            argv += ["--start", str(int(args["start"]))]
+        return argv
     if name == "doctor":
         argv = ["doctor"]
         if args.get("project"):
@@ -1051,7 +1115,7 @@ def mcp_handle(message: dict) -> dict | None:
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
                 "instructions": (
-                    "Portskill MCP: tools allocate/activate/start/stop/release/status/doctor/environment_export/environment_import/set_default/apply_defaults/deactivate/compat_check/preset_save/preset_list/preset_apply/preset_delete/settings_get/settings_set/set_tailnet/tailscale_status/tailscale_login/history_list/history_restore/history_reset/ports_discover/ports_import "
+                    "Portskill MCP: tools allocate/activate/start/stop/release/status/portskill_path/doctor/environment_export/environment_import/set_default/apply_defaults/deactivate/compat_check/preset_save/preset_list/preset_apply/preset_delete/settings_get/settings_set/set_tailnet/tailscale_status/tailscale_login/history_list/history_restore/history_reset/ports_discover/ports_import "
                     "wrap the Portskill CLI against ~/.config/port-registry/registry.json "
                     "(or PORT_REGISTRY_PATH). Session Handoff tools use flat names "
                     "handoff_status/handoff_skill/handoff_template/handoff_list/handoff_resolve/"
