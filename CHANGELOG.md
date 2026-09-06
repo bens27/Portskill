@@ -11,6 +11,9 @@
 - Optional WebAuthn/passkey HTTP gate (default **off**). When on, the personal listen UI and mutating HTTP APIs accept a short-lived httpOnly passkey session cookie **or** the optional bearer. Register/authenticate are stdlib-only (no new pip runtime dependency). Operator credentials live in `~/.config/port-registry/http_passkey.json`, not `registry.json`. Settings UI can enable the gate and register/manage passkeys. CLI: `http-auth gate on|off` and `http-auth passkeys`.
 
 ### Changed
+- HTML UI section containers no longer sit flush: stacked MCP Tools boxes (System tools ↔ Agent connection) and main-panel boxes (Settings ↔ Services, Session Handoff) share a 14px vertical gap.
+- Project/service list lives under a **Services** disclosure (Settings-style all-caps header, chevron, rounded bordered container; start-open).
+- Session Handoff uses the same Settings header/container/disclose chrome (`pr-subpanel`) instead of a nested panel + System-tools wrapper.
 - Local HTTP UI and ordinary HTTP APIs on the personal listen path no longer require `Authorization: Bearer`. `GET /` serves the registry UI (no login wall). Funnel of Portskill’s own listen port remains refused. Stdio MCP is unchanged. `http-auth` CLI / `http_auth.json` remain optional helpers and do not gate default UI routes.
 - MCP Tools panel order is System tools → Agent connection (each setup instruction is a start-collapsed disclosure) → User commands → Command composer.
 - Session Handoff flat tool-name copy (`handoff_status`, `handoff_list`, … — not nested `session-handoff/*`) lives in the Session Handoff section. The user-command enable-map sentence stays next to User commands.

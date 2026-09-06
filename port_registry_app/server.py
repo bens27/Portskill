@@ -1331,6 +1331,8 @@ def console_css() -> str:
         ".pr-toolbar input[type=text],.pr-toolbar input[type=file]{font-size:12px}"
         ".pr-subpanel{margin-top:16px;padding:0;border:1px solid var(--line);"
         "border-radius:8px;background:#fafbf9}"
+        ".pr-services-body{padding:12px 14px;display:flex;flex-direction:column;gap:12px}"
+        ".pr-services-body>.pr-project{margin-bottom:0}"
         ".pr-subpanel h3{margin:0 0 10px;font-size:13px;text-transform:uppercase;"
         "letter-spacing:.08em;color:var(--muted)}"
         ".pr-preset-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;"
@@ -1387,6 +1389,10 @@ def console_css() -> str:
         ".pr-serve-url-details summary{cursor:pointer;color:var(--cobalt);list-style:none;display:inline-flex;align-items:center;gap:6px}"
         ".pr-serve-url-details summary::-webkit-details-marker{display:none}"
         ".pr-serve-url-details code{display:block;margin-top:4px;padding:6px 8px;background:#fafbf9;border:1px solid var(--line);border-radius:6px;word-break:break-all;white-space:pre-wrap;max-width:min(42ch,100%)}"
+        ".pr-section-stack{display:flex;flex-direction:column;gap:14px}"
+        ".pr-section-stack>.pr-mcp-system-details,"
+        ".pr-section-stack>.pr-mcp-connect,"
+        ".pr-section-stack>.pr-subpanel{margin-top:0;margin-bottom:0}"
         ".pr-mcp-system-details{margin:8px 0 0;border:1px solid var(--line);border-radius:8px;background:#fafbf9;padding:0}"
         ".pr-mcp-system-details>summary{cursor:pointer;padding:10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;list-style:none;display:flex;align-items:center;gap:8px;user-select:none}"
         ".pr-mcp-system-details>summary::-webkit-details-marker{display:none}"
@@ -1532,6 +1538,7 @@ def console_css() -> str:
         ".pr-subpanel[open]>summary .pr-disclose-hint{font-size:0}"
         ".pr-subpanel[open]>summary .pr-disclose-hint::after{content:\"Hide\";font-size:11px;opacity:.55}"
         ".pr-subpanel .pr-settings-row{padding:14px 16px}"
+        ".pr-subpanel .pr-handoff-body{padding:14px 16px}"
         ".pr-serve-url-details>summary .pr-disclose-hint{margin-left:4px;font-size:11px;font-weight:500;"
         "color:var(--cobalt);opacity:.85}"
         ".pr-serve-url-details[open]>summary .pr-disclose-hint{font-size:0}"
@@ -1618,6 +1625,18 @@ def settings_panel_html(view: dict) -> str:
         '<button type="button" class="pr-btn" id="pr-http-auth-regen">Regenerate</button>'
         "</div>"
         "</div>"
+        "</details>"
+    )
+
+
+def services_panel_html(body: str, project_count: int = 0) -> str:
+    """Project/service list under a Settings-style SERVICES disclosure (start-open)."""
+    count = int(project_count or 0)
+    return (
+        f'<details class="pr-subpanel pr-services" id="pr-services" open>'
+        f'<summary>Services <span class="tag">{count}</span>'
+        f'<span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
+        f'<div class="pr-services-body">{body}</div>'
         "</details>"
     )
 
@@ -2379,8 +2398,10 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         f'lifecycle tools. Use this HTML UI for maintenance and defaults. '
         f'Stdio MCP (<code>{esc(stdio)}</code>) is an available agent install option. '
         f'Toggles filter live <code>tools/list</code> + <code>tools/call</code> (disabled tools stay listed here so you can re-enable).</p>'
+        f'<div class="pr-section-stack">'
         f"{system_body}"
         f"{stdio_block}"
+        f"</div>"
         f"{user_body}"
         f"{composer}"
         f"</div>"
@@ -2479,8 +2500,7 @@ def handoff_panel_html(view: dict | None = None) -> str:
     skill_override = esc(status.get("skill_override") or "")
     skill_current = esc(status.get("skill_path") or "")
     return (
-        f'<div class="panel pr-panel pr-handoff" id="pr-handoff">'
-        f'<details class="pr-mcp-system-details pr-handoff-details" id="pr-handoff-details">'
+        f'<details class="pr-subpanel pr-handoff pr-handoff-details" id="pr-handoff-details">'
         f'<summary>Session Handoff <span class="tag">{esc("on" if enabled else "off")}</span>'
         f'<span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
         f'<div class="pr-handoff-body">'
@@ -2528,7 +2548,7 @@ def handoff_panel_html(view: dict | None = None) -> str:
         f"{matrix}"
         f"<h4>Install help</h4>"
         f'<pre class="pr-handoff-help" id="pr-handoff-help">{help_text}</pre>'
-        f"</div></details></div>"
+        f"</div></details>"
     )
 
 
@@ -2620,6 +2640,7 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
     handoff_block = handoff_panel_html(view)
     presets_block = presets_panel_html(view)
     settings_block = settings_panel_html(view)
+    services_block = services_panel_html(body, len(projects))
     env_rail = env_rail_html(view)
     listen = _ACTIVE_LISTEN or read_listen_file() or {}
     mcp_footer_url = esc(listen.get("mcp_url") or "/mcp")
@@ -2673,10 +2694,12 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
       {stats_block}
       {defaults_block}
       {mcp_block}
+      <div class="pr-section-stack">
       {handoff_block}
       {presets_block}
       {settings_block}
-      <div class="panel pr-panel">{body}</div>
+      {services_block}
+      </div>
     </section>
   </main>
 </div>
@@ -3819,9 +3842,10 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
   }});
   (function(){{
     /* Disclosures: default-collapsed (System tools, repo, Settings, Serve URL, handoff). */
+    /* Services stays open — it is the primary project list. */
     document.querySelectorAll(
       'details.pr-project, details.pr-mcp-system-details, details.pr-subpanel, details.pr-serve-url-details, details.pr-disclose'
-    ).forEach(function(el){{ el.open=false; }});
+    ).forEach(function(el){{ if(el.id==='pr-services') return; el.open=false; }});
   }})();
   function applyTailscaleStatus(body){{
     if(!body)return;

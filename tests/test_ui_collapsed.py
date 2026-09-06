@@ -68,7 +68,7 @@ class CollapsedMarkupTests(unittest.TestCase):
             self.assertFalse(_has_open_attr(tag), f"repo details not collapsed: {tag}")
             self.assertIn("pr-project", tag)
 
-        settings = _details_tags(markup, "pr-subpanel")
+        settings = [t for t in _details_tags(markup, "pr-subpanel") if 'id="pr-settings"' in t]
         self.assertTrue(settings, "details.pr-subpanel (Settings) missing from rendered HTML")
         for tag in settings:
             self.assertFalse(_has_open_attr(tag), f"Settings details not collapsed: {tag}")
@@ -77,6 +77,22 @@ class CollapsedMarkupTests(unittest.TestCase):
         self.assertIn('id="pr-stop-also-release"', html)
         self.assertIn("Stop also Release", html)
         self.assertIn("pr-disclose-hint", html)
+
+        services = [t for t in _details_tags(markup, "pr-services") if 'id="pr-services"' in t]
+        self.assertTrue(services, "details.pr-services (Services) missing from rendered HTML")
+        for tag in services:
+            self.assertTrue(_has_open_attr(tag), f"Services details should start open: {tag}")
+        self.assertIn("<summary>Services", html)
+        self.assertIn('id="pr-services"', html)
+        self.assertIn("pr-services-body", html)
+        self.assertLess(html.find('id="pr-settings"'), html.find('id="pr-services"'))
+        self.assertIn("pr-section-stack", html)
+
+        handoff_sub = [t for t in _details_tags(markup, "pr-handoff-details") if "pr-subpanel" in t]
+        self.assertTrue(handoff_sub, "Session Handoff should use the Settings pr-subpanel chrome")
+        for tag in handoff_sub:
+            self.assertFalse(_has_open_attr(tag), f"Session Handoff details not collapsed: {tag}")
+            self.assertNotIn("pr-mcp-system-details", tag)
 
     def test_serve_url_details_start_collapsed_with_chevron_hint(self) -> None:
         from port_registry_app.server import portskill_serve_chip_html
