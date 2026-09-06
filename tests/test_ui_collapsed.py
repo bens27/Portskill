@@ -166,20 +166,24 @@ class AdHocCodesignScriptTests(unittest.TestCase):
 
 
 class PlaybookTests(unittest.TestCase):
-    def test_playbook_has_two_friend_paths_and_gatekeeper_honesty(self) -> None:
+    def test_playbook_retired_developer_path(self) -> None:
         import pathlib
 
         root = pathlib.Path(__file__).resolve().parents[1]
         text = (root / "PLAYBOOK.md").read_text(encoding="utf-8")
-        self.assertIn("right-click", text.lower())
-        self.assertIn("install-mac.sh", text)
-        self.assertIn("com.apple.quarantine", text)
-        self.assertIn("SECURITY.md", text)
-        self.assertIn("HOLD", text)
-        self.assertIn("does **not** claim App Store Connect", text)
-        self.assertIn("not** an app store or notarized", text.lower())
+        self.assertIn("retired", text.lower())
+        self.assertIn("not** a supported", text.lower())
+        self.assertIn("README.md", text)
+        self.assertIn("./scripts/run.sh", text)
+        self.assertNotIn("right-click", text.lower())
+        self.assertNotIn("AirDrop", text)
         readme = (root / "README.md").read_text(encoding="utf-8")
-        self.assertIn("PLAYBOOK.md", readme)
+        self.assertIn("./scripts/run.sh", readme)
+        self.assertIn("Quick start", readme)
+        self.assertNotIn("Mac friends", readme)
+        self.assertIn("does not ship a notarized or signed binary", readme.lower())
+        security = (root / "SECURITY.md").read_text(encoding="utf-8")
+        self.assertIn("No signed / notarized distribution", security)
 
 
 if __name__ == "__main__":
