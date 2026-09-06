@@ -179,9 +179,15 @@ def main() -> int:
                     "registry",
                     "bind_host",
                     "handoff_kit",
+                    "http_auth",
                 ):
                     if need not in names:
                         fail(f"doctor missing check {need!r}")
+                http_auth = payload.get("http_auth")
+                if not isinstance(http_auth, dict) or "configured" not in http_auth:
+                    fail(f"doctor missing http_auth status: {http_auth!r}")
+                if "token" in http_auth:
+                    fail("doctor http_auth leaked token field")
                 hk = payload.get("handoff_kit")
                 if not isinstance(hk, dict) or not hk.get("present"):
                     fail(f"doctor handoff_kit not present: {hk!r}")
@@ -203,18 +209,55 @@ def main() -> int:
         print("PASS")
         return 0
 
-    for key in ("ui_url", "mcp_url"):
-        url = listen.get(key)
-        if not url:
-            fail(f"listen.json missing {key}")
+    ui_url = listen.get("ui_url")
+    mcp_url = listen.get("mcp_url")
+    if not ui_url:
+        fail("listen.json missing ui_url")
+    if not mcp_url:
+        fail("listen.json missing mcp_url")
+    try:
+        with urllib.request.urlopen(ui_url, timeout=5) as resp:
+            code = getattr(resp, "status", None) or resp.getcode()
+            if int(code) != 200:
+                fail(f"GET ui_url {ui_url} -> HTTP {code}")
+            ok(f"GET ui_url -> HTTP {code} ({ui_url})")
+    except urllib.error.URLError as exc:
+        fail(f"GET ui_url {ui_url}: {exc}")
+
+    mcp_headers = {}
+    token = None
+    auth_path = pathlib.Path.home() / ".config" / "port-registry" / "http_auth.json"
+    if auth_path.is_file():
         try:
-            with urllib.request.urlopen(url, timeout=5) as resp:
-                code = getattr(resp, "status", None) or resp.getcode()
-                if int(code) != 200:
-                    fail(f"GET {key} {url} -> HTTP {code}")
-                ok(f"GET {key} -> HTTP {code} ({url})")
-        except urllib.error.URLError as exc:
-            fail(f"GET {key} {url}: {exc}")
+            token = (json.loads(auth_path.read_text(encoding="utf-8")) or {}).get("token")
+        except Exception:
+            token = None
+        if isinstance(token, str) and token.strip():
+            mcp_headers["Authorization"] = f"Bearer {token.strip()}"
+    try:
+        req = urllib.request.Request(mcp_url, method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            code = int(getattr(resp, "status", None) or resp.getcode())
+            if code == 200:
+                ok(f"GET mcp_url -> HTTP {code} ({mcp_url})")
+            else:
+                fail(f"GET mcp_url {mcp_url} -> HTTP {code}")
+    except urllib.error.HTTPError as exc:
+        if int(exc.code) != 401:
+            fail(f"GET mcp_url {mcp_url}: HTTP {exc.code}")
+        if not mcp_headers:
+            fail(f"GET mcp_url {mcp_url} -> 401 without local http_auth.json token")
+        req = urllib.request.Request(mcp_url, headers=mcp_headers, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                code = int(getattr(resp, "status", None) or resp.getcode())
+                if code != 200:
+                    fail(f"GET mcp_url with bearer {mcp_url} -> HTTP {code}")
+                ok(f"GET mcp_url with bearer -> HTTP {code} ({mcp_url})")
+        except urllib.error.URLError as retry_exc:
+            fail(f"GET mcp_url with bearer {mcp_url}: {retry_exc}")
+    except urllib.error.URLError as exc:
+        fail(f"GET mcp_url {mcp_url}: {exc}")
 
     print("PASS")
     return 0

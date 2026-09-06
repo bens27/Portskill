@@ -7,9 +7,12 @@ from .handoff import doctor_handoff
 import copy
 import datetime
 import fcntl
+import hashlib
+import hmac
 import json
 import os
 import pathlib
+import secrets
 import shlex
 import shutil
 import signal
@@ -24,6 +27,8 @@ import webbrowser
 VERSION = 1
 DEFAULT_REGISTRY_PATH = "~/.config/port-registry/registry.json"
 LISTEN_FILENAME = "listen.json"
+HTTP_AUTH_FILENAME = "http_auth.json"
+HTTP_AUTH_COOKIE_NAME = "portskill_http"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 # Doctor exit contract (main): 0 = healthy / informational warnings; 2 = fail-closed.
 # Hard checks only; informational checks never flip the exit code.
@@ -108,7 +113,8 @@ def bind_host_warning(host):
         return None
     return (
         f"Bound to {host} (not loopback). "
-        "The unauthenticated UI and HTTP MCP are reachable beyond this machine. "
+        "The HTTP UI and MCP listener are reachable beyond this machine "
+        "(bearer auth is still required; Tailscale is not authentication). "
         "Default bind remains 127.0.0.1. "
         f"This requires {ALLOW_NON_LOOPBACK_FLAG} (documented footgun). Remotes HOLD."
     )
@@ -118,9 +124,10 @@ def non_loopback_refuse_message(host):
     """Error when bind host is not loopback and the override flag is absent."""
     return (
         f"Refusing to bind {host} (not loopback). "
-        "The unauthenticated UI and HTTP MCP would be reachable beyond this machine. "
+        "The HTTP UI and MCP listener would be reachable beyond this machine. "
         f"Default bind is 127.0.0.1. Pass {ALLOW_NON_LOOPBACK_FLAG} only if you "
-        "intentionally accept that exposure (documented footgun)."
+        "intentionally accept that exposure (documented footgun). "
+        "Bearer auth is mandatory even with the override (no open LAN dogfood)."
     )
 
 
@@ -129,6 +136,116 @@ def listen_allows_non_loopback(listen_payload):
     if not isinstance(listen_payload, dict):
         return False
     return bool(listen_payload.get("allow_non_loopback"))
+
+
+def http_auth_path():
+    """http_auth.json beside the registry, or PORTSKILL_HTTP_AUTH_PATH."""
+    configured = os.environ.get("PORTSKILL_HTTP_AUTH_PATH")
+    if configured and str(configured).strip():
+        return pathlib.Path(configured).expanduser()
+    return registry_path().parent / HTTP_AUTH_FILENAME
+
+
+def mint_http_auth_secret():
+    return secrets.token_urlsafe(32)
+
+
+def read_http_auth_file():
+    """Return http_auth.json object or None. Read-only; never creates a file."""
+    path = http_auth_path()
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    token = data.get("token")
+    if not isinstance(token, str) or not token.strip():
+        return None
+    return data
+
+
+def http_auth_token():
+    data = read_http_auth_file()
+    if not data:
+        return None
+    token = data.get("token")
+    return token.strip() if isinstance(token, str) else None
+
+
+def http_auth_configured():
+    return bool(http_auth_token())
+
+
+def http_auth_public_status():
+    """Doctor/UI-safe: path + configured. Never includes the secret."""
+    return {
+        "configured": http_auth_configured(),
+        "present": http_auth_configured(),
+        "path": str(http_auth_path()),
+    }
+
+
+def write_http_auth_file(token, *, created_at=None):
+    path = http_auth_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    now = utc_now()
+    payload = {
+        "version": 1,
+        "token": token,
+        "created_at": created_at or now,
+        "updated_at": now,
+    }
+    raw = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+    try:
+        tmp.write_text(raw, encoding="utf-8")
+        try:
+            os.chmod(tmp, 0o600)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+    return payload
+
+
+def ensure_http_auth_token():
+    """Load existing token or mint one. Returns (payload, minted)."""
+    existing = read_http_auth_file()
+    if existing:
+        return existing, False
+    return write_http_auth_file(mint_http_auth_secret()), True
+
+
+def regenerate_http_auth_token():
+    """Mint a new token; the previous value is invalidated."""
+    prev = read_http_auth_file()
+    created = prev.get("created_at") if prev else None
+    return write_http_auth_file(mint_http_auth_secret(), created_at=created)
+
+
+def http_bearer_matches(provided):
+    expected = http_auth_token()
+    if not expected or not isinstance(provided, str) or not provided:
+        return False
+    got = provided.strip()
+    if not got:
+        return False
+    return hmac.compare_digest(
+        hashlib.sha256(got.encode("utf-8")).digest(),
+        hashlib.sha256(expected.encode("utf-8")).digest(),
+    )
 
 
 def pool_bounds():
@@ -1997,9 +2114,29 @@ def tailscale_command(mode, port, off=False):
     return command
 
 
+def funnel_of_listen_port(port):
+    """True when *port* is Portskill's own listen/UI/MCP port."""
+    listen = read_listen_port_from_disk()
+    try:
+        return listen is not None and int(port) == int(listen)
+    except (TypeError, ValueError):
+        return False
+
+
+def refuse_funnel_listen_message(port):
+    return (
+        f"Refusing Tailscale Funnel of Portskill listen/UI/MCP port {int(port)}. "
+        "Funnel of the listen port is blocked in code. "
+        "Serve of user claimed service ports stays a deliberate user action. "
+        "Tailscale is not authentication — HTTP MCP/UI require a local bearer token."
+    )
+
+
 def run_tailnet(mode, port, off=False):
     if mode == "none":
         return
+    if mode == "funnel" and not off and funnel_of_listen_port(port):
+        fail("funnel_listen_refused", refuse_funnel_listen_message(port))
     command = tailscale_command(mode, port, off=off)
     result = subprocess.run(
         command,
@@ -4813,6 +4950,40 @@ def cmd_workspace(args):
     fail("invalid_args", f"unknown workspace command: {cmd}")
 
 
+def cmd_http_auth(args):
+    """Show or regenerate the local HTTP bearer token (never used by stdio MCP)."""
+    sub = getattr(args, "http_auth_command", None)
+    path = str(http_auth_path())
+    if sub == "show":
+        payload, minted = ensure_http_auth_token()
+        emit({
+            "status": "ok",
+            "configured": True,
+            "present": True,
+            "path": path,
+            "token": payload.get("token"),
+            "minted": bool(minted),
+            "created_at": payload.get("created_at"),
+            "updated_at": payload.get("updated_at"),
+        })
+        return
+    if sub == "regenerate":
+        payload = regenerate_http_auth_token()
+        emit({
+            "status": "ok",
+            "configured": True,
+            "present": True,
+            "path": path,
+            "token": payload.get("token"),
+            "regenerated": True,
+            "created_at": payload.get("created_at"),
+            "updated_at": payload.get("updated_at"),
+            "message": "Previous HTTP bearer token is invalidated.",
+        })
+        return
+    fail("invalid_args", "http-auth requires show|regenerate")
+
+
 def cmd_tailscale(args):
     cmd = getattr(args, "tailscale_command", None)
     if cmd == "status":
@@ -4925,6 +5096,23 @@ def cmd_doctor(args):
         except OSError as exc:
             checks.append({"name": "listen", "ok": False, "detail": f"unreadable: {listen_file}: {exc}"})
 
+    auth_status = http_auth_public_status()
+    if auth_status.get("configured"):
+        checks.append({
+            "name": "http_auth",
+            "ok": True,
+            "detail": f"configured (token present) at {auth_status.get('path')}",
+        })
+    else:
+        checks.append({
+            "name": "http_auth",
+            "ok": True,  # informational — minted on first HTTP serve; doctor never writes
+            "detail": (
+                f"absent: {auth_status.get('path')} "
+                "(minted on first HTTP serve; doctor never writes this file)"
+            ),
+        })
+
     loopback_warn = bind_host_warning(bind_host)
     allow_non_loopback = listen_allows_non_loopback(listen_payload)
     if loopback_warn:
@@ -4955,7 +5143,7 @@ def cmd_doctor(args):
             "detail": "unset (default bind is loopback 127.0.0.1)",
         })
 
-    def _probe(name: str, url: object) -> None:
+    def _probe(name: str, url: object, *, bearer: str | None = None) -> None:
         if not listening:
             checks.append({
                 "name": name,
@@ -4971,7 +5159,10 @@ def cmd_doctor(args):
             })
             return
         try:
-            with urllib.request.urlopen(url, timeout=3) as resp:
+            req = urllib.request.Request(url, method="GET")
+            if bearer:
+                req.add_header("Authorization", f"Bearer {bearer}")
+            with urllib.request.urlopen(req, timeout=3) as resp:
                 code = int(getattr(resp, "status", None) or resp.getcode())
             if code != 200:
                 checks.append({
@@ -4985,6 +5176,12 @@ def cmd_doctor(args):
                     "ok": True,
                     "detail": f"GET {url} -> HTTP {code}",
                 })
+        except urllib.error.HTTPError as exc:
+            checks.append({
+                "name": name,
+                "ok": False,
+                "detail": f"GET {url} -> HTTP {int(exc.code)}",
+            })
         except urllib.error.URLError as exc:
             checks.append({
                 "name": name,
@@ -4999,7 +5196,7 @@ def cmd_doctor(args):
             })
 
     _probe("ui_reachability", ui_url)
-    _probe("mcp_reachability", mcp_url)
+    _probe("mcp_reachability", mcp_url, bearer=http_auth_token())
 
     ts_bin = resolve_tailscale_bin()
     ts_path = pathlib.Path(shlex.split(ts_bin)[0]) if ts_bin else None
@@ -5028,7 +5225,9 @@ def cmd_doctor(args):
         "ok": True,
         "detail": (
             "Serve maps localhost ports onto your tailnet when logged in. "
-            "UI toggle is Serve on/off; Funnel remains available via CLI `--mode funnel`."
+            "UI toggle is Serve on/off; Funnel of user service ports remains "
+            "available via CLI `--mode funnel`. Funnel of the Portskill listen "
+            "port is refused. Tailscale is not HTTP authentication."
             + ("" if ts_status.get("logged_in") else " Log in before enabling Serve.")
         ),
     })
@@ -5153,6 +5352,7 @@ def cmd_doctor(args):
         "bind_host": bind_host,
         "loopback": loopback_warn is None,
         "allow_non_loopback": allow_non_loopback,
+        "http_auth": auth_status,
         "ui_url": ui_url,
         "mcp_url": mcp_url,
         "skill_dir": str(skill),
@@ -5555,6 +5755,22 @@ def parser():
     doctor = subparsers.add_parser("doctor")
     doctor.add_argument("--project", default=".")
     doctor.set_defaults(func=cmd_doctor)
+
+    http_auth = subparsers.add_parser(
+        "http-auth",
+        help="Show or regenerate the local HTTP bearer token (stdio MCP unchanged)",
+    )
+    http_auth_sub = http_auth.add_subparsers(dest="http_auth_command", required=True)
+    http_auth_show = http_auth_sub.add_parser(
+        "show",
+        help="Print the local HTTP bearer token (mints one if missing)",
+    )
+    http_auth_show.set_defaults(func=cmd_http_auth)
+    http_auth_regen = http_auth_sub.add_parser(
+        "regenerate",
+        help="Mint a new HTTP bearer token and invalidate the old one",
+    )
+    http_auth_regen.set_defaults(func=cmd_http_auth)
 
     set_default = subparsers.add_parser("set-default")
     set_default.add_argument("--range-id", required=True)

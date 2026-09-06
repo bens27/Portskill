@@ -41,11 +41,16 @@ from .mcp import (
 )
 from .cli import (
     ALLOW_NON_LOOPBACK_FLAG,
+    HTTP_AUTH_COOKIE_NAME,
     apply_portskill_tailscale_serve,
     bind_host_warning,
     default_machines,
+    ensure_http_auth_token,
     extract_tailscale_advertise_host,
     get_machine,
+    http_auth_public_status,
+    http_auth_token,
+    http_bearer_matches,
     is_loopback_host,
     listen_path as cli_listen_path,
     non_loopback_refuse_message,
@@ -53,6 +58,7 @@ from .cli import (
     normalize_mcp_user_commands,
     probe_portskill_serve_status,
     probe_tailscale_status,
+    regenerate_http_auth_token,
     resolve_range_host,
     resolve_range_scheme,
     resolve_range_url,
@@ -191,8 +197,9 @@ def build_listen_payload(host: str, port: int) -> dict:
                 "or python3 -m port_registry_app --mcp-stdio"
             ),
             "cursor_mcp_http_hint": (
-                "HTTP MCP is local-trust dogfood only (unauthenticated loopback). "
-                "Prefer stdio for agents."
+                "HTTP MCP is local-trust dogfood only and requires "
+                "Authorization: Bearer (even on loopback). Prefer stdio for agents. "
+                "Tailscale is not authentication."
             ),
             "tools_endpoint": "initialize / tools/list / tools/call via JSON-RPC on /mcp",
         },
@@ -204,8 +211,10 @@ def print_listen_banner(payload: dict) -> None:
     print("======== Portskill ========", flush=True)
     print(f"UI:            {payload.get('ui_url')}", flush=True)
     print(f"Stdio MCP:     {payload.get('stdio')}  (preferred for agents)", flush=True)
-    print(f"HTTP MCP:      {payload.get('mcp_post')}  (local-trust dogfood only)", flush=True)
-    print(f"MCP discovery: {payload.get('mcp_get_discovery')}", flush=True)
+    print(f"HTTP MCP:      {payload.get('mcp_post')}  (Bearer required; stdio preferred)", flush=True)
+    print(f"MCP discovery: {payload.get('mcp_get_discovery')}  (Bearer required)", flush=True)
+    print("HTTP auth:     configured (token in ~/.config/port-registry/http_auth.json)", flush=True)
+    print("               show/regenerate: portskill-cli http-auth show|regenerate", flush=True)
     print(f"listen.json:   {payload.get('listen_path') or listen_path()}", flush=True)
     print(f"Registry:      {payload.get('registry_path') or registry_path()}", flush=True)
     print("===========================", flush=True)
@@ -1488,6 +1497,22 @@ def settings_panel_html(view: dict) -> str:
         "Require compatibility — on</label>"
         '<button type="button" class="pr-btn" data-pr-action="settings-save">Save settings</button>'
         "</div>"
+        '<div class="pr-settings-row" id="pr-http-auth">'
+        "<strong>HTTP auth</strong>"
+        '<p class="pr-mcp-meta" style="margin:6px 0">Local bearer for HTTP MCP and UI APIs '
+        "(even on loopback). Stdio MCP does not use this token. "
+        "Tailscale Serve/Funnel is not authentication. "
+        "Regenerate invalidates the old token. "
+        "CLI: <code>portskill-cli http-auth show</code></p>"
+        '<p class="pr-mcp-meta" id="pr-http-auth-status" style="margin:0 0 8px">Token configured — not shown here.</p>'
+        '<input type="password" id="pr-http-auth-input" autocomplete="off" '
+        'placeholder="Paste bearer token" style="width:100%;margin-bottom:8px">'
+        '<div style="display:flex;flex-wrap:wrap;gap:8px">'
+        '<button type="button" class="pr-btn" id="pr-http-auth-apply">Use token</button>'
+        '<button type="button" class="pr-btn" id="pr-http-auth-show">Show token</button>'
+        '<button type="button" class="pr-btn" id="pr-http-auth-regen">Regenerate</button>'
+        "</div>"
+        "</div>"
         "</details>"
     )
 
@@ -2128,9 +2153,10 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         f'<span class="tag">preferred for agents</span>'
         f'</div>'
         f'<p class="pr-mcp-meta" style="margin:0" id="pr-mcp-http-dogfood">'
-        f'HTTP MCP is <strong>local-trust dogfood only</strong> — same unauthenticated listener as this UI: '
+        f'HTTP MCP is <strong>local-trust dogfood only</strong> and requires '
+        f'<code>Authorization: Bearer</code> (even on loopback). '
         f'<a class="pr-port-link" href="{esc(mcp_url)}" target="_blank" rel="noopener"><code>{esc(mcp_url)}</code></a>. '
-        f'Do not Funnel or bind off loopback.</p>'
+        f'Tailscale is not authentication. Funnel of this listen port is refused.</p>'
         f'</div>'
     )
     return (
@@ -2141,7 +2167,7 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         f'<a class="pr-compose-jump" href="#pr-mcp-user-composer">Compose</a>'
         f'<span class="tag">user command composer</span></div>'
         f'<p class="pr-mcp-meta">Live <code>tools/list</code> surface. Agents should use '
-        f'<strong>stdio MCP</strong> (<code>{esc(stdio)}</code>). HTTP MCP is local-trust dogfood only. '
+        f'<strong>stdio MCP</strong> (<code>{esc(stdio)}</code>). HTTP MCP is local-trust dogfood only and needs a bearer token. '
         f'Toggles filter live <code>tools/list</code> + <code>tools/call</code> (disabled tools stay listed here so you can re-enable). '
         f'Session Handoff tools are flat names (<code>handoff_status</code>, <code>handoff_list</code>, …) — not nested <code>session-handoff/*</code>. '
         f'User commands are marked <code>x-portskill-kind: user-command</code> and respect the same enable map.</p>'
@@ -2472,8 +2498,39 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
 <script>
 (function(){{
 
+  var HTTP_AUTH_COOKIE='{HTTP_AUTH_COOKIE_NAME}';
+  function readHttpAuthCookie(){{
+    var parts=document.cookie?document.cookie.split(';'):[];
+    for(var i=0;i<parts.length;i++){{
+      var kv=parts[i].replace(/^\\s+/,'').split('=');
+      if(kv[0]===HTTP_AUTH_COOKIE)return decodeURIComponent(kv.slice(1).join('=')||'');
+    }}
+    return '';
+  }}
+  function currentHttpToken(){{
+    try{{
+      var stored=sessionStorage.getItem('portskill_http_token');
+      if(stored)return stored;
+    }}catch(e){{}}
+    return readHttpAuthCookie();
+  }}
+  function persistHttpToken(token){{
+    if(!token)return;
+    try{{sessionStorage.setItem('portskill_http_token', token);}}catch(e){{}}
+    document.cookie=HTTP_AUTH_COOKIE+'='+encodeURIComponent(token)+'; Path=/; SameSite=Lax';
+  }}
+  (function syncHttpToken(){{
+    var t=currentHttpToken();
+    if(t)persistHttpToken(t);
+  }})();
+  function authHeaders(extra){{
+    var headers=extra||{{}};
+    var token=currentHttpToken();
+    if(token)headers['Authorization']='Bearer '+token;
+    return headers;
+  }}
   function postAction(payload){{
-    return fetch('/port-registry/actions',{{method:'POST',headers:{{'content-type':'application/json'}},body:JSON.stringify(payload)}})
+    return fetch('/port-registry/actions',{{method:'POST',headers:authHeaders({{'content-type':'application/json'}}),body:JSON.stringify(payload)}})
       .then(function(res){{return res.json().then(function(body){{return {{ok:res.ok,body:body,status:res.status}};}});}});
   }}
   function pollTailscaleConnected(maxMs, onDone){{
@@ -3565,10 +3622,50 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
     if(body.portskill_serve){{applyPortskillServeStatus(body.portskill_serve);}}
   }}
   function refreshTailscaleStatus(){{
-    return fetch('/api/tailscale-status')
+    return fetch('/api/tailscale-status',{{headers:authHeaders()}})
       .then(function(res){{return res.json();}})
       .then(function(body){{applyTailscaleStatus(body);return body;}})
       .catch(function(){{}});
+  }}
+  var httpApply=document.getElementById('pr-http-auth-apply');
+  var httpShow=document.getElementById('pr-http-auth-show');
+  var httpRegen=document.getElementById('pr-http-auth-regen');
+  var httpInput=document.getElementById('pr-http-auth-input');
+  var httpStatus=document.getElementById('pr-http-auth-status');
+  function setHttpStatus(text){{if(httpStatus)httpStatus.textContent=text;}}
+  if(httpApply&&httpInput){{
+    httpApply.addEventListener('click',function(){{
+      var token=(httpInput.value||'').trim();
+      if(!token){{setHttpStatus('Paste a token from portskill-cli http-auth show');return;}}
+      persistHttpToken(token);
+      fetch('/api/http-auth',{{headers:authHeaders()}}).then(function(res){{
+        if(res.status===401){{setHttpStatus('Token rejected (401)');return;}}
+        setHttpStatus('Token stored for this browser session.');
+        httpInput.value='';
+      }}).catch(function(){{setHttpStatus('Could not verify token');}});
+    }});
+  }}
+  if(httpShow){{
+    httpShow.addEventListener('click',function(){{
+      fetch('/api/http-auth',{{headers:authHeaders()}}).then(function(res){{return res.json().then(function(body){{return {{ok:res.ok,body:body,status:res.status}};}});}}).then(function(result){{
+        var body=result.body||{{}};
+        if(!result.ok){{setHttpStatus('Show failed — enter a valid token first');return;}}
+        if(httpInput&&body.token){{httpInput.type='text';httpInput.value=body.token;persistHttpToken(body.token);}}
+        setHttpStatus('Token shown. Keep it local — doctor never prints it.');
+      }}).catch(function(){{setHttpStatus('Show failed');}});
+    }});
+  }}
+  if(httpRegen){{
+    httpRegen.addEventListener('click',function(){{
+      if(!confirm('Regenerate HTTP token? The old bearer is invalidated.'))return;
+      fetch('/api/http-auth/regenerate',{{method:'POST',headers:authHeaders({{'content-type':'application/json'}}),body:'{{}}'}}).then(function(res){{return res.json().then(function(body){{return {{ok:res.ok,body:body,status:res.status}};}});}}).then(function(result){{
+        var body=result.body||{{}};
+        if(!result.ok){{setHttpStatus('Regenerate failed — enter a valid token first');return;}}
+        if(body.token)persistHttpToken(body.token);
+        if(httpInput&&body.token){{httpInput.type='text';httpInput.value=body.token;}}
+        setHttpStatus('New token minted. Previous bearer is invalid.');
+      }}).catch(function(){{setHttpStatus('Regenerate failed');}});
+    }});
   }}
   if(document.readyState==='loading'){{
     document.addEventListener('DOMContentLoaded', function(){{refreshTailscaleStatus();}});
@@ -3583,7 +3680,7 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
 background:#fafbf9;border-top:1px solid var(--line);font-size:11px;color:var(--muted);
 font-family:ui-monospace,Menlo,monospace;z-index:20">
   Stdio MCP (preferred): <code>python3 -m port_registry_app --mcp-stdio</code>
-  · HTTP MCP (local-trust dogfood): <a href="{mcp_footer_url}" style="color:var(--cobalt)">{mcp_footer_label}</a>
+  · HTTP MCP (Bearer required): <a href="{mcp_footer_url}" style="color:var(--cobalt)">{mcp_footer_label}</a>
   · listen: <span title="Sticky broadcast">{mcp_listen_path}</span>
 </footer>
 </body>
@@ -4206,23 +4303,115 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
     return 400, {"ok": False, "message": f"unsupported action: {action}"}
 
 
+def http_auth_login_page() -> str:
+    """HTML shell with no registry inventory. Used when GET / has no bearer/cookie."""
+    return """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Portskill HTTP auth</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{font:15px/1.45 ui-sans-serif,system-ui,sans-serif;max-width:36rem;margin:12vh auto;padding:0 18px;color:#1a1d24}
+code{font:13px ui-monospace,Menlo,monospace}
+input{width:100%;padding:10px 12px;font:14px ui-monospace,Menlo,monospace;margin:10px 0 14px;box-sizing:border-box}
+button{padding:8px 14px;font:14px inherit;cursor:pointer}
+.muted{color:#5c6570;font-size:13px}
+</style></head><body>
+<h1>Portskill HTTP auth</h1>
+<p>This listener requires a local bearer token (even on loopback). Stdio MCP does not.</p>
+<p class="muted">Show the token: <code>portskill-cli http-auth show</code> (or <code>./scripts/cli.sh http-auth show</code>). Tailscale Serve/Funnel is not authentication. Funnel of this listen port is refused.</p>
+<form id="f">
+<input type="password" id="t" autocomplete="off" placeholder="Bearer token" autofocus>
+<button type="submit">Continue</button>
+</form>
+<p id="err" class="muted" hidden>Token rejected (401). No tool side effects.</p>
+<script>
+(function(){
+  var COOKIE='""" + HTTP_AUTH_COOKIE_NAME + """';
+  document.getElementById('f').addEventListener('submit', function(ev){
+    ev.preventDefault();
+    var token=(document.getElementById('t').value||'').trim();
+    var err=document.getElementById('err');
+    if(!token){err.hidden=false;err.textContent='Paste the token from http-auth show.';return;}
+    fetch('/api/http-auth/session',{method:'POST',headers:{'Authorization':'Bearer '+token,'content-type':'application/json'},body:'{}'})
+      .then(function(res){
+        if(res.status===401){err.hidden=false;err.textContent='Token rejected (401). No tool side effects.';return;}
+        try{sessionStorage.setItem('portskill_http_token', token);}catch(e){}
+        document.cookie=COOKIE+'='+encodeURIComponent(token)+'; Path=/; SameSite=Lax';
+        location.reload();
+      }).catch(function(){err.hidden=false;err.textContent='Could not reach HTTP auth.';});
+  });
+})();
+</script>
+</body></html>
+"""
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = f"PortskillUI/{__version__}"
 
     def log_message(self, fmt, *args):  # quieter default logging
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
-    def _send(self, status: int, body: bytes, content_type: str) -> None:
+    def _send(self, status: int, body: bytes, content_type: str, extra_headers=None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if extra_headers:
+            for key, value in extra_headers:
+                self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_json(self, status: int, payload) -> None:
+    def _send_json(self, status: int, payload, extra_headers=None) -> None:
         raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-        self._send(status, raw, "application/json; charset=utf-8")
+        self._send(status, raw, "application/json; charset=utf-8", extra_headers)
+
+    def _discard_body(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length") or "0")
+        except (TypeError, ValueError):
+            length = 0
+        if length > 0:
+            self.rfile.read(length)
+
+    def _provided_http_token(self) -> str:
+        auth = self.headers.get("Authorization") or self.headers.get("authorization") or ""
+        if auth.lower().startswith("bearer "):
+            return auth[7:].strip()
+        cookie_header = self.headers.get("Cookie") or ""
+        for part in cookie_header.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == HTTP_AUTH_COOKIE_NAME:
+                return value.strip()
+        return ""
+
+    def _auth_ok(self) -> bool:
+        return http_bearer_matches(self._provided_http_token())
+
+    def _send_unauthorized(self) -> None:
+        self._send_json(
+            401,
+            {
+                "ok": False,
+                "error": "unauthorized",
+                "message": "Authorization: Bearer required",
+            },
+            extra_headers=[("WWW-Authenticate", 'Bearer realm="portskill"')],
+        )
+
+    def _require_auth(self, *, discard_body: bool = False) -> bool:
+        if self._auth_ok():
+            return True
+        if discard_body:
+            self._discard_body()
+        self._send_unauthorized()
+        return False
+
+    def _auth_cookie_header(self, token: str | None = None):
+        value = token if isinstance(token, str) and token else http_auth_token()
+        if not value:
+            return None
+        return ("Set-Cookie", f"{HTTP_AUTH_COOKIE_NAME}={value}; Path=/; SameSite=Lax")
 
     def do_GET(self):  # noqa: N802
         parsed = urlparse(self.path)
@@ -4235,10 +4424,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send_json(404, {"ok": False, "message": "static not found"})
             return
+        if path == "/health":
+            self._send_json(200, {"ok": True, "service": "portskill"})
+            return
         if path == "/mcp":
+            if not self._require_auth():
+                return
             self._send_json(200, discovery_payload())
             return
         if path in ("/", "/port-registry"):
+            if not self._auth_ok():
+                page = http_auth_login_page().encode("utf-8")
+                self._send(200, page, "text/html; charset=utf-8")
+                return
             raw = load_registry()
             # Fast first paint: no Tailscale probes; local 127.0.0.1 links OK until async refresh
             # One workspace: show all services (no focused-preset filter)
@@ -4247,23 +4445,74 @@ class Handler(BaseHTTPRequestHandler):
             page = render_page(view, tailscale=ts).encode("utf-8")
             self._send(200, page, "text/html; charset=utf-8")
             return
+        if path == "/api/http-auth":
+            if not self._require_auth():
+                return
+            payload = dict(http_auth_public_status())
+            payload["ok"] = True
+            payload["token"] = http_auth_token()
+            self._send_json(200, payload)
+            return
         if path == "/api/tailscale-status":
+            if not self._require_auth():
+                return
             self._send_json(200, api_tailscale_status_payload())
             return
         if path == "/api/state":
+            if not self._require_auth():
+                return
             self._send_json(200, load_registry())
             return
         if path == "/iterate/state":
+            if not self._require_auth():
+                return
             self._send_json(200, iterate_state_payload())
             return
         if path == "/iterate/collab/messages":
+            if not self._require_auth():
+                return
             self._send_json(200, {"ok": True, "messages": iterate_read_collab()})
             return
         self._send_json(404, {"ok": False, "message": "not found"})
 
     def do_POST(self):  # noqa: N802
         path = urlparse(self.path).path.rstrip("/") or "/"
+        if path == "/api/http-auth/session":
+            ok = self._auth_ok()
+            self._discard_body()
+            if not ok:
+                self._send_unauthorized()
+                return
+            cookie = self._auth_cookie_header()
+            self._send_json(
+                200,
+                {"ok": True, **http_auth_public_status()},
+                extra_headers=[cookie] if cookie else None,
+            )
+            return
+        if path == "/api/http-auth/regenerate":
+            ok = self._auth_ok()
+            self._discard_body()
+            if not ok:
+                self._send_unauthorized()
+                return
+            payload = regenerate_http_auth_token()
+            public = http_auth_public_status()
+            cookie = self._auth_cookie_header(payload.get("token"))
+            self._send_json(
+                200,
+                {
+                    "ok": True,
+                    **public,
+                    "token": payload.get("token"),
+                    "regenerated": True,
+                },
+                extra_headers=[cookie] if cookie else None,
+            )
+            return
         if path == "/mcp":
+            if not self._require_auth(discard_body=True):
+                return
             length = int(self.headers.get("Content-Length") or "0")
             raw = self.rfile.read(length) if length else b""
             try:
@@ -4296,6 +4545,8 @@ class Handler(BaseHTTPRequestHandler):
             "/iterate/persist",
             "/iterate/collab/send",
         ):
+            if not self._require_auth(discard_body=True):
+                return
             length = int(self.headers.get("Content-Length") or "0")
             raw = self.rfile.read(length) if length else b""
             try:
@@ -4333,6 +4584,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path != "/port-registry/actions":
             self._send_json(404, {"ok": False, "message": "not found"})
+            return
+        if not self._require_auth(discard_body=True):
             return
         length = int(self.headers.get("Content-Length") or "0")
         raw = self.rfile.read(length) if length else b""
@@ -4436,6 +4689,16 @@ def serve_http(
         run_launch_auto_apply()
     else:
         print("auto-apply: skipped (--no-auto-apply)", flush=True)
+    try:
+        _auth_payload, minted = ensure_http_auth_token()
+        print(
+            "http_auth: "
+            + ("minted" if minted else "loaded")
+            + f" ({http_auth_public_status().get('path')}; secret not printed)",
+            flush=True,
+        )
+    except OSError as exc:
+        print(f"http_auth: failed to mint/load token ({exc}); HTTP will fail closed", flush=True)
 
     source = "explicit" if explicit and port is not None else "pending"
     if explicit and port is not None:
@@ -4605,7 +4868,8 @@ def main(argv=None) -> int:
         dest="allow_non_loopback",
         help=(
             "FOOTGUN: allow --host that is not 127.0.0.1 / ::1 / localhost. "
-            "Exposes the unauthenticated UI and HTTP MCP beyond this machine. "
+            "Exposes the HTTP UI and MCP listener beyond this machine. "
+            "Bearer auth is still mandatory (no open LAN dogfood). "
             "Without this flag, non-loopback bind is refused."
         ),
     )

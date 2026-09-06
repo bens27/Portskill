@@ -17,6 +17,7 @@ HOME_LISTEN = pathlib.Path.home() / ".config" / "port-registry" / "listen.json"
 _ISOLATE_KEYS = (
     "PORT_REGISTRY_PATH",
     "PORTSKILL_LISTEN_PATH",
+    "PORTSKILL_HTTP_AUTH_PATH",
     "HOME",
     "XDG_CONFIG_HOME",
     "PORTSKILL_HANDOFF_KIT",
@@ -53,6 +54,7 @@ class IsolatedConfig:
         os.environ["HOME"] = str(self.home_dir)
         os.environ["XDG_CONFIG_HOME"] = str(self.xdg_config)
         os.environ.pop("PORTSKILL_HANDOFF_KIT", None)
+        os.environ.pop("PORTSKILL_HTTP_AUTH_PATH", None)
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -74,6 +76,7 @@ class IsolatedConfig:
             os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
         )
         env.pop("PORTSKILL_HANDOFF_KIT", None)
+        env.pop("PORTSKILL_HTTP_AUTH_PATH", None)
         if extra:
             env.update(extra)
         return env
