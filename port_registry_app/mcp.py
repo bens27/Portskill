@@ -1307,12 +1307,14 @@ def _listen_enrichment() -> dict:
     if "setup" not in out:
         out["setup"] = {
             "cursor_mcp_stdio_hint": (
-                "Preferred for agents: stdio MCP — examples/mcp.stdio.json "
-                "or python3 -m port_registry_app --mcp-stdio"
+                "Stdio MCP is an available agent install option — "
+                "examples/mcp.stdio.json or python3 -m port_registry_app --mcp-stdio"
             ),
             "cursor_mcp_http_hint": (
-                "HTTP MCP is local-trust dogfood only. Prefer stdio for agents. "
-                "Tailscale is not authentication. Funnel of this listen port is refused."
+                "HTTP MCP uses the same local listener as the HTML UI. "
+                "Access does not require a token unless the optional passkey gate is enabled. "
+                "Sharing Portskill's listen port with Tailscale Serve or Funnel is not a "
+                "substitute for authentication, and Funnel of Portskill's own listen port is blocked."
             ),
             "tools_endpoint": "initialize / tools/list / tools/call via JSON-RPC on /mcp",
         }

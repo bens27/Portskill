@@ -44,6 +44,7 @@ from .mcp import (
 from .cli import (
     ALLOW_NON_LOOPBACK_FLAG,
     HTTP_AUTH_COOKIE_NAME,
+    HTTP_SESSION_COOKIE_NAME,
     apply_portskill_tailscale_serve,
     bind_host_warning,
     default_machines,
@@ -64,6 +65,21 @@ from .cli import (
     resolve_range_host,
     resolve_range_scheme,
     resolve_range_url,
+)
+from .webauthn import (
+    authentication_options,
+    clear_bearer_cookie_header,
+    complete_authentication,
+    complete_registration,
+    delete_passkey_credential,
+    http_passkey_gate_enabled,
+    http_session_valid,
+    mint_http_session,
+    passkey_public_status,
+    registration_options,
+    revoke_http_session,
+    session_cookie_header,
+    set_http_passkey_gate,
 )
 
 DEFAULT_REGISTRY_PATH = "~/.config/port-registry/registry.json"
@@ -188,19 +204,20 @@ def build_listen_payload(host: str, port: int) -> dict:
         "mcp_post": f"POST {mcp} (JSON-RPC)",
         "mcp_get_discovery": f"GET {mcp}",
         "stdio": "python3 -m port_registry_app --mcp-stdio",
-        "stdio_preferred": True,
         "registry_path": str(registry_path()),
         "listen_path": str(path),
         "pid": os.getpid(),
         "started_at": utc_now_iso(),
         "setup": {
             "cursor_mcp_stdio_hint": (
-                "Preferred for agents: stdio MCP — examples/mcp.stdio.json "
-                "or python3 -m port_registry_app --mcp-stdio"
+                "Stdio MCP is an available agent install option — "
+                "examples/mcp.stdio.json or python3 -m port_registry_app --mcp-stdio"
             ),
             "cursor_mcp_http_hint": (
-                "HTTP MCP is local-trust dogfood only. Prefer stdio for agents. "
-                "Tailscale is not authentication. Funnel of this listen port is refused."
+                "HTTP MCP uses the same local listener as the HTML UI. "
+                "Access does not require a token unless the optional passkey gate is enabled. "
+                "Sharing Portskill's listen port with Tailscale Serve or Funnel is not a "
+                "substitute for authentication, and Funnel of Portskill's own listen port is blocked."
             ),
             "tools_endpoint": "initialize / tools/list / tools/call via JSON-RPC on /mcp",
         },
@@ -211,10 +228,14 @@ def print_listen_banner(payload: dict) -> None:
     print("", flush=True)
     print("======== Portskill ========", flush=True)
     print(f"UI:            {payload.get('ui_url')}", flush=True)
-    print(f"Stdio MCP:     {payload.get('stdio')}  (preferred for agents)", flush=True)
-    print(f"HTTP MCP:      {payload.get('mcp_post')}  (stdio preferred; no bearer required)", flush=True)
+    print(f"HTTP MCP:      {payload.get('mcp_post')}  (same listener as the UI; open unless passkey gate on)", flush=True)
+    print(f"Stdio MCP:     {payload.get('stdio')}  (available agent install option)", flush=True)
     print(f"MCP discovery: {payload.get('mcp_get_discovery')}", flush=True)
-    print("HTTP auth:     optional helper (http-auth show|regenerate; does not gate this UI)", flush=True)
+    print(
+        "HTTP auth:     optional helper (http-auth show|regenerate); "
+        "passkey gate default OFF (http-auth gate on)",
+        flush=True,
+    )
     print(f"listen.json:   {payload.get('listen_path') or listen_path()}", flush=True)
     print(f"Registry:      {payload.get('registry_path') or registry_path()}", flush=True)
     print("===========================", flush=True)
@@ -1526,6 +1547,25 @@ def settings_panel_html(view: dict) -> str:
         name = p["name"]
         sel = " selected" if name == current else ""
         options.append(f'<option value="{esc(name)}"{sel}>{esc(name)}</option>')
+    pk = passkey_public_status()
+    gate_checked = "checked" if pk.get("gate") else ""
+    cred_n = int(pk.get("count") or 0)
+    gate_label = (
+        f"Gate {'ON' if pk.get('gate') else 'OFF'} — {cred_n} passkey"
+        f"{'' if cred_n == 1 else 's'} stored under ~/.config/port-registry/"
+    )
+    cred_items = []
+    for cred in pk.get("credentials") or []:
+        cid = cred.get("id") or ""
+        cname = cred.get("name") or "Passkey"
+        created = cred.get("created_at") or ""
+        cred_items.append(
+            f'<li data-cred-id="{esc(cid)}">{esc(cname)} '
+            f'<span class="pr-mcp-meta">{esc(created)}</span> '
+            f'<button type="button" class="pr-btn" data-pr-passkey-delete="{esc(cid)}">'
+            "Remove</button></li>"
+        )
+    cred_html = "".join(cred_items) or '<li class="pr-mcp-meta">No passkeys registered yet.</li>'
     # Remotes remain HOLD — do not render a Coming soon stub.
     return (
         '<details class="pr-subpanel" id="pr-settings">'
@@ -1541,13 +1581,25 @@ def settings_panel_html(view: dict) -> str:
         "</div>"
         '<div class="pr-settings-row" id="pr-http-auth">'
         "<strong>HTTP auth</strong>"
-        '<p class="pr-mcp-meta" style="margin:6px 0">Optional local token helper '
-        "(<code>http_auth.json</code>) for a later passkey cut. "
-        "It does <strong>not</strong> gate this UI or ordinary HTTP APIs. "
-        "Stdio MCP does not use this token. "
-        "Tailscale Serve/Funnel is not authentication. "
-        "CLI: <code>portskill-cli http-auth show</code></p>"
-        '<p class="pr-mcp-meta" id="pr-http-auth-status" style="margin:0 0 8px">Token configured — not shown here.</p>'
+        '<p class="pr-mcp-meta" style="margin:6px 0">Opt-in passkey gate (default '
+        "<strong>off</strong>). When off, this HTML UI and its HTTP APIs stay open. "
+        "When on, they need a passkey session cookie <em>or</em> the optional bearer. "
+        "This gate does not apply to stdio MCP. "
+        "Tailscale Serve or Funnel is not authentication. "
+        "CLI: <code>portskill-cli http-auth gate on|off</code></p>"
+        f'<label><input type="checkbox" id="pr-passkey-gate" {gate_checked}> '
+        "Require passkey (or bearer) for this HTTP UI</label>"
+        '<p class="pr-mcp-meta" id="pr-passkey-status" style="margin:6px 0">'
+        f"{esc(gate_label)}</p>"
+        '<div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0">'
+        '<button type="button" class="pr-btn" id="pr-passkey-register">Register passkey</button>'
+        '<button type="button" class="pr-btn" id="pr-passkey-logout">Log out passkey session</button>'
+        "</div>"
+        '<ul id="pr-passkey-list" style="margin:8px 0 12px;padding-left:18px">'
+        f"{cred_html}"
+        "</ul>"
+        '<p class="pr-mcp-meta" id="pr-http-auth-status" style="margin:0 0 8px">'
+        "Optional bearer helper — not shown here.</p>"
         '<input type="password" id="pr-http-auth-input" autocomplete="off" '
         'placeholder="Paste bearer token" style="width:100%;margin-bottom:8px">'
         '<div style="display:flex;flex-wrap:wrap;gap:8px">'
@@ -1559,6 +1611,92 @@ def settings_panel_html(view: dict) -> str:
         "</details>"
     )
 
+
+def render_passkey_login_page() -> str:
+    """Unauthenticated GET / when the opt-in passkey gate is ON. No inventory."""
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portskill — passkey required</title>
+<style>
+body{{margin:0;font-family:ui-sans-serif,system-ui,sans-serif;background:#f6f7f4;color:#1c1f26}}
+main{{max-width:420px;margin:12vh auto;padding:24px;background:#fff;border:1px solid #d8dce3;border-radius:12px}}
+h1{{font-size:20px;margin:0 0 8px}}
+p{{font-size:13px;line-height:1.45;color:#5c6573}}
+button{{font:inherit;padding:8px 12px;border-radius:8px;border:1px solid #c5cad3;background:#f3f4f1;cursor:pointer}}
+input{{width:100%;box-sizing:border-box;padding:8px;margin:8px 0;font:inherit}}
+.row{{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}}
+#status{{min-height:1.3em;font-size:12px;color:#3d4654}}
+</style>
+</head>
+<body>
+<main>
+<h1>Passkey required</h1>
+<p>This HTML UI has the optional passkey gate <strong>on</strong>.
+Unlock with a registered passkey, or paste the optional bearer from
+<code>portskill-cli http-auth show</code>.
+Default is off — this wall only appears after you enable the gate.</p>
+<p id="status"></p>
+<div class="row">
+<button type="button" id="use-passkey">Use passkey</button>
+</div>
+<input type="password" id="bearer" autocomplete="off" placeholder="Optional bearer token">
+<div class="row">
+<button type="button" id="use-bearer">Use bearer</button>
+</div>
+</main>
+<script>
+function b64urlToBuf(s){{
+  s=String(s||'').replace(/-/g,'+').replace(/_/g,'/');
+  while(s.length%4)s+='=';
+  var bin=atob(s), u=new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);
+  return u.buffer;
+}}
+function bufToB64url(buf){{
+  var u=new Uint8Array(buf), s='';
+  for(var i=0;i<u.length;i++)s+=String.fromCharCode(u[i]);
+  return btoa(s).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');
+}}
+function setStatus(t){{document.getElementById('status').textContent=t||'';}}
+document.getElementById('use-passkey').addEventListener('click', async function(){{
+  setStatus('Waiting for authenticator…');
+  try{{
+    var optRes=await fetch('/api/webauthn/authenticate/options',{{method:'POST',headers:{{'content-type':'application/json'}},body:'{{}}'}});
+    var opt=await optRes.json();
+    if(!optRes.ok){{setStatus(opt.message||'Could not start passkey');return;}}
+    opt.challenge=b64urlToBuf(opt.challenge);
+    (opt.allowCredentials||[]).forEach(function(c){{c.id=b64urlToBuf(c.id);}});
+    var cred=await navigator.credentials.get({{publicKey:opt}});
+    var resp=cred.response;
+    var body={{
+      id:cred.id,
+      rawId:bufToB64url(cred.rawId),
+      type:cred.type,
+      clientDataJSON:bufToB64url(resp.clientDataJSON),
+      authenticatorData:bufToB64url(resp.authenticatorData),
+      signature:bufToB64url(resp.signature)
+    }};
+    var done=await fetch('/api/webauthn/authenticate',{{method:'POST',headers:{{'content-type':'application/json'}},body:JSON.stringify(body)}});
+    var out=await done.json();
+    if(!done.ok){{setStatus(out.message||'Passkey rejected');return;}}
+    location.reload();
+  }}catch(err){{setStatus(err&&err.message?err.message:String(err));}}
+}});
+document.getElementById('use-bearer').addEventListener('click', async function(){{
+  var token=(document.getElementById('bearer').value||'').trim();
+  if(!token){{setStatus('Paste a bearer token first');return;}}
+  try{{sessionStorage.setItem('portskill_http_token', token);}}catch(e){{}}
+  document.cookie='{HTTP_AUTH_COOKIE_NAME}='+encodeURIComponent(token)+'; Path=/; SameSite=Lax';
+  var res=await fetch('/api/http-auth/session',{{method:'POST',headers:{{'content-type':'application/json','Authorization':'Bearer '+token}},body:'{{}}'}});
+  if(res.status===401){{setStatus('Token rejected (401)');return;}}
+  location.reload();
+}});
+</script>
+</body>
+</html>"""
 
 
 def probe_tailscale_for_ui() -> dict:
@@ -2190,11 +2328,11 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         f'<div class="pr-mcp-connect" id="pr-mcp-connect">'
         f'<div class="pr-mcp-section">Agent connection</div>'
         f'<details class="pr-mcp-system-details pr-mcp-connect-details" id="pr-mcp-connect-stdio">'
-        f'<summary>Stdio preferred <span class="tag">preferred for agents</span>'
+        f'<summary>Stdio MCP <span class="tag">agent install option</span>'
         f'<span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
         f'<div class="pr-mcp-connect-body">'
-        f'<p class="pr-mcp-meta" style="margin:0">Preferred path for Cursor / Claude / Codex. '
-        f'Copy this stdio config (same as <code>examples/mcp.stdio.json</code>). '
+        f'<p class="pr-mcp-meta" style="margin:0">Optional stdio attach for Cursor / Claude / Codex. '
+        f'Copy this config (same as <code>examples/mcp.stdio.json</code>). '
         f'Command: <code id="pr-mcp-stdio-cmd">{esc(stdio)}</code></p>'
         f'<pre class="pr-mcp-stdio-config" id="pr-mcp-stdio-config">{esc(stdio_config)}</pre>'
         f'<div class="pr-mcp-connect-row">'
@@ -2202,13 +2340,15 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         f'</div>'
         f'</div></details>'
         f'<details class="pr-mcp-system-details pr-mcp-connect-details" id="pr-mcp-connect-http">'
-        f'<summary>HTTP MCP <span class="tag">local-trust dogfood</span>'
+        f'<summary>HTTP MCP <span class="tag">same listener as this UI</span>'
         f'<span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
         f'<div class="pr-mcp-connect-body">'
-        f'<p class="pr-mcp-meta" style="margin:0" id="pr-mcp-http-dogfood">'
-        f'HTTP MCP is <strong>local-trust dogfood only</strong> (no bearer required on this listen path). '
+        f'<p class="pr-mcp-meta" style="margin:0" id="pr-mcp-http-note">'
+        f'HTTP MCP uses the same local listener as this UI. The endpoint is '
         f'<a class="pr-port-link" href="{esc(mcp_url)}" target="_blank" rel="noopener"><code>{esc(mcp_url)}</code></a>. '
-        f'Tailscale is not authentication. Funnel of this listen port is refused.</p>'
+        f'Access on this local listener does not require a token unless the optional passkey gate is enabled. '
+        f'Sharing Portskill’s listen port with Tailscale Serve or Funnel is not a substitute for authentication, '
+        f'and Funnel of Portskill’s own listen port is blocked.</p>'
         f'</div></details>'
         f'</div>'
     )
@@ -2219,8 +2359,9 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         f'<div class="pr-mcp-jump-row">'
         f'<a class="pr-compose-jump" href="#pr-mcp-user-composer">Compose</a>'
         f'<span class="tag">user command composer</span></div>'
-        f'<p class="pr-mcp-meta">Live <code>tools/list</code> surface. Agents should use '
-        f'<strong>stdio MCP</strong> (<code>{esc(stdio)}</code>). HTTP MCP is local-trust dogfood only. '
+        f'<p class="pr-mcp-meta">Live <code>tools/list</code> surface. Agents auto-invoke registry '
+        f'lifecycle tools. Use this HTML UI for maintenance and defaults. '
+        f'Stdio MCP (<code>{esc(stdio)}</code>) is an available agent install option. '
         f'Toggles filter live <code>tools/list</code> + <code>tools/call</code> (disabled tools stay listed here so you can re-enable).</p>'
         f"{system_body}"
         f"{stdio_block}"
@@ -3757,6 +3898,88 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
       }}).catch(function(){{setHttpStatus('Regenerate failed');}});
     }});
   }}
+  function b64urlToBuf(s){{
+    s=String(s||'').replace(/-/g,'+').replace(/_/g,'/');
+    while(s.length%4)s+='=';
+    var bin=atob(s), u=new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);
+    return u.buffer;
+  }}
+  function bufToB64url(buf){{
+    var u=new Uint8Array(buf), s='';
+    for(var i=0;i<u.length;i++)s+=String.fromCharCode(u[i]);
+    return btoa(s).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');
+  }}
+  var passStatus=document.getElementById('pr-passkey-status');
+  function setPassStatus(t){{if(passStatus)passStatus.textContent=t;}}
+  var passRegister=document.getElementById('pr-passkey-register');
+  if(passRegister){{
+    passRegister.addEventListener('click', async function(){{
+      setPassStatus('Waiting for authenticator…');
+      try{{
+        var optRes=await fetch('/api/webauthn/register/options',{{method:'POST',headers:authHeaders({{'content-type':'application/json'}}),body:'{{}}'}});
+        var opt=await optRes.json();
+        if(!optRes.ok){{setPassStatus(opt.message||'Could not start registration');return;}}
+        opt.challenge=b64urlToBuf(opt.challenge);
+        if(opt.user&&opt.user.id)opt.user.id=b64urlToBuf(opt.user.id);
+        (opt.excludeCredentials||[]).forEach(function(c){{c.id=b64urlToBuf(c.id);}});
+        var cred=await navigator.credentials.create({{publicKey:opt}});
+        var att=cred.response;
+        var body={{
+          id:cred.id,
+          rawId:bufToB64url(cred.rawId),
+          type:cred.type,
+          clientDataJSON:bufToB64url(att.clientDataJSON),
+          attestationObject:bufToB64url(att.attestationObject),
+          name:'Passkey'
+        }};
+        var done=await fetch('/api/webauthn/register',{{method:'POST',headers:authHeaders({{'content-type':'application/json'}}),body:JSON.stringify(body)}});
+        var out=await done.json();
+        if(!done.ok){{setPassStatus(out.message||'Register failed');return;}}
+        window.location.reload();
+      }}catch(err){{setPassStatus(err&&err.message?err.message:String(err));}}
+    }});
+  }}
+  var passGate=document.getElementById('pr-passkey-gate');
+  if(passGate){{
+    passGate.addEventListener('change', async function(){{
+      var enabled=!!passGate.checked;
+      if(enabled && !confirm('Turn on the passkey HTTP gate? This tab will keep a short-lived session. Default is off; enabling is opt-in.')){{
+        passGate.checked=false;
+        return;
+      }}
+      try{{
+        var res=await fetch('/api/http-auth/gate',{{method:'POST',headers:authHeaders({{'content-type':'application/json'}}),body:JSON.stringify({{enabled:enabled}})}});
+        var body=await res.json();
+        if(!res.ok){{
+          passGate.checked=!enabled;
+          setPassStatus(body.message||'Could not update gate');
+          return;
+        }}
+        window.location.reload();
+      }}catch(err){{
+        passGate.checked=!enabled;
+        setPassStatus(err&&err.message?err.message:String(err));
+      }}
+    }});
+  }}
+  var passLogout=document.getElementById('pr-passkey-logout');
+  if(passLogout){{
+    passLogout.addEventListener('click', async function(){{
+      try{{sessionStorage.removeItem('portskill_http_token');}}catch(e){{}}
+      await fetch('/api/webauthn/logout',{{method:'POST',headers:{{'content-type':'application/json'}},body:'{{}}'}});
+      window.location.reload();
+    }});
+  }}
+  document.querySelectorAll('[data-pr-passkey-delete]').forEach(function(btn){{
+    btn.addEventListener('click', async function(){{
+      var id=btn.getAttribute('data-pr-passkey-delete');
+      if(!id||!confirm('Remove this passkey?'))return;
+      var res=await fetch('/api/webauthn/credentials/delete',{{method:'POST',headers:authHeaders({{'content-type':'application/json'}}),body:JSON.stringify({{id:id}})}});
+      if(!res.ok){{setPassStatus('Remove failed');return;}}
+      window.location.reload();
+    }});
+  }});
   if(document.readyState==='loading'){{
     document.addEventListener('DOMContentLoaded', function(){{refreshTailscaleStatus();}});
   }} else {{
@@ -3769,8 +3992,8 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
 <footer class="pr-mcp-footer" style="position:fixed;bottom:0;left:0;right:0;padding:6px 14px;
 background:#fafbf9;border-top:1px solid var(--line);font-size:11px;color:var(--muted);
 font-family:ui-monospace,Menlo,monospace;z-index:20">
-  Stdio MCP (preferred): <code>python3 -m port_registry_app --mcp-stdio</code>
-  · HTTP MCP (local-trust dogfood): <a href="{mcp_footer_url}" style="color:var(--cobalt)">{mcp_footer_label}</a>
+  HTML UI + HTTP MCP (same listener): <a href="{mcp_footer_url}" style="color:var(--cobalt)">{mcp_footer_label}</a>
+  · Stdio MCP (agent install option): <code>python3 -m port_registry_app --mcp-stdio</code>
   · listen: <span title="Sticky broadcast">{mcp_listen_path}</span>
 </footer>
 </body>
@@ -4459,27 +4682,48 @@ class Handler(BaseHTTPRequestHandler):
         if length > 0:
             self.rfile.read(length)
 
+    def _cookie_value(self, name: str) -> str:
+        cookie_header = self.headers.get("Cookie") or ""
+        for part in cookie_header.split(";"):
+            cookie_name, _, value = part.strip().partition("=")
+            if cookie_name == name:
+                return value.strip()
+        return ""
+
     def _provided_http_token(self) -> str:
         auth = self.headers.get("Authorization") or self.headers.get("authorization") or ""
         if auth.lower().startswith("bearer "):
             return auth[7:].strip()
-        cookie_header = self.headers.get("Cookie") or ""
-        for part in cookie_header.split(";"):
-            name, _, value = part.strip().partition("=")
-            if name == HTTP_AUTH_COOKIE_NAME:
-                return value.strip()
-        return ""
+        return self._cookie_value(HTTP_AUTH_COOKIE_NAME)
+
+    def _provided_session_token(self) -> str:
+        return self._cookie_value(HTTP_SESSION_COOKIE_NAME)
 
     def _auth_ok(self) -> bool:
         return http_bearer_matches(self._provided_http_token())
 
+    def _session_ok(self) -> bool:
+        return http_session_valid(self._provided_session_token())
+
+    def _access_ok(self) -> bool:
+        return self._auth_ok() or self._session_ok()
+
+    def _gate_required(self) -> bool:
+        return http_passkey_gate_enabled()
+
     def _send_unauthorized(self) -> None:
+        message = (
+            "Passkey session or Authorization: Bearer required"
+            if self._gate_required()
+            else "Authorization: Bearer required"
+        )
         self._send_json(
             401,
             {
                 "ok": False,
                 "error": "unauthorized",
-                "message": "Authorization: Bearer required",
+                "message": message,
+                "passkey_gate": self._gate_required(),
             },
             extra_headers=[("WWW-Authenticate", 'Bearer realm="portskill"')],
         )
@@ -4492,11 +4736,32 @@ class Handler(BaseHTTPRequestHandler):
         self._send_unauthorized()
         return False
 
+    def _require_http_access(self, *, discard_body: bool = False) -> bool:
+        """When the opt-in gate is ON, require passkey session or bearer."""
+        if not self._gate_required():
+            return True
+        if self._access_ok():
+            return True
+        if discard_body:
+            self._discard_body()
+        self._send_unauthorized()
+        return False
+
     def _auth_cookie_header(self, token: str | None = None):
         value = token if isinstance(token, str) and token else http_auth_token()
         if not value:
             return None
         return ("Set-Cookie", f"{HTTP_AUTH_COOKIE_NAME}={value}; Path=/; SameSite=Lax")
+
+    def _read_json_body(self):
+        length = int(self.headers.get("Content-Length") or "0")
+        raw = self.rfile.read(length) if length else b""
+        if not raw:
+            return {}
+        data = json.loads(raw.decode("utf-8") or "{}")
+        if not isinstance(data, dict):
+            raise ValueError("expected JSON object")
+        return data
 
     def do_GET(self):  # noqa: N802
         parsed = urlparse(self.path)
@@ -4512,10 +4777,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self._send_json(200, {"ok": True, "service": "portskill"})
             return
-        if path == "/mcp":
-            self._send_json(200, discovery_payload())
+        if path == "/api/webauthn/status":
+            payload = dict(passkey_public_status())
+            payload["ok"] = True
+            payload["session"] = self._session_ok()
+            payload["bearer"] = self._auth_ok()
+            if not self._access_ok():
+                payload.pop("credentials", None)
+            self._send_json(200, payload)
             return
         if path in ("/", "/port-registry"):
+            if self._gate_required() and not self._access_ok():
+                page = render_passkey_login_page().encode("utf-8")
+                self._send(200, page, "text/html; charset=utf-8")
+                return
             raw = load_registry()
             # Fast first paint: no Tailscale probes; local 127.0.0.1 links OK until async refresh
             # One workspace: show all services (no focused-preset filter)
@@ -4523,6 +4798,11 @@ class Handler(BaseHTTPRequestHandler):
             ts = {"chip": "Checking…", "state": "pending", "logged_in": False}
             page = render_page(view, tailscale=ts).encode("utf-8")
             self._send(200, page, "text/html; charset=utf-8")
+            return
+        if not self._require_http_access():
+            return
+        if path == "/mcp":
+            self._send_json(200, discovery_payload())
             return
         if path == "/api/http-auth":
             if not self._require_auth():
@@ -4548,6 +4828,82 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         path = urlparse(self.path).path.rstrip("/") or "/"
+        if path == "/api/webauthn/authenticate/options":
+            self._discard_body()
+            self._send_json(200, authentication_options(self.headers.get("Host") or ""))
+            return
+        if path == "/api/webauthn/authenticate":
+            try:
+                body = self._read_json_body()
+                result = complete_authentication(body, self.headers.get("Host") or "")
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                self._send_json(400, {"ok": False, "error": "webauthn_failed", "message": str(exc)})
+                return
+            session = result.pop("session", None) or {}
+            token = session.get("token")
+            extra = [session_cookie_header(token)] if token else None
+            self._send_json(200, result, extra_headers=extra)
+            return
+        if path == "/api/webauthn/logout":
+            revoke_http_session(self._provided_session_token())
+            self._discard_body()
+            self._send_json(
+                200,
+                {"ok": True, "logged_out": True, **passkey_public_status()},
+                extra_headers=[session_cookie_header("", clear=True), clear_bearer_cookie_header()],
+            )
+            return
+        if path == "/api/webauthn/register/options":
+            if self._gate_required() and not self._require_http_access(discard_body=True):
+                return
+            self._discard_body()
+            self._send_json(200, registration_options(self.headers.get("Host") or ""))
+            return
+        if path == "/api/webauthn/register":
+            if self._gate_required() and not self._require_http_access(discard_body=True):
+                return
+            try:
+                body = self._read_json_body()
+                result = complete_registration(body, self.headers.get("Host") or "")
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                self._send_json(400, {"ok": False, "error": "webauthn_failed", "message": str(exc)})
+                return
+            self._send_json(200, result)
+            return
+        if path == "/api/webauthn/credentials/delete":
+            if self._gate_required() and not self._require_http_access(discard_body=True):
+                return
+            try:
+                body = self._read_json_body()
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                self._send_json(400, {"ok": False, "message": str(exc)})
+                return
+            cred_id = body.get("id")
+            if not isinstance(cred_id, str) or not cred_id.strip():
+                self._send_json(400, {"ok": False, "message": "id required"})
+                return
+            deleted = delete_passkey_credential(cred_id.strip())
+            self._send_json(200, {"ok": True, "deleted": deleted, **passkey_public_status()})
+            return
+        if path == "/api/http-auth/gate":
+            if self._gate_required() and not self._require_http_access(discard_body=True):
+                return
+            try:
+                body = self._read_json_body()
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                self._send_json(400, {"ok": False, "message": str(exc)})
+                return
+            enabled = body.get("enabled")
+            if not isinstance(enabled, bool):
+                self._send_json(400, {"ok": False, "message": "enabled bool required"})
+                return
+            set_http_passkey_gate(enabled)
+            extra = None
+            if enabled and not self._session_ok():
+                minted = mint_http_session()
+                extra = [session_cookie_header(minted["token"], ttl_sec=minted["ttl_sec"])]
+            self._send_json(200, {"ok": True, **passkey_public_status()}, extra_headers=extra)
+            return
         if path == "/api/http-auth/session":
             ok = self._auth_ok()
             self._discard_body()
@@ -4580,6 +4936,8 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 extra_headers=[cookie] if cookie else None,
             )
+            return
+        if not self._require_http_access(discard_body=True):
             return
         if path == "/mcp":
             length = int(self.headers.get("Content-Length") or "0")
@@ -4934,7 +5292,7 @@ def main(argv=None) -> int:
         help=(
             "FOOTGUN: allow --host that is not 127.0.0.1 / ::1 / localhost. "
             "Exposes the HTTP UI and MCP listener beyond this machine. "
-            "Bearer auth is still mandatory (no open LAN dogfood). "
+            "Sharing that listener with Tailscale Serve or Funnel is not authentication. "
             "Without this flag, non-loopback bind is refused."
         ),
     )
@@ -4945,7 +5303,7 @@ def main(argv=None) -> int:
         help=(
             "Bind port (explicit; wins over sticky/allocate). "
             "Also: env PORTSKILL_PORT or PORT_REGISTRY_APP_PORT. "
-            "Default: sticky ~/.config/port-registry/listen.json or dogfood allocate."
+            "Default: sticky ~/.config/port-registry/listen.json or a registry allocate."
         ),
     )
     parser.add_argument(

@@ -66,15 +66,19 @@ class NonLoopbackRefuseTests(unittest.TestCase):
 
 
 class StdioPreferenceDocTests(unittest.TestCase):
-    def test_readme_and_security_prefer_stdio(self) -> None:
+    def test_readme_and_security_describe_surfaces_without_ranking(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         for blob, name in ((readme, "README.md"), (security, "SECURITY.md"), (skill, "SKILL.md")):
             low = blob.lower()
             self.assertIn("stdio", low, f"{name} missing stdio")
-            self.assertIn("preferred", low, f"{name} missing preferred")
-            self.assertIn("local-trust", low, f"{name} missing local-trust")
+            self.assertIn("html ui", low, f"{name} missing HTML UI")
+            self.assertIn("same local listener", low, f"{name} missing same-local-listener copy")
+            self.assertNotIn("dogfood", low, f"{name} still says dogfood")
+            self.assertNotIn("prefer stdio", low, f"{name} still ranks stdio over HTTP/UI")
+            self.assertNotIn("stdio preferred", low, f"{name} still ranks stdio over HTTP/UI")
+            self.assertNotIn("preferred agent path", low, f"{name} still ranks stdio over HTTP/UI")
         self.assertIn("--allow-non-loopback", readme)
         self.assertIn("--allow-non-loopback", security)
         self.assertIn("refused", readme.lower())

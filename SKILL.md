@@ -27,23 +27,23 @@ If this skill sidecar is installed under `~/.agents/skills/port-registry/`, you 
 
 ## Light UI + MCP app (stdlib)
 
-Preferred entrypoint: `python3 -m port_registry_app` — one small stdlib process that serves the HTML Portskill UI **and** an MCP server wrapping the same registry schema/CLI (no second registry). On macOS you can also double-click `macos/Portskill.app`.
+Usual entrypoint: `python3 -m port_registry_app` — one small stdlib process that serves the HTML Portskill UI **and** an MCP server wrapping the same registry schema/CLI (no second registry). On macOS you can also double-click `macos/Portskill.app`. Humans use the HTML UI for maintenance and defaults. Agents auto-invoke registry lifecycle tools.
 
 When the user asks to "show port registry UI", "open ports console", or to attach an MCP-capable agent to the registry:
 
 ```bash
-# Default: HTML UI + MCP HTTP; port from sticky listen.json or dogfood allocate (historical :8765)
+# Default: HTML UI + HTTP MCP; port from sticky listen.json or a registry allocate (historical :8765)
 python3 -m port_registry_app
 # optional: python3 -m port_registry_app --port 8765 --no-open
 
-# Preferred: MCP over stdio (Cursor / Claude / Codex MCP attach)
+# Available: MCP over stdio (Cursor / Claude / Codex attach)
 python3 -m port_registry_app --mcp-stdio
 # or: portskill  (legacy: port-registry-app) --mcp-stdio
 ```
 
 - UI: open the printed URL (default `http://127.0.0.1:8765/`). Mirrors the Roster Port Registry view (sidebar, stats, range cards, Start/Stop/Release, Default On/Off, Export/Import environment, Apply defaults). Actions POST to `/port-registry/actions`.
-- MCP stdio (**preferred for agents**): newline-delimited JSON-RPC on stdin/stdout — `python3 -m port_registry_app --mcp-stdio` (see `examples/mcp.stdio.json`).
-- MCP HTTP (**local-trust dogfood only**): same loopback listener as the UI — `POST http://127.0.0.1:<port>/mcp` JSON-RPC; `GET /mcp` discovery. No bearer required on the personal listen path. Do not bind `0.0.0.0` casually. Funnel of the Portskill listen port is refused. Tailscale is not authentication.
+- MCP HTTP: uses the same local listener as the UI — `POST http://127.0.0.1:<port>/mcp` JSON-RPC; `GET /mcp` discovery. Access does not require a token unless the optional passkey gate is enabled. Sharing Portskill’s listen port with Tailscale Serve or Funnel is not a substitute for authentication, and Funnel of Portskill’s own listen port is blocked. Do not bind `0.0.0.0` casually.
+- MCP stdio (available agent install option): newline-delimited JSON-RPC on stdin/stdout — `python3 -m port_registry_app --mcp-stdio` (see `examples/mcp.stdio.json`).
 
 MCP tools (all map to CLI subcommands): `allocate`, `activate`, `start`, `stop`, `release`, `status`, `portskill_path`, `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults` (activate), `deactivate` (safe stop, keep reserved; `exit_house` alias), `compat_check`, presets/settings tools. `portskill_path` (`mode` start|stop|release|restart|status) orchestrates the happy path and returns `{ran, skipped, result, needs_input?}`; skips are inspectable; fine primitives stay callable. Exit-code-3 needs_input (Tailnet) is returned as a tool error with structured `needs_input` / `prompt` / `options` / `resume_hint` so the agent can resume.
 
@@ -69,9 +69,9 @@ Portable TypeScript modules for hosts wiring into a larger console live under `u
 ## Local trust / security
 
 - Default bind is `127.0.0.1`.
-- Local HTTP UI and ordinary HTTP APIs (`GET /`, `GET /api/state`, `POST /mcp`) open without `Authorization: Bearer`. `http-auth` / `http_auth.json` are optional helpers and do not gate this listen path. Stdio MCP does not use a token.
+- Local HTTP UI and ordinary HTTP APIs (`GET /`, `GET /api/state`, `POST /mcp`) open without `Authorization: Bearer` unless the **opt-in** passkey gate is on (`http-auth gate on`). Default is off. When on, those routes need a passkey session cookie or the optional bearer. `http-auth` / `http_auth.json` remain optional helpers. Stdio MCP does not use a token or passkey.
 - `--host` other than loopback is **refused** unless `--allow-non-loopback` (documented footgun; no allowlist). Do not use `0.0.0.0` casually.
-- Prefer **stdio MCP** for agents (`python3 -m port_registry_app --mcp-stdio` / `examples/mcp.stdio.json`). HTTP MCP is **local-trust dogfood only**. Tailscale is not authentication.
+- Agents auto-invoke registry lifecycle tools. Humans use the HTML UI for maintenance and defaults. HTTP MCP uses the same local listener as the UI. Sharing Portskill’s listen port with Tailscale Serve or Funnel is not authentication. Stdio MCP (`--mcp-stdio` / `examples/mcp.stdio.json`) is an available agent install option.
 - Funnel of the Portskill listen/UI port is refused in code. Funnel on user services is a separate deliberate choice.
 - **Remotes** — HOLD (not implemented).
 
