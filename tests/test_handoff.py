@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tests.helpers import IsolatedConfig
 from tests.test_ui_collapsed import _details_tags, _has_open_attr
@@ -33,7 +34,7 @@ class HandoffMarkupTests(unittest.TestCase):
         from port_registry_app.server import build_view, render_page
 
         with IsolatedConfig() as iso:
-            iso.write_registry()
+            iso.write_registry({"settings": {"handoff_enabled": True}})
             html = render_page(
                 build_view({}),
                 tailscale={"chip": "Needs login", "state": "needs_login", "logged_in": False},
@@ -47,7 +48,8 @@ class HandoffMarkupTests(unittest.TestCase):
         for tag in tags:
             self.assertFalse(_has_open_attr(tag), tag)
         self.assertIn("Kit present", html)
-        self.assertIn("Enable / add", html)
+        self.assertIn("Enable Session Handoff", html)
+        self.assertIn("Experimental (Beta)", html)
         self.assertIn("Install matrix", html)
         self.assertIn("Add / manage", html)
         self.assertIn("Claude Code", html)
@@ -82,7 +84,7 @@ class HandoffMarkupTests(unittest.TestCase):
         )
 
         with IsolatedConfig() as iso:
-            iso.write_registry()
+            iso.write_registry({"settings": {"handoff_enabled": True}})
             view = build_view({})
         mcp = mcp_tools_panel_html(view)
         handoff = handoff_panel_html(view)
@@ -104,11 +106,59 @@ class HandoffMarkupTests(unittest.TestCase):
 
 
 class HandoffMcpTests(unittest.TestCase):
-    def test_tools_list_includes_handoff_by_default(self) -> None:
+    def test_default_off_cannot_be_bypassed_by_tool_toggles_or_chains(self) -> None:
+        from port_registry_app.mcp import mcp_handle
+
+        for settings in ({}, {"handoff_enabled": False}, {"handoff_enabled": "off"}):
+            with self.subTest(settings=settings), IsolatedConfig() as iso:
+                settings = dict(settings, mcp_tools={name: True for name in HANDOFF_TOOLS})
+                settings["mcp_user_commands"] = {"try_handoff": {"name": "try_handoff", "steps": [{"tool": "handoff_list", "arguments": {}, "mode": "series"}]}}
+                iso.write_registry({"settings": settings})
+                listed = mcp_handle({"id": 1, "method": "tools/list"})
+                names = {t["name"] for t in listed["result"]["tools"]}
+                self.assertFalse(names.intersection(HANDOFF_TOOLS))
+                self.assertIn("portskill", names)
+                with patch("port_registry_app.mcp.call_handoff_tool") as call:
+                    for name in HANDOFF_TOOLS:
+                        response = mcp_handle({"id": 2, "method": "tools/call", "params": {"name": name}})
+                        self.assertEqual(response["error"]["code"], -32001)
+                    chain = mcp_handle({"id": 3, "method": "tools/call", "params": {"name": "try_handoff"}})
+                    self.assertTrue(chain["result"]["isError"])
+                    call.assert_not_called()
+
+    def test_ui_toggle_enables_and_disables_mcp(self) -> None:
+        from port_registry_app.mcp import enabled_tool_defs
+        from port_registry_app.server import dispatch_ui_action
+
+        with IsolatedConfig() as iso:
+            iso.write_registry()
+            for enabled in (True, False):
+                code, body = dispatch_ui_action({"action": "handoff-set-enabled", "enabled": enabled})
+                self.assertEqual(code, 0, body)
+                names = {t["name"] for t in enabled_tool_defs()}
+                self.assertEqual(set(HANDOFF_TOOLS).issubset(names), enabled)
+
+    def test_disabled_dashboard_does_not_read_ledger_or_run_installers(self) -> None:
+        from port_registry_app.server import build_view, handoff_panel_html, dispatch_ui_action, mcp_tools_panel_html
+
+        with IsolatedConfig() as iso, patch("port_registry_app.handoff.open_handoff_count") as ledger:
+            iso.write_registry()
+            html = handoff_panel_html(build_view({}))
+            self.assertIn("Experimental (Beta)", html)
+            self.assertIn('aria-checked="false"', html)
+            ledger.assert_not_called()
+            mcp_html = mcp_tools_panel_html(build_view({}))
+            self.assertNotIn('data-mcp-tool="handoff_status"', mcp_html)
+            for action in ("handoff-package", "handoff-codex-install"):
+                code, body = dispatch_ui_action({"action": action})
+                self.assertEqual(code, 409)
+                self.assertEqual(body["error"], "handoff_disabled")
+
+    def test_tools_list_includes_handoff_after_opt_in(self) -> None:
         from port_registry_app.mcp import enabled_tool_defs, mcp_handle
 
         with IsolatedConfig() as iso:
-            iso.write_registry({"settings": {"mcp_tools": {}}})
+            iso.write_registry({"settings": {"handoff_enabled": True, "mcp_tools": {}}})
             names = [t["name"] for t in enabled_tool_defs()]
             resp = mcp_handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
         for name in HANDOFF_TOOLS:
@@ -122,7 +172,7 @@ class HandoffMcpTests(unittest.TestCase):
     def test_vendored_md_pins_kit_sha(self) -> None:
         text = (ROOT / "vendor" / "session-handoff-kit" / "VENDORED.md").read_text(encoding="utf-8")
         self.assertIn("7587834", text)
-        self.assertIn("/Users/bens/Development/handoff-manager/", text)
+        self.assertNotIn("/Users/", text)
         self.assertIn("Session Handoff Kit", text)
 
     def test_tools_list_omits_when_toggled_off(self) -> None:
@@ -130,7 +180,7 @@ class HandoffMcpTests(unittest.TestCase):
 
         off = {name: False for name in HANDOFF_TOOLS}
         with IsolatedConfig() as iso:
-            iso.write_registry({"settings": {"mcp_tools": off}})
+            iso.write_registry({"settings": {"handoff_enabled": True, "mcp_tools": off}})
             names = [t["name"] for t in enabled_tool_defs()]
             resp = mcp_handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
             call = mcp_handle({
@@ -151,7 +201,7 @@ class HandoffMcpTests(unittest.TestCase):
         from port_registry_app.mcp import mcp_handle
 
         with IsolatedConfig() as iso:
-            iso.write_registry()
+            iso.write_registry({"settings": {"handoff_enabled": True}})
             status = mcp_handle({
                 "jsonrpc": "2.0",
                 "id": 4,
@@ -212,7 +262,7 @@ class HandoffMcpTests(unittest.TestCase):
             self.assertEqual(listed[0]["topic"], "portskill-demo")
 
             with IsolatedConfig() as iso:
-                iso.write_registry()
+                iso.write_registry({"settings": {"handoff_enabled": True}})
                 resp = mcp_handle({
                     "jsonrpc": "2.0",
                     "id": 7,
@@ -258,7 +308,7 @@ class HandoffMcpTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with IsolatedConfig() as iso:
-                iso.write_registry()
+                iso.write_registry({"settings": {"handoff_enabled": True}})
                 resolved = mcp_handle({
                     "jsonrpc": "2.0",
                     "id": 20,
@@ -340,7 +390,7 @@ class HandoffMcpTests(unittest.TestCase):
         from port_registry_app.handoff import call_handoff_tool
 
         with IsolatedConfig() as iso:
-            iso.write_registry()
+            iso.write_registry({"settings": {"handoff_enabled": True}})
             missing = iso.root / "not-a-kit"
             missing.mkdir()
             result = call_handoff_tool(
@@ -369,7 +419,7 @@ class HandoffCustomSkillTests(unittest.TestCase):
             "# Custom Write-a-Handoff\n\nreplacement skill body\n"
         )
         with IsolatedConfig() as iso:
-            iso.write_registry()
+            iso.write_registry({"settings": {"handoff_enabled": True}})
             code, body = dispatch_ui_action({
                 "action": "handoff-skill-upload",
                 "filename": "SKILL.md",
@@ -403,7 +453,7 @@ class HandoffCustomSkillTests(unittest.TestCase):
         from port_registry_app.server import dispatch_ui_action
 
         with IsolatedConfig() as iso:
-            iso.write_registry()
+            iso.write_registry({"settings": {"handoff_enabled": True}})
             code, body = dispatch_ui_action({"action": "handoff-skill-download"})
         self.assertEqual(code, 0, body)
         self.assertTrue(body.get("ok"), body)
@@ -416,7 +466,7 @@ class HandoffCustomSkillTests(unittest.TestCase):
         from port_registry_app.server import dispatch_ui_action
 
         with IsolatedConfig() as iso:
-            iso.write_registry()
+            iso.write_registry({"settings": {"handoff_enabled": True}})
             dispatch_ui_action({
                 "action": "handoff-skill-upload",
                 "content": "# custom only\n",
@@ -442,7 +492,7 @@ class HandoffCustomSkillTests(unittest.TestCase):
         from tests.helpers import free_loopback_port
 
         with IsolatedConfig() as iso:
-            iso.write_registry()
+            iso.write_registry({"settings": {"handoff_enabled": True}})
             port = free_loopback_port()
             httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
             thread = threading.Thread(target=httpd.serve_forever, daemon=True)

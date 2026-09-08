@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import os
 import pathlib
+import plistlib
+import shutil
 import subprocess
 import tempfile
 import time
@@ -38,6 +40,49 @@ def _make_app(root: pathlib.Path, body: str = "bin\n") -> pathlib.Path:
 
 
 class MacBundleHelperTests(unittest.TestCase):
+    def test_build_from_source_without_existing_app(self) -> None:
+        """A release checkout must build without ignored local app artifacts."""
+        with tempfile.TemporaryDirectory(prefix="portskill-clean-build-") as tmp:
+            checkout = pathlib.Path(tmp) / "checkout"
+            for directory in ("scripts", "macos", "port_registry_app"):
+                shutil.copytree(
+                    ROOT / directory,
+                    checkout / directory,
+                    ignore=shutil.ignore_patterns("*.app", ".build", "__pycache__", "*.pyc"),
+                )
+            self.assertFalse((checkout / "macos/Portskill.app").exists())
+            # Exercise the portable fallback without compiling/signing or accessing
+            # a developer identity on the test machine.
+            fake_bin = pathlib.Path(tmp) / "bin"
+            fake_bin.mkdir()
+            for name, body in (("swiftc", "exit 1"), ("uname", "echo Linux")):
+                command = fake_bin / name
+                command.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
+                command.chmod(0o755)
+            env = os.environ.copy()
+            env.update({
+                "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
+                "PORTSKILL_INSTALL_LOCK": str(pathlib.Path(tmp) / "build.lock"),
+            })
+            result = subprocess.run(
+                ["bash", str(checkout / "scripts/build-app.sh")],
+                cwd=checkout, env=env, capture_output=True, text=True, timeout=60,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            for location in ("dist/Portskill.app", "macos/Portskill.app"):
+                contents = checkout / location / "Contents"
+                with (contents / "Info.plist").open("rb") as stream:
+                    self.assertEqual(plistlib.load(stream)["CFBundleExecutable"], "Portskill")
+                self.assertTrue((contents / "Resources/python/port_registry_app/__main__.py").is_file())
+                launcher = contents / "MacOS/Portskill"
+                self.assertTrue(os.access(launcher, os.X_OK))
+                result = subprocess.run(
+                    [str(launcher), "--help"], cwd=pathlib.Path(tmp), env=env,
+                    capture_output=True, text=True, timeout=20,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                self.assertIn("--mcp-stdio", result.stdout)
+
     def test_scripts_source_helper_and_are_valid(self) -> None:
         self.assertTrue(HELPER.is_file())
         for rel in (

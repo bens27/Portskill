@@ -210,6 +210,12 @@ def main() -> int:
                     fail(f"doctor handoff_kit not present: {hk!r}")
             ok(f"cli {cmd} status={payload.get('status')!r}")
 
+    # Live server probing is explicit so routine tests do not depend on user state.
+    if "--live" not in sys.argv[1:]:
+        ok("offline smoke — use --live to probe an existing server")
+        print("PASS")
+        return 0
+
     # 3) If server already up, GET ui_url and mcp_url from listen.json
     if not LISTEN.is_file():
         ok("listen.json absent — skip HTTP (server not required for smoke)")

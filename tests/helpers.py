@@ -23,6 +23,7 @@ _ISOLATE_KEYS = (
     "HOME",
     "XDG_CONFIG_HOME",
     "PORTSKILL_HANDOFF_KIT",
+    "PORT_REGISTRY_TAILSCALE_BIN",
 )
 
 
@@ -56,6 +57,7 @@ class IsolatedConfig:
         os.environ["HOME"] = str(self.home_dir)
         os.environ["XDG_CONFIG_HOME"] = str(self.xdg_config)
         os.environ.pop("PORTSKILL_HANDOFF_KIT", None)
+        os.environ["PORT_REGISTRY_TAILSCALE_BIN"] = str(self.root / "tailscale-not-installed")
         os.environ.pop("PORTSKILL_HTTP_AUTH_PATH", None)
         os.environ.pop("PORTSKILL_HTTP_PASSKEY_PATH", None)
         os.environ.pop("PORTSKILL_HTTP_SESSIONS_PATH", None)
@@ -80,6 +82,7 @@ class IsolatedConfig:
             os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
         )
         env.pop("PORTSKILL_HANDOFF_KIT", None)
+        env["PORT_REGISTRY_TAILSCALE_BIN"] = str(self.root / "tailscale-not-installed")
         env.pop("PORTSKILL_HTTP_AUTH_PATH", None)
         env.pop("PORTSKILL_HTTP_PASSKEY_PATH", None)
         env.pop("PORTSKILL_HTTP_SESSIONS_PATH", None)

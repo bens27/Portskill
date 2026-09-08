@@ -10,7 +10,7 @@ import sys
 from typing import Any
 
 from . import __version__
-from .handoff import HANDOFF_TOOL_DEFS, HANDOFF_TOOL_NAMES, call_handoff_tool
+from .handoff import HANDOFF_TOOL_DEFS, HANDOFF_TOOL_NAMES, call_handoff_tool, handoff_enabled
 
 # Named settings.mcp_tools profiles. Apply writes the existing enable map
 # (missing key = enabled). Default is full so existing installs stay unchanged
@@ -367,7 +367,7 @@ TOOL_DEFS = [
                     "enum": ["full", "lean"],
                     "description": (
                         "Apply named MCP tools profile into settings.mcp_tools. "
-                        "full = all tools enabled (empty map). "
+                        "full = all core tools enabled (empty map); Session Handoff requires separate opt-in. "
                         "lean = portskill, status, settings_get, plus escape hatches "
                         "allocate/stop/release; activate and other CRUD and handoff_* stay off until toggled. "
                         "Opt-in: existing installs stay full until this is applied."
@@ -551,23 +551,14 @@ def _load_settings_from_registry() -> dict:
 
 def _mcp_tools_prefs(registry_or_settings=None) -> dict:
     """Return settings.mcp_tools map (name -> bool). Missing key = enabled."""
-    prefs = None
-    if registry_or_settings is None:
-        settings = _load_settings_from_registry()
-        prefs = settings.get("mcp_tools")
-    elif isinstance(registry_or_settings, dict):
-        if "settings" in registry_or_settings and isinstance(registry_or_settings.get("settings"), dict):
-            prefs = registry_or_settings["settings"].get("mcp_tools")
-        elif "mcp_tools" in registry_or_settings and isinstance(registry_or_settings.get("mcp_tools"), dict):
-            prefs = registry_or_settings.get("mcp_tools")
-        else:
-            # Treat as a raw mcp_tools map or settings dict
-            if "mcp_tools" in registry_or_settings:
-                prefs = registry_or_settings.get("mcp_tools")
-            else:
-                prefs = registry_or_settings
+    settings = _load_settings_from_registry() if registry_or_settings is None else registry_or_settings
+    if not isinstance(settings, dict):
+        settings = {}
+    if isinstance(settings.get("settings"), dict):
+        settings = settings["settings"]
+    prefs = settings.get("mcp_tools", settings)
     if not isinstance(prefs, dict):
-        return {}
+        prefs = {}
     out: dict[str, bool] = {}
     for key, val in prefs.items():
         if not isinstance(key, str) or not key.strip():
@@ -579,6 +570,8 @@ def _mcp_tools_prefs(registry_or_settings=None) -> dict:
             out[name] = val.strip().lower() in ("1", "true", "yes", "on")
         else:
             out[name] = bool(val)
+    if not handoff_enabled(settings):
+        out.update({name: False for name in HANDOFF_TOOL_NAMES})
     return out
 
 
@@ -1096,7 +1089,11 @@ def call_tool(name: str, arguments: dict) -> dict:
     """Return MCP tools/call result payload (result object, not full JSON-RPC)."""
     args = arguments or {}
     if name in HANDOFF_TOOL_NAMES:
-        return call_handoff_tool(name, args, _load_settings_from_registry())
+        settings = _load_settings_from_registry()
+        if not _tool_enabled(_mcp_tools_prefs(settings), name):
+            body = {"ok": False, "error": "tool_disabled", "message": "Session Handoff is disabled. Enable it under Experimental (Beta)."}
+            return {"content": [{"type": "text", "text": json.dumps(body)}], "structuredContent": body, "isError": True}
+        return call_handoff_tool(name, args, settings)
     # Multi-port import: invoke discover import once per port with optional per-port notes
     if name == "ports_import":
         ports = args.get("ports")
@@ -1221,7 +1218,8 @@ def mcp_handle(message: dict) -> dict | None:
                     "settings_get/settings_set/set_tailnet/tailscale_status/tailscale_login/"
                     "history_list/history_restore/history_reset/ports_discover/ports_import. "
                     "These wrap the Portskill CLI against ~/.config/port-registry/registry.json "
-                    "(or PORT_REGISTRY_PATH). Session Handoff tools use flat names "
+                    "(or PORT_REGISTRY_PATH). Experimental (Beta): Session Handoff is disabled by default; "
+                    "enable it in the UI or CLI before using its flat tool names "
                     "handoff_status/handoff_skill/handoff_template/handoff_list/handoff_resolve/"
                     "handoff_new_path/handoff_resume/handoff_supersede/handoff_install_help "
                     "(not nested session-handoff/*) and wrap the vendored kit ledger "

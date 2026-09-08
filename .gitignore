@@ -55,3 +55,7 @@ dist/
 macos/Portskill.app/
 macos/PortskillMenu/PortskillMenu.app/
 macos/PortskillMenu/.build/
+
+# Agent session state is not distribution source
+.handoffs/
+**/.claude/RESUME.md

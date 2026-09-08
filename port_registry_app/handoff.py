@@ -59,6 +59,11 @@ def _as_bool(value: Any, default: bool = False) -> bool:
     return bool(value)
 
 
+def handoff_enabled(settings: dict | None = None) -> bool:
+    """Session Handoff is experimental and requires an explicit opt-in."""
+    return _as_bool((settings or {}).get("handoff_enabled"), False)
+
+
 def _looks_like_kit(root: pathlib.Path) -> bool:
     if not root.is_dir():
         return False
@@ -234,11 +239,11 @@ def chrome_extension_dir(settings: dict | None = None) -> pathlib.Path | None:
 
 
 def doctor_handoff(settings: dict | None = None) -> tuple[dict, dict]:
-    """Doctor check + top-level payload. Hard-fail when kit missing or override invalid."""
+    """Require the optional kit only when enabled or explicitly configured."""
     override = configured_kit_override(settings)
     present = kit_present(settings)
     err = kit_error(settings)
-    enabled = _as_bool((settings or {}).get("handoff_enabled"), False)
+    enabled = handoff_enabled(settings)
     configured = bool(override) or enabled
     info = {
         "present": present,
@@ -251,7 +256,7 @@ def doctor_handoff(settings: dict | None = None) -> tuple[dict, dict]:
     }
     if not present:
         detail = err or "Session Handoff kit missing or override is not a kit"
-        check = {"name": "handoff_kit", "ok": False, "detail": detail}
+        check = {"name": "handoff_kit", "ok": not configured, "detail": detail if configured else "Experimental (Beta): disabled; optional kit not installed"}
         return check, info
     bits = [
         f"present={info['path']}",
@@ -570,10 +575,11 @@ def status_payload(project_dir: str | None = None, settings: dict | None = None)
     ledger = ledger_script(settings)
     pkg = package_script(settings)
     skill_override = configured_skill_override(settings)
-    opened = open_handoff_count(project_dir, settings) if ledger is not None else {
+    enabled = handoff_enabled(settings)
+    opened = open_handoff_count(project_dir, settings) if enabled and ledger is not None else {
         "ok": False,
         "count": None,
-        "error": err or "ledger unavailable",
+        "error": (err or "ledger unavailable") if enabled else None,
     }
     return {
         "ok": present,
@@ -592,7 +598,7 @@ def status_payload(project_dir: str | None = None, settings: dict | None = None)
         "open_count_error": opened.get("error"),
         "project": opened.get("project"),
         "install_matrix": install_matrix(settings),
-        "handoff_enabled": _as_bool((settings or {}).get("handoff_enabled"), False),
+        "handoff_enabled": enabled,
         "skill_version": "0.7.0",
     }
 

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Public release preparation
+- Move Session Handoff under **Experimental (Beta)** and enforce its existing default-off setting across MCP discovery, direct and chained calls, dashboard ledger reads, and installer/package actions. Existing explicit opt-ins remain enabled.
+- Make an absent, unconfigured Handoff kit and optional agent skill sidecar non-fatal for core `doctor` health, including wheel and Mac installations.
+- Validate HTTP Host headers before GET/POST dispatch to protect local access from DNS rebinding; preserve explicitly configured local and own Tailscale Serve hosts.
+- Build Mac apps from tracked source templates on a fresh clone; fix launcher compatibility with macOS Bash 3.2.
+- Add the declared MIT license, a shorter README, detailed usage guide, contribution instructions, issue/PR templates, and source-distribution metadata.
+- Remove a vendored internal session checkpoint and a personal checkout path from distributed source; give the menu icon a conventional filename.
+- Expand CI across Python 3.10/3.12 and macOS/Linux, verify source/wheel installations, make live smoke probing explicit, and isolate Tailscale during tests.
+
 ### Fixed
 - Session Handoff Codex `SessionStart` hook: always emit valid SessionStart JSON (and use `context-watch:` prefix) so newer Codex no longer rejects stdout that looked like JSON (`[context-watch]…`).
 

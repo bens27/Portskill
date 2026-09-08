@@ -4,6 +4,7 @@ from __future__ import annotations
 import unittest
 
 from tests.helpers import IsolatedConfig
+from port_registry_app.handoff import HANDOFF_TOOL_NAMES
 
 
 class McpToolToggleTests(unittest.TestCase):
@@ -17,7 +18,7 @@ class McpToolToggleTests(unittest.TestCase):
             self.assertNotIn("allocate", names)
             self.assertIn("status", names)
             all_system = {t["name"] for t in TOOL_DEFS}
-            self.assertEqual(set(names) & all_system, all_system - {"allocate"})
+            self.assertEqual(set(names) & all_system, all_system - {"allocate"} - set(HANDOFF_TOOL_NAMES))
             # tools/list JSON-RPC
             resp = mcp_handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
             rpc_names = [t["name"] for t in resp["result"]["tools"]]
@@ -99,7 +100,7 @@ class McpToolsProfileTests(unittest.TestCase):
             iso.write_registry({"settings": {"mcp_tools": {}}})
             names = {t["name"] for t in enabled_tool_defs()}
             all_system = {t["name"] for t in TOOL_DEFS}
-            self.assertEqual(names & all_system, all_system)
+            self.assertEqual(names & all_system, all_system - set(HANDOFF_TOOL_NAMES))
 
     def test_apply_lean_writes_map_and_hides_disabled(self) -> None:
         from port_registry_app.mcp import LEAN_MCP_TOOLS_ENABLED, enabled_tool_defs, mcp_handle
@@ -165,7 +166,7 @@ class McpToolsProfileTests(unittest.TestCase):
             self.assertNotIn("error", ok)
             self.assertIn("result", ok)
 
-    def test_apply_full_restores_all_tools(self) -> None:
+    def test_apply_full_restores_core_tools_without_enabling_beta(self) -> None:
         from port_registry_app.mcp import TOOL_DEFS, enabled_tool_defs, mcp_handle
 
         with IsolatedConfig() as iso:
@@ -179,14 +180,14 @@ class McpToolsProfileTests(unittest.TestCase):
             self.assertEqual(leftover, set())
 
             names = {t["name"] for t in enabled_tool_defs()}
-            self.assertEqual(names & system, system)
+            self.assertEqual(names & system, system - set(HANDOFF_TOOL_NAMES))
             resp = mcp_handle({
                 "jsonrpc": "2.0",
                 "id": 14,
                 "method": "tools/call",
                 "params": {"name": "handoff_status", "arguments": {}},
             })
-            self.assertNotIn("error", resp)
+            self.assertEqual(resp["error"]["code"], -32001)
 
     def test_settings_set_mcp_applies_lean_profile(self) -> None:
         from port_registry_app.mcp import enabled_tool_defs, mcp_handle
