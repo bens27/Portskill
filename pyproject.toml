@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "portskill"
-version = "0.1.0"
+version = "0.1.1"
 description = "Portskill — local port registry for humans and LLMs (UI + MCP + CLI, stdlib-only runtime)"
 readme = "README.md"
 requires-python = ">=3.10"

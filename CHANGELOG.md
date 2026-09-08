@@ -1,84 +1,69 @@
 # Changelog
 
+Notable changes to Portskill. Version numbers match `pyproject.toml` and the
+application's UI, MCP server, and CLI.
+
 ## Unreleased
 
-### Public release preparation
-- Move Session Handoff under **Experimental (Beta)** and enforce its existing default-off setting across MCP discovery, direct and chained calls, dashboard ledger reads, and installer/package actions. Existing explicit opt-ins remain enabled.
-- Make an absent, unconfigured Handoff kit and optional agent skill sidecar non-fatal for core `doctor` health, including wheel and Mac installations.
-- Validate HTTP Host headers before GET/POST dispatch to protect local access from DNS rebinding; preserve explicitly configured local and own Tailscale Serve hosts.
-- Build Mac apps from tracked source templates on a fresh clone; fix launcher compatibility with macOS Bash 3.2.
-- Add the declared MIT license, a shorter README, detailed usage guide, contribution instructions, issue/PR templates, and source-distribution metadata.
-- Remove a vendored internal session checkpoint and a personal checkout path from distributed source; give the menu icon a conventional filename.
-- Expand CI across Python 3.10/3.12 and macOS/Linux, verify source/wheel installations, make live smoke probing explicit, and isolate Tailscale during tests.
+No additional changes queued.
+
+## [0.1.1] — release prepared
+
+### Added
+
+- A developer quick start, detailed usage guide, contribution guidelines, issue
+  and pull request templates, and the MIT license declared by the package.
+- Service defaults, workspace import/export, named presets, command composition,
+  and `full` / `lean` MCP tool profiles.
+- Optional passkey protection for the local HTTP listener, disabled by default.
+- Source and wheel installation checks in CI, plus Python 3.10/3.12 on Linux
+  and Python 3.12 on macOS.
+
+### Changed
+
+- Session Handoff lives under **Experimental (Beta)** and is **disabled by
+  default**. Opt-in controls MCP discovery, direct and chained calls, dashboard
+  ledger reads, and installer/package actions. Existing explicit opt-ins remain
+  enabled. Installing or removing external agent hooks is a separate action.
+- The main lifecycle MCP tool is named `portskill`; the `portskill_path` alias
+  remains compatible. `activate` remains an internal primitive and is off in lean.
+- **Stop also Release** controls whether stopping a service frees its reservation
+  (default on). Deactivate keeps reservations unless explicitly told to release.
+- Tailscale Serve for Portskill's own listener defaults off for new installs;
+  existing explicit settings are preserved.
+- The dashboard uses collapsible Settings, Services, agent connection, and
+  experimental sections. Service rows show registered/active/Tailnet counts.
+- Optional agent skills and an absent, unconfigured Handoff kit no longer make
+  core installed-package health checks fail. Wheels and Mac apps need an explicit
+  source-kit path to enable Handoff.
 
 ### Fixed
-- Session Handoff Codex `SessionStart` hook: always emit valid SessionStart JSON (and use `context-watch:` prefix) so newer Codex no longer rejects stdout that looked like JSON (`[context-watch]…`).
 
-### Changed
-- New installs default `settings.serve_portskill_on_tailscale` to **false**. The toolbar Serve toggle remains. Existing registries that already store `true` keep Serve on; normalize does not silently flip that key.
-- MCP tools/list name is **`portskill`** (was `portskill_path`). Description: “One MCP tool for your agent to handle all port management functions.” Compat: tools/call still accepts `portskill_path`; CLI keeps `path` / `portskill-path` / `portskill_path`. Lean enable list uses `portskill`. An older `settings.mcp_tools.portskill_path: false` key still hides the renamed tool.
-- `activate` is no longer presented as a happy-path peer. It stays off in lean, remains implemented, and can be re-enabled with `settings set --mcp-tool activate=on`. `apply-defaults` / **Start Default Services** are not rebranded as Activate.
-- `settings.stop_also_release` (bool, default **true**) controls whether `stop` also frees the range. When false, Stop keeps the range reserved and Release is the explicit free. Honored by CLI stop (single + bulk), UI Stop, MCP `stop`, and orchestrator mode `stop`. Restart’s stop phase still keeps the range so allocate can reuse it. Settings checkbox **Stop also Release**; CLI/MCP `settings get` / `settings set --stop-also-release on|off`. Optional per-call `--also-release on|off` / MCP `also_release`.
-
-### Added
-- Optional WebAuthn/passkey HTTP gate (default **off**). When on, the personal listen UI and mutating HTTP APIs accept a short-lived httpOnly passkey session cookie **or** the optional bearer. Register/authenticate are stdlib-only (no new pip runtime dependency). Operator credentials live in `~/.config/port-registry/http_passkey.json`, not `registry.json`. Settings UI can enable the gate and register/manage passkeys. CLI: `http-auth gate on|off` and `http-auth passkeys`.
-
-### Changed
-- HTML UI section containers no longer sit flush: stacked MCP Tools boxes (System tools ↔ Agent connection) and main-panel boxes (Settings ↔ Services, Session Handoff) share a 14px vertical gap.
-- Project/service list lives under a **Services** disclosure (Settings-style all-caps header, chevron, rounded bordered container; start-open).
-- Session Handoff uses the same Settings header/container/disclose chrome (`pr-subpanel`) instead of a nested panel + System-tools wrapper.
-- Services records are full-bleed inside the Services frame (no row border-radius; expand/collapse hit target is the entire row, flush to container edges / row-to-row). Collapsed row padding and line-height are tighter so more services fit without clipping labels.
-- Local HTTP UI and ordinary HTTP APIs on the personal listen path no longer require `Authorization: Bearer`. `GET /` serves the registry UI (no login wall). Funnel of Portskill’s own listen port remains refused. Stdio MCP is unchanged. `http-auth` CLI / `http_auth.json` remain optional helpers and do not gate default UI routes.
-- MCP Tools panel order is System tools → Agent connection (each setup instruction is a start-collapsed disclosure) → User commands → Command composer.
-- Session Handoff flat tool-name copy (`handoff_status`, `handoff_list`, … — not nested `session-handoff/*`) lives in the Session Handoff section. The user-command enable-map sentence stays next to User commands.
-- Settings → Services list is denser (tighter padding/gap between service entries). Collapsed project disclosures show registered / active / Tailnet-served counts.
-- Personal Mac `.app` path is keepalive + `build-app.sh` only. `scripts/install-mac.sh` and `scripts/notarize-mac.sh` removed from the product surface. Remotes/ASC remain HOLD.
-
-### Added
-- MCP tool `portskill_path` (CLI `path` / `portskill-path`) with `mode` start|stop|release|restart|status. Happy-path `start` is allocate → wire → activate → start → optional Tailnet Serve of **user** service ports. Returns `{ran, skipped, result, needs_input?}`. Skip predicates are deterministic Python rules. Fine primitives stay callable. `mcp_tools` can hide the path tool. Never Funnels Portskill listen. Remotes/ASC HOLD. Passkey not in this cut.
-- Named `settings.mcp_tools` profiles `lean` and `full`. Default stays `full` (empty enable map; existing installs unchanged). Opt-in `lean` enables `portskill_path`, `status`, `settings_get`, plus escape hatches `allocate` / `stop` / `release`; rarely used CRUD and flat `handoff_*` tools stay off until toggled. Apply via `settings set --mcp-tools-profile lean|full` or MCP `settings_set` `{mcp_tools_profile}`. Writes the existing `mcp_tools` map; no second store. HTML UI reorder not required.
-- Write-a-Handoff skill file control in Session Handoff: download the bundled skill, upload a replacement, persist `settings.handoff_skill` under `~/.config/port-registry/`. Reload keeps the choice. Stdio MCP is unchanged.
+- Fresh-clone Mac builds now use tracked app templates; the launcher works with
+  stock macOS Bash 3.2. Local app replacement is staged and serialized.
+- Session Handoff's Codex SessionStart hook emits valid JSON.
+- Tests isolate Tailscale discovery from the real local daemon. Live-server
+  smoke checks require `--live`.
+- Distributed source excludes an internal session checkpoint, personal checkout
+  paths, runtime state, and built apps.
 
 ### Security
-- Mutating HTTP (`POST`) rejects a cross-origin `Origin` (it must match `Host`). JSON API bodies require `Content-Type: application/json`. Browser posts that omit Origin and send `Sec-Fetch-Site: cross-site` are refused. Same-origin loopback UI and non-browser JSON clients that omit Origin still work.
-- While the passkey gate is off, enabling the gate and registering the first passkey are loopback-only. Non-loopback bootstrap is refused. Funnel of Portskill’s own listen port remains refused.
-- Local HTTP UI and APIs on the personal listen path are open without a bearer token unless the **opt-in** passkey gate is enabled. Funnel of Portskill’s own listen/UI/MCP port is refused. Tailscale is not HTTP authentication. `http-auth` / `http_auth.json` remain optional helpers (not a default gate). Passkeys are opt-in only; OAuth/SSO/multi-user are not in this cut.
 
-### Docs
-- Serve of Portskill listen defaults off for new installs; Origin / Content-Type on mutating HTTP; passkey bootstrap is loopback-only. Human-written README preamble left verbatim.
-- README rewritten for developers: clone then ./scripts/run.sh; removed Mac-friends cold path, installer-first narrative, and notarization-as-distribution sections.
-- PLAYBOOK.md retired (friend-share / installer path unsupported).
-- PLAYBOOK.md removed from the tracked tree. Local retired copies may live under gitignored `_retired/` (never published).
-- SECURITY.md: no signed/notarized distribution claim; personal packaging is keepalive + `build-app.sh`; ASC/notarize HOLD.
-- HTTP `http-auth` CLI / `http_auth.json` documented as optional helpers (not a default UI/API gate). Opt-in passkey gate documented (default off). Public copy no longer ranks stdio over the HTML UI / HTTP MCP or uses “dogfood”. Human-written README preamble left verbatim.
+- GET and POST validate Host headers before accessing data or dispatching
+  actions, protecting the local listener from DNS rebinding. Only known local
+  hosts and the exact own Tailscale DNS name when Serve is enabled are accepted.
+- Mutating requests reject cross-origin browser access and require JSON content
+  types. Passkey bootstrap is loopback-only.
+- Loopback remains the default bind. Non-loopback binds require an explicit flag;
+  Funnel of Portskill's own listener is refused.
 
-All notable changes to **Portskill** are documented here.
+### Distribution
 
-Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versioning follows the `project.version` in `pyproject.toml` (single product version for UI, MCP `initialize`, and `doctor`).
-
-## [Unreleased]
-
-### Changed
-
-- Mac rebuild replace stages beside dest (never inside the `.app`), flock-serializes overlapping `install-mac.sh` / keepalive replaces, and purges leftover `.*.new.*` / non-Contents bundle-root junk before codesign. Finder junk (`.DS_Store`, `._*`) is still stripped so ad-hoc signing does not warn about an unsealed bundle root.
-- Friend UI no longer renders **Coming soon** chrome for Workspaces, Remote machines, or Presets. One implicit workspace; Export/Import Workspace and locked `require_compat` stay.
-- Primary Mac cold path is `scripts/install-mac.sh` (build or reuse `dist/`, copy to Applications, strip quarantine). Git/module launch is secondary.
-- Cold-path smoke/doctor no longer require remembering `PYTHONPATH=.` — use `./scripts/smoke_test.sh` and `./scripts/doctor.sh` only.
-- CI runs `./scripts/smoke_test.sh` (friend smoke + `tests/test_*.py`).
-
-### Added
-
-- Session Handoff as a first-class Workspace section + MCP tools. The full kit is tracked at `vendor/session-handoff-kit/` (Claude Code plugin, Cowork/chat artifacts via `package.sh`, Codex installer, Chrome extension, ledger CLI; pin `7587834` in `VENDORED.md`). UI Add / manage per README surface (copy `/plugin` commands, `package.sh`, Codex `install.sh`, Chrome path). MCP: flat names `handoff_status`, `handoff_skill`, `handoff_template`, `handoff_list`, `handoff_resolve`, `handoff_new_path`, `handoff_resume`, `handoff_supersede`, `handoff_install_help` (not nested `session-handoff/*`). Ledger writes only via the vendored `handoff_ledger.py`. `doctor` reports kit present/configured (fail-closed on a bad override). Optional override: `settings.handoff_kit` / `PORTSKILL_HANDOFF_KIT`.
-- Doctor exit contract documented and tested: exit 0 healthy offline / informational warnings; exit 2 fail-closed (corrupt registry/listen, missing skill files, listening-but-unreachable, non-loopback bind without `--allow-non-loopback`, invalid handoff kit). `scripts/doctor.sh` matches CLI codes. Test isolation pins `PORTSKILL_LISTEN_PATH` + temp `HOME` so leftover listen.json / sticky-port races do not flake Linux CI.
-- `scripts/install-mac.sh` — friend-grade Mac install + Gatekeeper quarantine strip; optional `--keepalive`.
-- `scripts/notarize-mac.sh` — Developer ID codesign, `notarytool` via App Store Connect API key env (`APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_API_KEY_PATH`), staple. Fails closed without those vars. **Notarization is not claimed until that script is run with real creds.**
-- `scripts/build-app.sh` ad-hoc codesigns on Darwin when no Developer ID / `PORTSKILL_SIGN_IDENTITY` is present. Ad-hoc ≠ notarized. Signing is skipped (not failed) on Linux CI.
-- Loopback harden: non-loopback `--host` is refused at start unless `--allow-non-loopback` (footgun). `doctor` fails closed on a non-loopback `listen.json` host unless that override is recorded. UI banner/chip remains when bound off loopback. Default bind unchanged.
-- MCP / Compose UI and README cold path prefer **stdio** for agents; HTTP MCP is labeled local-trust dogfood only.
-- `scripts/cli.sh`, `scripts/doctor.sh`, `scripts/run.sh` — PYTHONPATH wrappers for a cold clone.
-- Expanded stdlib tests: version identity, doctor offline, MCP tool toggles, listen.json sticky, collapsed Compose/System Tools markup.
-- Friend-share PLAYBOOK.md (AirDrop/zip right-click Open vs clone + `install-mac.sh`). Linked from the README cold path. Remotes HOLD; no ASC/notarize claim.
-- Disclosure chevrons: Settings is a start-collapsed details (same cobalt arrowhead + Show/Hide as System tools / repo). Serve URL gets the same Show hint. JS forces all of those closed on load.
+- This release supplies Python source and a pure-Python wheel. No signed or
+  notarized Mac binary is distributed; Mac build scripts are included in source.
+- Runtime requirements: Python 3.10+ on macOS or Linux, with no third-party Python
+  runtime dependencies. Tailscale is optional. Remote machine management and
+  multi-user access are not implemented.
 
 ## [0.1.0] — 2026-09-05
 
@@ -98,4 +83,5 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versioning f
 - Module path remains `port_registry_app` for compatibility; product name is **Portskill**.
 - Runtime is stdlib-only (packaging metadata in `pyproject.toml` does not add pip deps to run).
 
-[0.1.0]: https://github.com/bens27/Portskill/releases/tag/v0.1.0
+[0.1.1]: https://github.com/bens27/Portskill/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/bens27/Portskill/tree/v0.1.0
