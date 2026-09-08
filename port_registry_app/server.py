@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import html
+import ipaddress
 import json
 import os
 import pathlib
@@ -25,6 +26,8 @@ from urllib.parse import urlparse, unquote
 
 from . import __version__
 from .handoff import (
+    HANDOFF_TOOL_NAMES,
+    handoff_enabled,
     bundled_skill_text,
     install_help_text,
     persist_custom_skill,
@@ -2215,7 +2218,10 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
     settings = (view or {}).get("settings") or {}
     prefs = settings.get("mcpTools") if isinstance(settings.get("mcpTools"), dict) else {}
     user_cmds = settings.get("mcpUserCommands") if isinstance(settings.get("mcpUserCommands"), dict) else {}
-    from .mcp import _tool_enabled  # noqa: PLC0415
+    from .mcp import _mcp_tools_prefs, _tool_enabled  # noqa: PLC0415
+
+    prefs = _mcp_tools_prefs({"mcp_tools": prefs, "handoff_enabled": settings.get("handoffEnabled", False)})
+    visible_tools = [t for t in TOOL_DEFS if t.get("name") not in HANDOFF_TOOL_NAMES or settings.get("handoffEnabled", False)]
 
     def tool_row(name: str, desc: str, *, user: bool = False) -> str:
         desc_one = " ".join((desc or "").strip().split())
@@ -2254,7 +2260,7 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
 
     system_rows = []
     enabled_count = 0
-    for tool in TOOL_DEFS:
+    for tool in visible_tools:
         if not isinstance(tool, dict):
             continue
         name = tool.get("name")
@@ -2288,12 +2294,12 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
 
     system_names = [
         t.get("name")
-        for t in TOOL_DEFS
+        for t in visible_tools
         if isinstance(t, dict) and isinstance(t.get("name"), str) and t.get("name").strip()
     ]
     options = "".join(f'<option value="{esc(n)}">{esc(n)}</option>' for n in system_names)
     schemas = {}
-    for t in TOOL_DEFS:
+    for t in visible_tools:
         if isinstance(t, dict) and isinstance(t.get("name"), str) and t.get("name").strip():
             schemas[t["name"].strip()] = t.get("inputSchema") if isinstance(t.get("inputSchema"), dict) else {"type": "object", "properties": {}}
     schemas_json = _json.dumps(schemas, separators=(",", ":")).replace("</", "<\\/")
@@ -2413,7 +2419,7 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
 
 
 def handoff_panel_html(view: dict | None = None) -> str:
-    """First-class Session Handoff product section (collapsed). Not Coming soon."""
+    """Collapsed Experimental (Beta) section with explicit Session Handoff opt-in."""
     settings = (view or {}).get("settings") or {}
     raw_settings = {
         "handoff_enabled": bool(settings.get("handoffEnabled")),
@@ -2440,8 +2446,9 @@ def handoff_panel_html(view: dict | None = None) -> str:
     elif status.get("open_count_error"):
         count_html = f"ledger: {esc(str(status.get('open_count_error')))}"
     else:
-        count_html = "ledger unavailable"
+        count_html = "ledger unavailable" if enabled else "disabled"
     rows = []
+    disabled_install = '' if enabled else ' disabled title="Enable Session Handoff first"'
     for item in status.get("install_matrix") or []:
         if not isinstance(item, dict):
             continue
@@ -2467,7 +2474,7 @@ def handoff_panel_html(view: dict | None = None) -> str:
         elif action in ("handoff-package", "handoff-codex-install"):
             btn = (
                 f'<button type="button" class="pr-btn" data-pr-action="{esc(action)}" '
-                f'data-surface="{esc(item.get("id") or "")}">{esc(button)}</button>'
+                f'data-surface="{esc(item.get("id") or "")}"{disabled_install}>{esc(button)}</button>'
             )
         else:
             btn = ""
@@ -2505,16 +2512,20 @@ def handoff_panel_html(view: dict | None = None) -> str:
     skill_current = esc(status.get("skill_path") or "")
     return (
         f'<details class="pr-subpanel pr-handoff pr-handoff-details" id="pr-handoff-details">'
-        f'<summary>Session Handoff <span class="tag">{esc("on" if enabled else "off")}</span>'
+        f'<summary>Experimental (Beta) <span class="tag">{esc("on" if enabled else "off")}</span>'
         f'<span class="pr-disclose-hint" aria-hidden="true">Show</span></summary>'
         f'<div class="pr-handoff-body">'
+        f'<h4>Session Handoff</h4>'
+        f'<p>Save a handoff document and resume work in a fresh agent session. Disabled by default. '
+        f'Enable to expose MCP tools and read the ledger. Agent hooks require a separate installation. '
+        f'Disabling here does not uninstall hooks already installed in your agent.</p>'
         f'<p class="pr-mcp-meta" style="margin:0">Session Handoff tools are flat names '
         f'(<code>handoff_status</code>, <code>handoff_list</code>, …) — not nested '
         f'<code>session-handoff/*</code>.</p>'
         f'<p>{esc(kit_status)}</p>'
         f'<div class="pr-handoff-row">'
-        f'<label class="pr-switch" title="Persist settings.handoff_enabled">'
-        f'<span class="pr-switch-label">Enable / add</span>'
+        f'<label class="pr-switch" title="Enable experimental Session Handoff tools and ledger access">'
+        f'<span class="pr-switch-label">Enable Session Handoff</span>'
         f'<input type="checkbox" role="switch" aria-checked="{aria}" {checked}'
         f' data-pr-switch="handoff-set-enabled" data-pr-action="handoff-set-enabled">'
         f'<span class="pr-switch-track" aria-hidden="true"><span class="pr-switch-thumb"></span></span>'
@@ -4451,6 +4462,9 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         code, payload, stdout = run_cli(argv)
         return _cli_result(code, payload, stdout)
 
+    if action in ("handoff-package", "handoff-codex-install") and not handoff_enabled(load_registry().get("settings")):
+        return 409, {"ok": False, "error": "handoff_disabled", "message": "Enable Session Handoff under Experimental (Beta) before installing or packaging the kit."}
+
     if action == "handoff-package":
         settings = load_registry().get("settings") or {}
         result = run_package_sh(settings)
@@ -4712,6 +4726,61 @@ def json_content_type_ok(content_type: str | None) -> bool:
     return media == "application/json"
 
 
+def http_host_name(authority: str | None) -> str | None:
+    """Parse a single HTTP Host authority without resolving untrusted DNS."""
+    if not isinstance(authority, str) or not authority:
+        return None
+    if any(c.isspace() or c in "/\\?#@%" for c in authority):
+        return None
+    if authority.startswith("[") and not re.fullmatch(r"\[[0-9a-fA-F:.]+\](?::[0-9]+)?", authority):
+        return None
+    try:
+        parsed = urlparse("//" + authority)
+        host = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return None
+    if not host or authority.endswith(":") or port == 0:
+        return None
+    host = host.lower().rstrip(".")
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        if ":" in host or not re.fullmatch(r"[a-z0-9_-]+(?:\.[a-z0-9_-]+)*", host):
+            return None
+        return host
+
+
+def trusted_http_host(host: str, known_hosts: set[str]) -> bool:
+    """Only literal loopback addresses, localhost, or explicit local names."""
+    if host == "localhost":
+        return True
+    try:
+        if ipaddress.ip_address(host).is_loopback:
+            return True
+    except ValueError:
+        pass
+    return host in known_hosts
+
+
+def own_tailscale_http_host(server) -> str | None:
+    """Resolve the opted-in Serve name from local Tailscale state, never peers."""
+    try:
+        if not (load_registry().get("settings") or {}).get("serve_portskill_on_tailscale"):
+            return None
+        now = time.monotonic()
+        expires, host = getattr(server, "portskill_tailnet_host_cache", (0, None))
+        if now < expires:
+            return host
+        status = probe_tailscale_status()
+        self_node = status.get("Self") or {}
+        host = http_host_name(self_node.get("DNSName"))
+        server.portskill_tailnet_host_cache = (now + 30, host)
+        return host
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+
+
 def same_origin_ok(origin: str | None, host_header: str | None) -> bool:
     """True when Origin is http(s)://{Host} with no extra path."""
     raw_origin = (origin or "").strip()
@@ -4788,6 +4857,24 @@ def passkey_bootstrap_action(*, registering: bool = False, enabling_gate: bool =
 
 
 class Handler(BaseHTTPRequestHandler):
+    def _refuse_untrusted_host(self) -> bool:
+        """Reject DNS rebinding before reading inventory or dispatching actions."""
+        values = self.headers.get_all("Host", [])
+        host = http_host_name(values[0]) if len(values) == 1 else None
+        if host is not None:
+            bind_host = getattr(self.server, "portskill_bind_host", self.server.server_address[0])
+            # getsockname gives the actual interface reached for a wildcard bind.
+            known = {str(bind_host).lower().rstrip("."), self.connection.getsockname()[0]}
+            if bind_host in ("0.0.0.0", "::"):
+                known.add(self.server.server_name.lower().rstrip("."))
+                known.add(socket.gethostname().lower().rstrip("."))
+            if trusted_http_host(host, known) or host == own_tailscale_http_host(self.server):
+                return False
+        # Close instead of draining an untrusted request's potentially large body.
+        self.close_connection = True
+        self._send_json(403, {"ok": False, "error": "host_forbidden", "message": "Host is not a configured Portskill address."})
+        return True
+
     server_version = f"PortskillUI/{__version__}"
 
     def log_message(self, fmt, *args):  # quieter default logging
@@ -4944,6 +5031,8 @@ class Handler(BaseHTTPRequestHandler):
         return data
 
     def do_GET(self):  # noqa: N802
+        if self._refuse_untrusted_host():
+            return
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         # Static assets (keep trailing filename; do not strip extension via rstrip alone)
@@ -5007,6 +5096,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(404, {"ok": False, "message": "not found"})
 
     def do_POST(self):  # noqa: N802
+        if self._refuse_untrusted_host():
+            return
         path = urlparse(self.path).path.rstrip("/") or "/"
         if self._refuse_mutating_guard():
             return
@@ -5340,6 +5431,7 @@ def serve_http(
         try_port = int(candidates.pop(0))
         try:
             server = ThreadingHTTPServer((host, try_port), Handler)
+            server.portskill_bind_host = host
             bound_port = try_port
             break
         except OSError as exc:

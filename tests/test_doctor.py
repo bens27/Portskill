@@ -241,6 +241,15 @@ class DoctorContractTests(unittest.TestCase):
         self.assertFalse(names["ui_reachability"].get("ok"))
         self.assertFalse(names["mcp_reachability"].get("ok"))
 
+    def test_missing_optional_kit_is_healthy_only_when_not_configured(self) -> None:
+        from port_registry_app.handoff import doctor_handoff
+
+        with IsolatedConfig() as iso, patch("port_registry_app.handoff.VENDOR_KIT", iso.root / "absent-kit"):
+            for settings, expected in (({}, True), ({"handoff_enabled": True}, False)):
+                check, info = doctor_handoff(settings)
+                self.assertEqual(check["ok"], expected)
+                self.assertFalse(info["present"])
+
     def test_skill_files_missing_fail_closed_inprocess(self) -> None:
         with IsolatedConfig() as iso:
             empty = iso.root / "missing-skill"

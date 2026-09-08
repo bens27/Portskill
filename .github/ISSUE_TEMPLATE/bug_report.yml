@@ -1,0 +1,25 @@
+name: Bug report
+description: Report a reproducible problem.
+body:
+  - type: markdown
+    attributes:
+      value: "For vulnerabilities, use SECURITY.md. Remove tokens and private project details from logs."
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Portskill version, OS, Python version, and installation method.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include expected and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Sanitized error messages or doctor output, if useful.

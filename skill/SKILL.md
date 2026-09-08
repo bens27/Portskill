@@ -48,7 +48,7 @@ python3 -m port_registry_app --mcp-stdio
 
 Named `settings.mcp_tools` profiles (stored as `settings.mcp_tools_profile`, applied into the existing `settings.mcp_tools` enable map; missing key = enabled):
 
-- **`full`** (default) — every system tool and `handoff_*` tool is listed. Existing installs stay here until you opt in.
+- **`full`** (default) — core system tools are listed. Experimental Session Handoff tools require a separate `settings.handoff_enabled` opt-in (default off).
 - **`lean`** — enables `portskill`, `status`, `settings_get`, plus escape hatches `allocate` / `stop` / `release`. Rarely used CRUD (`activate`, `start`, `doctor`, environment/preset/history/ports/tailscale helpers, `settings_set`, …) and flat `handoff_*` tools stay off until toggled (`settings set --mcp-tool NAME=on`).
 
 Switch: `settings set --mcp-tools-profile lean|full` (CLI) or MCP `settings_set` with `mcp_tools_profile`. After `lean`, `settings_set` itself is hidden until you re-enable it or apply `full` from the CLI. Individual `--mcp-tool` / HTML toggles still work; no UI reorder required.
@@ -181,14 +181,14 @@ Run environment checks and report JSON. Prefer `./scripts/doctor.sh` (same exit 
 **Exit contract** (idempotent, never wipes files):
 
 - **0** — healthy offline / default bind. Absent registry or listen is OK (cold). Non-loopback `bind_host` with `allow_non_loopback` recorded warns only (`message` + `warning`, still exit 0). Tailscale / start-script / `default_state` are informational.
-- **2** — fail-closed: corrupt `registry.json` or `listen.json`, missing skill files, `listening: true` but UI/MCP URL missing or GET ≠ 200, non-loopback bind without `--allow-non-loopback`, or invalid Session Handoff kit override. `status=error`, `reason=doctor_failed`.
+- **2** — fail-closed: corrupt `registry.json` or `listen.json`, missing runtime files, `listening: true` but UI/MCP URL missing or GET ≠ 200, non-loopback bind without `--allow-non-loopback`, or invalid Session Handoff kit override. `status=error`, `reason=doctor_failed`.
 
 Checks:
 
 - Registry path exists and parses as a JSON object (fail-closed: corrupt files are reported; never wiped)
 - Listen path / sticky `listen.json` (fail-closed if corrupt)
 - Bind host: loopback default; off-loopback fails closed unless `--allow-non-loopback` is recorded (then warns)
-- Session Handoff kit present/configured (fail-closed on a bad override)
+- Session Handoff kit is optional while disabled; fail-closed when enabled or explicitly configured but missing
 - UI / MCP reachability (skipped when not listening; fail-closed when listening but unreachable)
 - Tailscale binary resolution: `PORT_REGISTRY_TAILSCALE_BIN` → `tailscale` on `PATH` → Mac app bundle default (informational)
 - Skill files present beside this CLI (`port_registry_app/{__init__,cli,server,mcp}.py`, `skill/SKILL.md` or `SKILL.md`, `ui/` or `port_registry_app/static/`)
@@ -292,3 +292,7 @@ Offer `serve`, `funnel`, and `none` as the choices. Then re-invoke the same comm
 The `resume_hint` field is the flag name only (for Tailnet prompts it is exactly `--tailnet`); append the user's answer as `--tailnet <answer>`.
 
 Never guess the answer and never create your own HITL prompt text.
+
+## Experimental (Beta)
+
+Session Handoff is disabled by default. Enable only when the user requests it: `settings set --handoff-enabled on`. The dashboard does not read the ledger while disabled, and `handoff_*` MCP calls (including chain steps) are rejected. Per-tool switches and the lean profile still apply after opt-in. This setting does not install or uninstall external agent hooks.

@@ -5389,12 +5389,12 @@ def cmd_doctor(args):
     missing = [name for name in required_rel if not (skill / name).exists()]
     skill_md_ok = (skill / "skill" / "SKILL.md").exists() or (skill / "SKILL.md").exists()
     ui_ok = (skill / "ui").is_dir() or (app_pkg / "static").is_dir()
-    skill_ok = not missing and ui_ok and skill_md_ok
+    skill_ok = not missing and ui_ok
     detail = str(skill)
     if missing:
         detail += f"; missing {', '.join(missing)}"
     if not skill_md_ok:
-        detail += "; missing skill/SKILL.md (or SKILL.md)"
+        detail += "; optional agent skill sidecar not installed"
     if not ui_ok:
         detail += "; missing ui/ (or port_registry_app/static/)"
     checks.append({"name": "skill_files", "ok": skill_ok, "detail": detail})
@@ -6228,7 +6228,7 @@ def parser():
         default=None,
         help=(
             "Apply named MCP tools profile into settings.mcp_tools. "
-            "full = all tools enabled (empty map; default). "
+            "full = all core tools enabled (default); Handoff requires separate opt-in. "
             "lean = portskill, status, settings_get, allocate/stop/release; "
             "activate and other CRUD and handoff_* stay off until toggled. Opt-in."
         ),
@@ -6261,7 +6261,7 @@ def parser():
         "--handoff-enabled",
         choices=["on", "off"],
         default=None,
-        help="Enable or hide the Session Handoff product section",
+        help="Enable experimental Session Handoff MCP tools and dashboard ledger access (default off)",
     )
     settings_set.add_argument(
         "--handoff-kit",

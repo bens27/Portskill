@@ -1,0 +1,16 @@
+include LICENSE README.md CHANGELOG.md SECURITY.md CONTRIBUTING.md SKILL.md
+include app.py port_registry.py serve_ui.py install.sh
+recursive-include docs *.md
+recursive-include scripts *.sh
+recursive-include skill *.md
+recursive-include examples *.json
+recursive-include macos *.swift *.plist *.sh *.bash *.png
+recursive-include ui *.html *.ts *.md
+recursive-include tests *.py
+recursive-include vendor/session-handoff-kit *.py *.sh *.md *.json *.js *.html *.txt
+prune vendor/session-handoff-kit/.claude
+prune vendor/session-handoff-kit/dist
+prune macos/Portskill.app
+prune macos/PortskillMenu/PortskillMenu.app
+prune macos/PortskillMenu/.build
+global-exclude .DS_Store *.py[cod]

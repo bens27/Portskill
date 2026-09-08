@@ -20,6 +20,7 @@ PACKAGE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DIST_APP="${PACKAGE_ROOT}/dist/Portskill.app"
 MACOS_APP="${PACKAGE_ROOT}/macos/Portskill.app"
 MENU_DIR="${PACKAGE_ROOT}/macos/PortskillMenu"
+TEMPLATE_DIR="${PACKAGE_ROOT}/macos/app-template"
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/portskill-app.XXXXXX")"
 trap 'rm -rf "${STAGE}"' EXIT
 
@@ -49,21 +50,23 @@ fi
 CONTENTS="${STAGE}/Portskill.app/Contents"
 mkdir -p "${CONTENTS}/MacOS" "${CONTENTS}/Resources/python"
 
-# Info.plist
-cp "${MACOS_APP}/Contents/Info.plist" "${CONTENTS}/Info.plist"
+# Build from tracked sources; an existing generated .app is never required.
+cp "${TEMPLATE_DIR}/Info.plist" "${CONTENTS}/Info.plist"
+mkdir -p "${MACOS_APP}/Contents/MacOS" "${MACOS_APP}/Contents/Resources"
+cp "${TEMPLATE_DIR}/Info.plist" "${MACOS_APP}/Contents/Info.plist"
 
 # Icons + menu icons
 if [[ -f "${MACOS_APP}/Contents/Resources/AppIcon.icns" ]]; then
   cp "${MACOS_APP}/Contents/Resources/AppIcon.icns" "${CONTENTS}/Resources/"
 fi
-if [[ -f "${MACOS_APP}/Contents/Resources/AppIcon.png" ]]; then
-  cp "${MACOS_APP}/Contents/Resources/AppIcon.png" "${CONTENTS}/Resources/"
+if [[ -f "${MENU_DIR}/AppIcon.png" ]]; then
+  cp "${MENU_DIR}/AppIcon.png" "${CONTENTS}/Resources/"
 fi
 if [[ -d "${MACOS_APP}/Contents/Resources/AppIcon.iconset" ]]; then
   cp -R "${MACOS_APP}/Contents/Resources/AppIcon.iconset" "${CONTENTS}/Resources/"
 fi
 # Menu icons (from menu Resources or already in app Resources)
-for f in MenuIcon.png diana.k@example.org; do
+for f in MenuIcon.png MenuIcon@2x.png; do
   if [[ -f "${MENU_DIR}/Resources/${f}" ]]; then
     cp "${MENU_DIR}/Resources/${f}" "${CONTENTS}/Resources/"
   elif [[ -f "${MACOS_APP}/Contents/Resources/${f}" ]]; then
@@ -77,13 +80,14 @@ copy_python_tree \
   "${CONTENTS}/Resources/python/port_registry_app"
 
 # Bash fallback always written
-BASH_SRC="${MACOS_APP}/Contents/MacOS/Portskill.bash"
+BASH_SRC="${TEMPLATE_DIR}/Portskill.bash"
 if [[ ! -f "${BASH_SRC}" ]]; then
   echo "missing ${BASH_SRC}" >&2
   exit 1
 fi
 cp "${BASH_SRC}" "${CONTENTS}/MacOS/Portskill.bash"
 chmod +x "${CONTENTS}/MacOS/Portskill.bash"
+cp "${BASH_SRC}" "${MACOS_APP}/Contents/MacOS/Portskill.bash"
 
 SWIFT_OK=0
 if command -v swiftc >/dev/null 2>&1 && [[ -f "${MENU_DIR}/main.swift" ]]; then
@@ -132,7 +136,7 @@ cp "${CONTENTS}/MacOS/Portskill.bash" "${MACOS_APP}/Contents/MacOS/Portskill.bas
 chmod +x "${MACOS_APP}/Contents/MacOS/Portskill.bash"
 cp "${CONTENTS}/MacOS/Portskill" "${MACOS_APP}/Contents/MacOS/Portskill"
 chmod +x "${MACOS_APP}/Contents/MacOS/Portskill"
-for f in MenuIcon.png diana.k@example.org AppIcon.icns AppIcon.png; do
+for f in MenuIcon.png MenuIcon@2x.png AppIcon.icns AppIcon.png; do
   if [[ -f "${CONTENTS}/Resources/${f}" ]]; then
     cp "${CONTENTS}/Resources/${f}" "${MACOS_APP}/Contents/Resources/" 2>/dev/null || true
   fi

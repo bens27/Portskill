@@ -1,0 +1,214 @@
+# Usage guide
+
+Commands below run from the repository root. Start with the [README](../README.md) for installation.
+
+## Sticky listen port
+
+On launch the server chooses a bind port in this order:
+
+1. Sticky port from `~/.config/port-registry/listen.json` (if still bindable)
+2. Existing Portskill listen claim in the registry
+3. Fresh allocate from the pool
+
+After bind it rewrites `listen.json` with live URLs. **Always read that file** for current UI/MCP addresses.
+
+Typical launch output shape (port varies):
+
+- **UI:** `http://127.0.0.1:<port>/`
+- **MCP:** `POST http://127.0.0.1:<port>/mcp` (JSON-RPC); `GET /mcp` discovery
+- **listen.json:** `~/.config/port-registry/listen.json`
+- **Registry:** `PORT_REGISTRY_PATH` or `~/.config/port-registry/registry.json`
+
+Soft-restart (`./scripts/install-keepalive.sh stop` then `start`, or restart the module server) keeps the sticky port when bindable. If the old port cannot bind, Portskill allocates a new one and rewrites `listen.json` — refresh MCP clients that pinned the previous URL. Corrupt `listen.json` / `registry.json` fail closed (never wiped silently).
+
+## Smoke test and CI
+
+**Only documented entry:** `./scripts/smoke_test.sh` (sets `PYTHONPATH` and cwd). Do not run `python3 tests/smoke_test.py` alone on a cold clone.
+
+```bash
+./scripts/smoke_test.sh
+```
+
+Exit 0 on pass. GitHub Actions runs the same script on every push/PR to `main` (`.github/workflows/ci.yml`) — Python 3.10 and 3.12 on Linux, plus Python 3.12 on macOS.
+
+## Doctor exit contract
+
+`./scripts/doctor.sh` and `portskill-cli doctor` / `python3 -m port_registry_app.cli doctor` share one contract (the script `exec`s the CLI). JSON is always printed first; the process then exits.
+
+| Exit | When |
+|------|------|
+| **0** | Healthy offline / default: registry absent (cold) or readable object; listen.json absent or valid; not listening, or listening and UI/MCP GET 200; runtime files present; optional Session Handoff kit present, or disabled and unconfigured. Non-loopback `bind_host` **with** `allow_non_loopback` recorded warns (`message` + `checks[].warning`, `ok: true`). Tailscale missing, placeholder start script, and default-state counts are informational. |
+| **2** | Fail-closed: corrupt `registry.json` or `listen.json` (never wiped), missing runtime files (`port_registry_app/{__init__,cli,server,mcp}.py` + `ui/` or `static/`), `listening: true` with a missing UI/MCP URL or non-200 GET, non-loopback bind without `--allow-non-loopback`, or missing Session Handoff kit when enabled or explicitly configured. Payload `status=error`, `reason=doctor_failed`. |
+
+Doctor is **read-only and idempotent** — running it twice does not create, rewrite, or delete registry/listen files. Default bind remains loopback. Remote machine management is not implemented.
+
+## UI highlights
+
+- **Compose** is first-class (topbar jump + MCP panel composer).
+- **System tools**, **repo**, **Settings**, **Experimental (Beta)**, and **Serve URL** disclosures are **default-closed** (chevron + Show/Hide). **Services** is the same chrome around the project list and starts **open**. Service rows are full-bleed (square, edge-to-edge hit target) and denser.
+- Stacked section containers (System tools / Agent connection; Settings / Services / Experimental (Beta)) have a consistent vertical gap.
+- **One workspace** — all services in a single implicit workspace. Export/Import Workspace stay in ⚙ Actions. Named presets remain CLI/MCP.
+- **Defaults** — per-range Default On/Off; toolbar **Start Default Services** via `apply-defaults`; deactivate keeps reserved unless `--also-release`.
+- **Stop also Release** — Settings toggle (`settings.stop_also_release`, default on). When off, Stop keeps the range reserved and Release is the explicit free.
+- **⚙ Actions** — workspace bulk actions (start/stop default/all, export/import workspace).
+- **require_compat** is always on (Settings checkbox locked).
+- **Iterate Mode** (optional) — floating control for in-page chrome/token A/B; persist writes `port_registry_app/static/iterate-tokens.css`.
+
+## Local trust / security
+
+See **[SECURITY.md](../SECURITY.md)** for reporting and trust boundaries.
+
+- Default bind is `127.0.0.1`.
+- Local HTTP UI and ordinary HTTP APIs (`GET /`, `GET /api/state`, UI `/api/*`, `/port-registry/actions`, `GET /mcp`, `POST /mcp`) open without `Authorization: Bearer` unless the **opt-in** passkey gate is enabled. Default is **off** (same open personal listen as a fresh installation). When on, those routes need a short-lived httpOnly passkey session **or** the optional bearer. `http-auth` / `http_auth.json` remain optional helpers. Stdio MCP does **not** use a token or passkey.
+- `--host` other than `127.0.0.1` / `::1` / `localhost` is **refused at start** unless you pass `--allow-non-loopback` (documented footgun; no allowlist). The UI banner/chip stays and `doctor` warns. Without the flag, `doctor` fails closed (exit 2) if `listen.json` still shows a non-loopback host.
+- Agents auto-invoke registry lifecycle tools. Humans use the HTML UI for maintenance and defaults. HTTP MCP uses the same local listener as the UI. Access does not require a token unless the optional passkey gate is enabled. Sharing Portskill’s listen port with Tailscale Serve or Funnel is not a substitute for authentication, and Funnel of Portskill’s own listen port is blocked. Stdio MCP (`--mcp-stdio` / `examples/mcp.stdio.json`) is an available agent install option.
+- Funnel of the Portskill listen/UI/MCP port is **refused in code**. Funnel on *user* claimed service ports stays a deliberate user action.
+- **Serve Portskill listen** (`settings.serve_portskill_on_tailscale`) defaults **off** for new installs. The toolbar toggle remains. Existing registries that already store `true` keep Serve on; upgrading does not silently flip that key.
+- Mutating HTTP (`POST`) rejects a cross-origin `Origin` (it must match `Host`). JSON API bodies require `Content-Type: application/json`. Browser posts that omit Origin and send `Sec-Fetch-Site: cross-site` are refused. Same-origin loopback UI and non-browser JSON clients that omit Origin still work.
+- While the passkey gate is off, **gate enable and the first passkey register are loopback-only**. Non-loopback bootstrap is refused. That is not a substitute for Funnel-of-listen refuse, which still stands.
+- Remote machines remain **HOLD** (not implemented).
+
+**Distribution / code signing:** Portskill does not ship a notarized or signed binary. Personal Mac packaging is `./scripts/build-app.sh` plus `./scripts/install-keepalive.sh` (same `port_registry_app` under the app/CLI/MCP). App Store Connect / notarization are not available. There is no friend installer or signed-app distribution path.
+
+## Connect MCP
+
+Agents auto-invoke registry lifecycle tools on the same listener as the HTML UI. Humans use that UI for maintenance and defaults.
+
+**HTTP MCP** uses the same local listener as the UI. The endpoint is the `mcp_url` in `listen.json` (`POST` JSON-RPC; also `GET /mcp` discovery). Access on this local listener does not require a token unless the optional passkey gate is enabled. Sharing Portskill’s listen port with Tailscale Serve or Funnel is not a substitute for authentication, and Funnel of Portskill’s own listen port is blocked.
+
+**Stdio MCP** is an available agent install option (Cursor / Claude / Codex). Copy `examples/mcp.stdio.json` or the stdio block in the UI MCP / Compose panel:
+
+```json
+{
+  "mcpServers": {
+    "portskill": {
+      "command": "python3",
+      "args": ["-m", "port_registry_app", "--mcp-stdio"],
+      "env": { "PYTHONPATH": "/absolute/path/to/this/repo" }
+    }
+  }
+}
+```
+
+`portskill` is one MCP tool for your agent to handle all port management functions. Happy-path tools are `portskill`, `start`, `stop`, `release`, and `status`. `allocate` remains available. `activate` is an internal primitive (off in lean; enable with `settings set --mcp-tool activate=on`). Other tools include `doctor`, `environment_export`, `environment_import`, `set_default`, `apply_defaults`, `deactivate`, `compat_check`, `preset_save`, `preset_list`, `preset_apply`, `preset_delete`, `settings_get`, and `settings_set`. (`exit_house` remains a deactivate alias.) CLI `path` / `portskill-path` / `portskill_path` still call the same orchestrator. An older `settings.mcp_tools.portskill_path: false` key still hides `portskill`.
+
+Named `mcp_tools` profiles (`settings.mcp_tools_profile`): default **`full`** (all core tools enabled; Session Handoff requires separate opt-in). Opt-in **`lean`** enables `portskill`, `status`, `settings_get`, plus escape hatches `allocate` / `stop` / `release`. `activate` stays off until you toggle it. Switch with `./scripts/cli.sh settings set --mcp-tools-profile lean|full` or MCP `settings_set` `{ "mcp_tools_profile": "lean"|"full" }`. The enable map remains `settings.mcp_tools` (missing key = enabled).
+
+Session Handoff is **Experimental (Beta)** and **disabled by default**. After enabling `settings.handoff_enabled`, available tools use flat names `handoff_status`, `handoff_skill`, `handoff_template`, `handoff_list`, `handoff_resolve`, `handoff_new_path`, `handoff_resume`, `handoff_supersede`, `handoff_install_help` — not nested `session-handoff/*`. Ledger writes go only through `vendor/session-handoff-kit/codex/hooks/handoff_ledger.py`.
+
+## CLI
+
+Wrappers set `PYTHONPATH` (`./scripts/cli.sh`, `./scripts/doctor.sh`). After `pip install -e .`, use `portskill-cli …` the same way.
+
+```bash
+./scripts/cli.sh status
+./scripts/doctor.sh
+./scripts/cli.sh allocate --count 1 --tailnet none --project .
+./scripts/cli.sh start --range-id <id> --project . --tailnet none
+./scripts/cli.sh stop --range-id <id> --project .
+./scripts/cli.sh release --range-id <id> --project .
+./scripts/cli.sh path --mode start --project . --command 'sleep 60'
+./scripts/cli.sh path --mode status --project .
+
+./scripts/cli.sh set-default --range-id <id> --state on --project .
+./scripts/cli.sh apply-defaults
+./scripts/cli.sh deactivate
+./scripts/cli.sh deactivate --also-release
+./scripts/cli.sh compat check --preset ui-work --preset api-stack
+./scripts/cli.sh preset list
+./scripts/cli.sh settings get
+./scripts/cli.sh settings set --mcp-tools-profile lean
+./scripts/cli.sh settings set --mcp-tools-profile full
+./scripts/cli.sh settings set --stop-also-release off
+./scripts/cli.sh settings set --stop-also-release on
+./scripts/cli.sh http-auth show
+./scripts/cli.sh http-auth regenerate
+./scripts/cli.sh http-auth gate show
+./scripts/cli.sh http-auth gate on
+./scripts/cli.sh http-auth passkeys
+```
+
+## HTTP auth (optional helper + opt-in passkey gate)
+
+Local high-entropy token at `~/.config/port-registry/http_auth.json` (minted on first HTTP serve or `http-auth show`). It does **not** gate `GET /` or ordinary UI/API/MCP HTTP routes by default.
+
+An **opt-in** WebAuthn/passkey gate (default **off**) can lock the personal HTTP UI and mutating APIs. Credentials live in `~/.config/port-registry/http_passkey.json` (not `registry.json`). After a successful assertion the server sets a short-lived **httpOnly** session cookie; logout clears it. When the gate is on, a valid bearer still works (`Authorization: Bearer` **or** passkey session).
+
+```bash
+./scripts/cli.sh http-auth show         # prints the optional bearer
+./scripts/cli.sh http-auth regenerate   # invalidates the previous token
+./scripts/cli.sh http-auth gate show    # default off
+./scripts/cli.sh http-auth gate on      # opt-in; fails closed without session/bearer
+./scripts/cli.sh http-auth passkeys     # list local operator credentials
+./scripts/doctor.sh                    # reports configured (token present) without printing the secret
+```
+
+- Default personal listen path: no `Authorization: Bearer` and no passkey required
+- Settings → HTTP auth: enable the gate and register/manage passkeys from loopback. First enable and the first passkey cannot be bootstrapped from a non-loopback client.
+- Optional helper endpoints (`/api/http-auth`, regenerate) still check a bearer if you use them
+- Stdio MCP (`--mcp-stdio`) is unchanged and does not read this token or a passkey
+- OAuth / SSO / multi-user is not in this cut
+
+## Keep-alive (macOS, optional)
+
+Build a local `Portskill.app`: **keepalive + `build-app.sh` only**. LaunchAgent + Dock/menubar so the server survives Terminal close / login:
+
+```bash
+./scripts/build-app.sh                    # optional; keepalive install also builds when needed
+./scripts/install-keepalive.sh install
+./scripts/install-keepalive.sh status
+./scripts/install-keepalive.sh stop
+./scripts/install-keepalive.sh uninstall   # plist only; registry untouched
+```
+
+May build or reuse `dist/Portskill.app` via `build-app.sh`; writes `~/Library/LaunchAgents/local.portskill.keepalive.plist`. Logs: `~/Library/Logs/Portskill/`. **Never** wipes `~/.config/port-registry/registry.json`.
+
+## Remote machines
+
+Not implemented. Do not expect add/remove machines or MCP `machine_*` in this cut. Keepalive, Dock/menubar, sticky listen, and port hyperlinks are local-only.
+
+## Workspaces, presets, defaults
+
+Each range stores additive `default_state` (`"off"` | `"on"`, missing ⇒ off).
+
+- **Start Default Services** = `apply-defaults` (start Default On; optional `--also-stop-off`)
+- **Deactivate** = `deactivate` (aliases `exit-house` / `leave`) — safe stop; **keeps reserved** unless `--also-release`
+- **Stop also Release** = `settings.stop_also_release` (default **on**). When off, `stop` keeps the range reserved.
+
+**Named presets** live in `registry.json` under `presets`. File packs: `examples/environments/`.
+
+Compatibility: `compat check` / `preset check` / `environment check` — exit 2 + JSON `conflicts` when not compatible. `require_compat` is always **on** (UI locked).
+
+**⚙ Actions:** Start Default / Start All / Stop non-Default / Stop All / Export / Import Workspace. Import backs up to `~/.config/port-registry/backups/workspace-YYYYMMDD-HHMMSS.json` first.
+
+See [Experimental (Beta): Session Handoff](../README.md#experimental-beta) for opt-in, installation, and packaging limits.
+
+**MCP tools** panel order: System tools → Agent connection (each setup instruction starts collapsed) → User commands → Command composer.
+
+```bash
+portskill-cli tailscale login
+portskill-cli start --all
+portskill-cli stop --all
+portskill-cli stop --non-default
+```
+
+## Legacy entrypoints
+
+Kept for transition; prefer `./scripts/run.sh` and `./scripts/cli.sh`.
+
+| Path | Role |
+|------|------|
+| `install.sh` | Forwards to optional `scripts/install-skill.sh` only |
+| `serve_ui.py` / `app.py` | Thin wrappers → `port_registry_app.server.main` |
+| `port_registry.py` | Thin CLI wrapper |
+| `port-registry` / `port-registry-app` | Console script aliases after pip install |
+| `scripts/install-skill.sh` | Optional agent `SKILL.md` sidecar installer |
+
+## Notes
+
+- Stdlib-only **runtime** (pyproject metadata is fine for packaging).
+- Live registry + sticky listen live under `~/.config/port-registry/` — never commit `.port-registry*` from a project tree.
+- Corrupt registry JSON fails closed (`corrupt_registry`) — never silently wiped.
+- `release` refuses with `process_still_running` if pid/pgid is live; use `stop` or `deactivate`.
+- Exit-code-3 needs-input protocol + Tailnet modes: `skill/SKILL.md`.
+- Changelog: [CHANGELOG.md](../CHANGELOG.md).
