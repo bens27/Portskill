@@ -1,16 +1,6 @@
 ---
 name: session-handoff-chat
-description: >
-  This skill should be used when the user says "hand off", "handoff", "wrap up
-  this chat", "wrap up the session", "make a handoff doc", "save our progress",
-  "park this work", or "continue this in a new chat", mentions running out of
-  context or hitting conversation length limits, or wants to carry the current
-  work into another conversation or surface. It should ALSO be used on the
-  resume side, in a fresh conversation, when the user says "resume from the
-  handoff", "pick up where we left off", "what's still open", "any open
-  handoffs", or asks to continue named parked work, or attaches or pastes a
-  HANDOFF.md — and whenever a memory file listing open handoffs exists and the
-  user's request plausibly relates to one of them.
+description: Create or resume a chat handoff when parking work, moving to another conversation, or approaching a context limit. Use for attached handoffs or relevant open ledger entries, not routine status updates.
 metadata:
   version: "0.4.2"
 ---
@@ -56,9 +46,6 @@ announcement unprompted, the chat equivalent of the plugin's SessionStart hook.
 The shape of the handoff — its header line, section set, and length rule —
 lives in `handoff-template.md`, bundled with this skill. Read it and build the
 content to that template.
-
-It is a separate file so the structure of a handoff can be experimented with on
-its own: rewrite `handoff-template.md` and nothing in this file changes.
 
 Then persist through every channel available, in this order:
 

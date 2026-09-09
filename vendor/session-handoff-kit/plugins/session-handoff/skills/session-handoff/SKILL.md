@@ -1,14 +1,6 @@
 ---
 name: session-handoff
-description: >
-  Use immediately whenever a "[context-watch]" message appears in conversation.
-  Also run whenever the user says a variation of "hand off", "wrap up the
-  session", "park this work", or "save this for later", or when context is
-  nearly exhausted or auto-compaction is imminent. Also use it to resume: at
-  session start when open handoffs are announced, or whenever the user asks to
-  resume or pick up parked work. Do not use for ordinary progress summaries,
-  commit messages, or status updates while the session is continuing, and do
-  not use it as a general note-taking or memory tool.
+description: Save or resume work across sessions. Use on [context-watch] notices, imminent context exhaustion, requests to hand off or resume parked work, or announced open handoffs. Excludes routine status updates and general note-taking.
 metadata:
   version: "0.7.0"
 ---
@@ -19,22 +11,6 @@ Preserve working state across a context boundary. Produce a handoff document a
 fresh session can resume from with zero shared context, then stop. Handoffs
 carry an `open`/`resumed`/`superseded` status so session starts can announce
 untransferred work automatically and stay silent about work already picked up.
-
-## How this file is organized
-
-Each numbered section below is a self-contained policy, deliberately bounded
-so it can be customized on its own without touching the others:
-
-- **§1 Wind-down protocol** — what to do the moment the trigger fires.
-- **§2 Naming and location** — where handoff files live and how they are
-  named. Swap in your own naming convention here.
-- **§3 Document structure** — delegates to `handoff-template.md`. Replace the
-  body outline with your own preferred structure there, not here.
-- **§4 Resuming** — how announced handoffs are retrieved and adopted.
-- **§5 After resuming** — the extension point for actions that should always
-  run right after retrieval (loading another skill, running a status
-  command, opening a tracker). Empty by default; add yours here.
-- **§6 Mechanics** — how the hooks and ledger work. Reference, not policy.
 
 **Invariants the hooks depend on — keep these through any customization:**
 handoff files end in `.md` and live in the directory
@@ -89,12 +65,6 @@ line — so announcements can order handoffs newest first.
 The shape of the handoff document — front matter, body outline, length rules —
 lives in `handoff-template.md`, beside this file. Read it and write the handoff
 to that template.
-
-It is a separate file so the structure of a handoff can be experimented with on
-its own: rewrite `handoff-template.md` and nothing in this file changes. The
-front matter is the load-bearing part (`status: open` plus a one-line
-`description:` are what the session-start announcer reads); the body outline
-under it is yours to replace.
 
 ## §4 Resuming
 

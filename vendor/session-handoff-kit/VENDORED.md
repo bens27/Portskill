@@ -7,3 +7,6 @@ Its README and SPEC describe kit behavior; `scripts/package.sh` builds distribut
 In Portskill this integration is **Experimental (Beta)** and disabled by default.
 Local modifications include Codex SessionStart JSON compatibility and removal of
 an internal agent resume checkpoint from the distributed source tree.
+
+Skill documentation is locally condensed: shorter discovery descriptions and
+removed customization boilerplate; templates and hook/ledger protocols are retained.

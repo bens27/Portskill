@@ -26,11 +26,11 @@ echo "             (from ${PACKAGE_DIR} with PYTHONPATH, or after pip install -e
 
 mkdir -p "${CANONICAL_DIR}"
 
-# Skill doc
+# Skill entrypoint and supporting references
 mkdir -p "${CANONICAL_DIR}/skill"
 if [[ -f "${PACKAGE_DIR}/skill/SKILL.md" ]]; then
-  cp "${PACKAGE_DIR}/skill/SKILL.md" "${CANONICAL_DIR}/skill/SKILL.md"
-  cp "${PACKAGE_DIR}/skill/SKILL.md" "${CANONICAL_DIR}/SKILL.md"
+  cp -R "${PACKAGE_DIR}/skill/." "${CANONICAL_DIR}/skill/"
+  cp "${PACKAGE_DIR}/SKILL.md" "${CANONICAL_DIR}/SKILL.md"
 else
   cp "${PACKAGE_DIR}/SKILL.md" "${CANONICAL_DIR}/SKILL.md"
 fi

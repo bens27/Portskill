@@ -21,8 +21,9 @@ stdlib-only runtime support, fail-closed handling of corrupt data, and existing
 CLI/MCP compatibility. Keep optional features disabled unless explicitly enabled.
 
 `port_registry_app/server.py` renders the live dashboard; files in `ui/` are
-reference/preview assets. Keep the root `SKILL.md` and `skill/SKILL.md` aligned
-when changing agent instructions. Do not commit runtime registries, auth files,
+reference/preview assets. Maintain agent instructions in `skill/SKILL.md` and its conditional references;
+the root `SKILL.md` is a compatibility entrypoint. Keep both discovery descriptions
+aligned. The sidecar installer must copy the supporting references. Do not commit runtime registries, auth files,
 agent session notes, compiled apps, or local build output.
 
 ## Packaging
