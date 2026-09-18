@@ -1055,6 +1055,12 @@ def resolve_range_url(registry, item, port=None, tailscale_self=None, allow_prob
     )
     if not host:
         return None
+    # Serve/Funnel terminate TLS at the tailnet endpoint and forward HTTP to
+    # the local service. A loopback fallback must not inherit that HTTPS scheme.
+    if (host in ("127.0.0.1", "localhost", "::1")
+            and (item.get("tailnet") or {}).get("mode") in ("serve", "funnel")
+            and not is_remote_range(registry, item)):
+        scheme = "http"
     if port is None:
         port = int(item.get("start") or 0) if isinstance(item, dict) else 0
     else:
@@ -2849,10 +2855,13 @@ def cmd_start(args):
         item = find_project_range(registry, project, args.range_id)
         if item is None:
             fail("not_found", f"range id not found for project: {args.range_id}")
-        if item.get("state") == "released":
-            fail("range_released", "released ranges cannot be started; allocate a fresh range")
         if is_remote_range(registry, item):
             refuse_remote_process(registry, item, action="start")
+        if item.get("state") == "released":
+            if not getattr(args, "reclaim", False):
+                fail("range_released", "Stop released this service's ports. Reclaim them to start again.",
+                     hint=f"start --project {shlex.quote(project)} --range-id {shlex.quote(args.range_id)} --reclaim")
+            reclaim_range(registry, item)
         life = lifecycle(item)
         if pid_alive(life.get("pid")):
             activate_item(item, project, args.range_id, args.tailnet)
@@ -2911,6 +2920,42 @@ def cmd_start(args):
         return {"status": "ok", "range": item}, [project]
 
     emit(locked_registry(mutate))
+
+
+def reclaim_range(registry, item):
+    """Re-reserve the same ports under the registry lock, preserving service wiring."""
+    import socket
+
+    for other in non_released_ranges(registry):
+        if overlaps(item["start"], item["end"], other["start"], other["end"]):
+            fail("port_in_use", f"These ports are now reserved by {other.get('note') or other.get('id')}. "
+                 "Stop and release that service, then retry Reclaim ports & start.")
+    for port in range(item["start"], item["end"] + 1):
+        for host in ("127.0.0.1", "::1"):
+            try:
+                connection = socket.create_connection((host, port), timeout=0.15)
+            except OSError:
+                continue
+            connection.close()
+            fail("port_in_use", f"Port {port} is in use. Stop the service using it, then retry Reclaim ports & start.")
+        for family, host in ((socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")):
+            try:
+                with socket.socket(family, socket.SOCK_STREAM) as probe:
+                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    if family == socket.AF_INET6:
+                        probe.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+                    probe.bind((host, port))
+            except OSError as exc:
+                import errno
+                if family == socket.AF_INET6 and exc.errno in (errno.EAFNOSUPPORT, errno.EADDRNOTAVAIL):
+                    continue
+                fail("port_in_use", f"Port {port} is in use. Stop the service using it, then retry Reclaim ports & start.")
+    item["state"] = "reserved"
+    item["reserved_at"] = utc_now()
+    item["released_at"] = None
+    life = lifecycle(item)
+    life["pid"] = None
+    life["pgid"] = None
 
 
 def cmd_stop(args):
@@ -5603,7 +5648,36 @@ def enrich_range_for_status(registry, item, tailscale_self=None):
     url = resolve_range_url(registry, out, tailscale_self=tailscale_self)
     if url:
         out["url"] = url
+    out.update(observed_range_status(registry, item))
     return out
+
+
+def observed_range_status(registry, item):
+    """Keep saved allocation state separate from a current local TCP observation."""
+    import socket
+
+    saved = item.get("state") or "reserved"
+    result = {"allocation_state": saved, "state": saved, "reachable": None}
+    if saved == "released":
+        return result
+    if is_remote_range(registry, item):
+        result["state"] = "unknown"
+        return result
+    port = item.get("start")
+    reachable = False
+    if isinstance(port, int) and 0 < port < 65536:
+        for host in ("127.0.0.1", "::1"):
+            try:
+                with socket.create_connection((host, port), timeout=0.15):
+                    reachable = True
+                    break
+            except OSError:
+                pass
+    result["reachable"] = reachable
+    pid = (item.get("lifecycle") or {}).get("pid")
+    result["process_alive"] = pid_alive(pid) if pid else None
+    result["state"] = "active" if reachable and result["process_alive"] is not False else "inactive"
+    return result
 
 
 def cmd_path(args):
@@ -5883,6 +5957,7 @@ def parser():
 
     start = subparsers.add_parser("start")
     start.add_argument("--range-id", default=None)
+    start.add_argument("--reclaim", action="store_true", help="Re-reserve a released service's ports if free, then start it")
     start.add_argument("--all", action="store_true", help="Start all non-released services")
     start.add_argument("--project", default=".")
     start.add_argument("--tailnet", choices=["serve", "funnel", "none"], default=None)

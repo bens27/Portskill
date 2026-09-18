@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Darwin
 
 /// Portskill native shell: Dock icon (regular activation) + menubar status item.
 /// Spawns `python3 -m port_registry_app --no-open` and keeps it alive as a child.
@@ -8,6 +9,28 @@ import Foundation
 enum PortskillNativeMain {
     static func main() {
         let app = NSApplication.shared
+        // LaunchServices discovery can miss an existing instance. Hold a kernel
+        // lock for the whole event loop, shared by installed and development copies.
+        let lockDirectory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Caches/Portskill")
+        do {
+            try FileManager.default.createDirectory(at: lockDirectory, withIntermediateDirectories: true)
+        } catch {
+            NSLog("Portskill: cannot create singleton lock directory: %@", "\(error)")
+            return
+        }
+        let lockFD = open(lockDirectory.appendingPathComponent("native.lock").path,
+                          O_CREAT | O_RDWR | O_EXLOCK | O_NONBLOCK | O_CLOEXEC, 0o600)
+        guard lockFD >= 0 else {
+            if errno == EWOULDBLOCK {
+                DistributedNotificationCenter.default().postNotificationName(
+                    NSNotification.Name("local.portskill.openUI"), object: nil, deliverImmediately: true)
+            } else {
+                NSLog("Portskill: cannot acquire singleton lock: %d", errno)
+            }
+            return
+        }
+        defer { close(lockFD) }
         let delegate = AppDelegate()
         app.delegate = delegate
         // Dock-visible unless PORTSKILL_MENU_ONLY=1
@@ -51,6 +74,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenu()
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(openUI), name: NSNotification.Name("local.portskill.openUI"), object: nil)
         let external = ProcessInfo.processInfo.environment["PORTSKILL_SERVER_EXTERNAL"] == "1"
         if !external {
             startServerIfNeeded()
@@ -60,11 +85,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Open browser once on interactive double-click (not LaunchAgent)
         if ProcessInfo.processInfo.environment["PORTSKILL_KEEPALIVE"] != "1",
            ProcessInfo.processInfo.environment["PORTSKILL_NO_OPEN"] != "1" {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                guard let self else { return }
-                NSWorkspace.shared.open(self.uiURL)
-            }
+            openUI()
         }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openUI()
+        return true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -72,8 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        stopping = true
-        stopServer()
+        shutdown()
     }
 
     private func packageRoot() -> String {
@@ -184,6 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startServerIfNeeded() {
+        guard serverProcess?.isRunning != true else { return }
         if serverAlreadyListening() {
             NSLog("Portskill: server already listening at %@", self.uiURL.absoluteString)
             return
@@ -208,6 +235,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = pipe
+        // Drain child output continuously; an unread pipe eventually blocks the server.
+        pipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+            } else if let text = String(data: data, encoding: .utf8) {
+                NSLog("Portskill server: %@", text)
+            }
+        }
         serverPipe = pipe
         proc.terminationHandler = { [weak self] p in
             NSLog("Portskill: server exited status=%d", p.terminationStatus)
@@ -227,15 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func stopServer() {
-        guard let proc = serverProcess, proc.isRunning else {
-            // Also clear orphaned module processes we started historically
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-            p.arguments = ["-f", "python3? -m port_registry_app"]
-            try? p.run()
-            p.waitUntilExit()
-            return
-        }
+        guard let proc = serverProcess, proc.isRunning else { return }
         proc.terminate()
         let deadline = Date().addingTimeInterval(3)
         while proc.isRunning && Date() < deadline {
@@ -246,7 +274,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func openUI() {
-        NSWorkspace.shared.open(uiURL)
+        if ProcessInfo.processInfo.environment["PORTSKILL_SERVER_EXTERNAL"] != "1" {
+            startServerIfNeeded()
+        }
+        openWhenReady(attempts: 30)
+    }
+
+    private func openWhenReady(attempts: Int) {
+        if serverAlreadyListening() {
+            NSWorkspace.shared.open(uiURL)
+        } else if attempts > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.openWhenReady(attempts: attempts - 1)
+            }
+        } else {
+            checkServer()
+        }
     }
 
     @objc func checkServer() {
@@ -261,23 +304,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func quitAll() {
+        NSApp.terminate(nil)
+    }
+
+    private func shutdown() {
+        guard !stopping else { return }
         stopping = true
-        // Unload LaunchAgent so KeepAlive does not revive us
+        DistributedNotificationCenter.default().removeObserver(self)
+        // A supervisor-launched native shell can itself die during bootout.
+        // Signal its recorded server first, then unload before the restart delay.
+        stopRecordedServer()
         let uid = getuid()
         for label in ["local.portskill.keepalive", "local.portskill"] {
             let boot = Process()
             boot.executableURL = URL(fileURLWithPath: "/bin/launchctl")
             boot.arguments = ["bootout", "gui/\(uid)/\(label)"]
-            try? boot.run()
-            boot.waitUntilExit()
+            do {
+                try boot.run()
+                boot.waitUntilExit()
+            } catch { NSLog("Portskill: could not stop supervisor: %@", "\(error)") }
         }
         stopServer()
-        // Also stop externally owned server
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        p.arguments = ["-f", "-m port_registry_app"]
-        try? p.run()
-        p.waitUntilExit()
-        NSApp.terminate(nil)
+    }
+
+    private func stopRecordedServer() {
+        // A LaunchAgent-owned server is not our child. Target the recorded PID,
+        // and verify its command before signalling it; never pkill all Python/MCP sessions.
+        let path = NSString(string: "~/.config/port-registry/listen.json").expandingTildeInPath
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let pid = obj["pid"] as? Int32, pid > 1 else { return }
+        let check = Process()
+        let output = Pipe()
+        check.executableURL = URL(fileURLWithPath: "/bin/ps")
+        check.arguments = ["-p", String(pid), "-o", "uid=,command="]
+        check.standardOutput = output
+        do {
+            try check.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            check.waitUntilExit()
+            let command = String(data: data, encoding: .utf8) ?? ""
+            let fields = command.split(maxSplits: 1, whereSeparator: { $0.isWhitespace })
+            guard fields.count == 2, fields[0] == String(getuid()),
+                  fields[1].contains("-m port_registry_app"),
+                  !fields[1].contains("--mcp-stdio") else { return }
+            kill(pid, SIGTERM)
+        } catch { NSLog("Portskill: could not inspect server: %@", "\(error)") }
     }
 }

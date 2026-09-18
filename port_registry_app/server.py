@@ -55,6 +55,7 @@ from .cli import (
     ensure_http_auth_token,
     extract_tailscale_advertise_host,
     get_machine,
+    observed_range_status,
     http_auth_public_status,
     http_auth_token,
     http_bearer_matches,
@@ -781,7 +782,8 @@ def build_view(raw: dict) -> dict:
         ranges_raw = list((entry or {}).get("ranges") or [])
         ranges = []
         for item in ranges_raw:
-            state = normalize_state(str(item.get("state") or "reserved"))
+            observed = observed_range_status(raw, item)
+            state = observed["state"]
             tailnet = normalize_tailnet((item.get("tailnet") or {}).get("mode"))
             lifecycle = item.get("lifecycle") or {}
             default_state = str(item.get("default_state") or "off").lower()
@@ -848,6 +850,9 @@ def build_view(raw: dict) -> dict:
                     "start": r_start,
                     "end": r_end,
                     "state": state,
+                    "allocationState": observed["allocation_state"],
+                    "reachable": observed["reachable"],
+                    "processAlive": observed.get("process_alive"),
                     "note": item.get("note"),
                     "tailnetMode": tailnet,
                     "pid": lifecycle.get("pid"),
@@ -860,6 +865,10 @@ def build_view(raw: dict) -> dict:
                     "host": host,
                     "scheme": scheme,
                     "url": url,
+                    "localUrl": (
+                        f"{'http' if tailnet in ('serve', 'funnel') else resolve_range_scheme(item)}://127.0.0.1:{r_start}/"
+                        if kind == "local" else None
+                    ),
                     "startScript": start_script,
                     "stopScript": stop_script,
                     "command": command,
@@ -1015,6 +1024,13 @@ def range_html(project: str, rng: dict) -> str:
         )
     else:
         port_link = f'<span class="mono" title="No advertise host for remote">{esc(port_label)}</span>'
+    local_link = ""
+    if rng.get("localUrl"):
+        local_link = (
+            f'<a class="pr-btn pr-local-link" href="{esc(rng["localUrl"])}" '
+            f'target="_blank" rel="noopener noreferrer" '
+            f'title="Open on this Mac: {esc(rng["localUrl"])}">Open local</a>'
+        )
     tailnet = rng.get("tailnetMode")
     tailnet_badge = (
         f'<span class="badge b-onb">{esc(tailnet)}</span>'
@@ -1055,8 +1071,8 @@ def range_html(project: str, rng: dict) -> str:
             f'Also used in: {esc(label)}</span>'
         )
     is_remote = machine_kind == "remote"
-    can_start = state != "active" and not is_remote
-    can_stop = state == "active" and not is_remote
+    can_start = state != "active" and rng.get("processAlive") is not True and not is_remote
+    can_stop = (state == "active" or rng.get("processAlive") is True) and not is_remote
     can_release = state != "released"
     start_dis = "" if can_start else "disabled"
     stop_dis = "" if can_stop else "disabled"
@@ -1088,7 +1104,8 @@ def range_html(project: str, rng: dict) -> str:
   <button type="button" class="pr-card-pencil" data-pr-action="card-edit" data-range-id="{esc(rng["id"])}" aria-label="Edit" title="Edit service settings">✎</button>
   <div class="pr-range-top">
     {port_link}
-    <span class="badge {state_class(state)}">{esc(state)}</span>
+    {local_link}
+    <span class="badge {state_class(state)}" data-service-status>{esc(state)}</span>
     {tailnet_badge}
     {machine_badge}
     <span class="badge {default_badge}">{esc(default_label)}</span>
@@ -2802,6 +2819,44 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
     return fetch('/port-registry/actions',{{method:'POST',headers:authHeaders({{'content-type':'application/json'}}),body:JSON.stringify(payload)}})
       .then(function(res){{return res.json().then(function(body){{return {{ok:res.ok,body:body,status:res.status}};}});}});
   }}
+  function refreshServiceStatus(){{
+    fetch('/api/service-status',{{headers:authHeaders()}}).then(function(res){{
+      if(!res.ok)throw new Error('Status unavailable');
+      return res.json();
+    }}).then(function(body){{
+      var active=0;var projectActive={{}};
+      (body.services||[]).forEach(function(service){{
+        if(service.state==='active')active++;
+        if(service.state==='active')projectActive[service.project]=(projectActive[service.project]||0)+1;
+        var card=document.getElementById('range-'+service.id);
+        if(!card)return;
+        var badge=card.querySelector('[data-service-status]');
+        if(badge){{
+          badge.textContent=service.state;
+          badge.className='badge '+(service.state==='active'?'b-exec':service.state==='reserved'?'b-onb':'b-term');
+          badge.title=service.reachable===false?'No local listener is responding':'';
+        }}
+        var local=service.state!=='unknown';
+        var start=card.querySelector('[data-pr-action="start"]');
+        var stop=card.querySelector('[data-pr-action="stop"]');
+        if(start)start.disabled=!local||service.state==='active'||service.process_alive===true;
+        if(stop)stop.disabled=!local||(service.state!=='active'&&service.process_alive!==true);
+      }});
+      document.querySelectorAll('.stat').forEach(function(stat){{
+        var label=stat.querySelector('span');
+        if(label&&label.textContent.toLowerCase()==='active ranges')stat.querySelector('b').textContent=active;
+      }});
+      document.querySelectorAll('.pr-project').forEach(function(project){{
+        var count=project.querySelector('[title="Active total"]');
+        if(count)count.textContent=(projectActive[project.getAttribute('data-project')]||0)+' active';
+      }});
+    }}).catch(function(){{
+      document.querySelectorAll('[data-service-status]').forEach(function(badge){{
+        badge.textContent='unknown';badge.className='badge b-term';badge.title='Could not refresh service status';
+      }});
+    }}).finally(function(){{setTimeout(refreshServiceStatus,5000);}});
+  }}
+  setTimeout(refreshServiceStatus,5000);
   function pollTailscaleConnected(maxMs, onDone){{
     var started=Date.now();
     function tick(){{
@@ -2880,6 +2935,26 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
       return;
     }}
     if(btn)btn.disabled=false;
+    if(result.body&&result.body.recovery){{
+      var recovery=result.body.recovery;
+      var dialog=document.createElement('dialog');
+      dialog.setAttribute('aria-label','Start stopped service');
+      var message=document.createElement('p');
+      message.textContent=result.body.message;
+      var retry=document.createElement('button');
+      retry.type='button'; retry.className='pr-btn'; retry.textContent=recovery.label;
+      var cancel=document.createElement('button');
+      cancel.type='button'; cancel.className='pr-btn'; cancel.textContent='Cancel';
+      cancel.onclick=function(){{dialog.close();}};
+      dialog.addEventListener('close',function(){{dialog.remove();}});
+      retry.onclick=function(){{
+        retry.disabled=true; cancel.disabled=true;
+        postAction(recovery.payload).then(function(next){{dialog.close();handleResult(next,btn);}})
+          .catch(function(){{retry.disabled=false;cancel.disabled=false;message.textContent='Could not connect. Try again.';}});
+      }};
+      dialog.append(message,retry,cancel);document.body.appendChild(dialog);dialog.showModal();
+      return;
+    }}
     if(result.body&&(result.body.needs_login||result.body.reason==='tailscale_auth_required'||result.body.reason==='tailscale_auth_pending')){{
       var msg=result.body.message||'Tailscale Serve needs Browser Login first.';
       if(confirm(msg+'\\n\\nStart Browser Login now?')){{
@@ -4046,9 +4121,9 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
 }})();
 </script>
 <!-- Iterate launcher hidden: <script src="/static/iterate.js" defer></script> -->
-<footer class="pr-mcp-footer" style="position:fixed;bottom:0;left:0;right:0;padding:6px 14px;
+<footer class="pr-mcp-footer" style="padding:10px 14px;overflow-wrap:anywhere;
 background:#fafbf9;border-top:1px solid var(--line);font-size:11px;color:var(--muted);
-font-family:ui-monospace,Menlo,monospace;z-index:20">
+font-family:ui-monospace,Menlo,monospace">
   HTML UI + HTTP MCP (same listener): <a href="{mcp_footer_url}" style="color:var(--cobalt)">{mcp_footer_label}</a>
   · Stdio MCP (agent install option): <code>python3 -m port_registry_app --mcp-stdio</code>
   · listen: <span title="Sticky broadcast">{mcp_listen_path}</span>
@@ -4058,9 +4133,9 @@ font-family:ui-monospace,Menlo,monospace;z-index:20">
 
 
 def run_cli_action(project: str, range_id: str, action: str) -> tuple[int, dict]:
-    argv = [action, "--project", project, "--range-id", range_id]
-    if action == "start":
-        argv.extend(["--tailnet", "none"])
+    argv = ["start" if action == "reclaim-start" else action, "--project", project, "--range-id", range_id]
+    if action == "reclaim-start":
+        argv.append("--reclaim")
     code, payload, stdout = run_cli(argv)
     if code == 0:
         return 0, {"ok": True, "result": payload}
@@ -4081,6 +4156,11 @@ def run_cli_action(project: str, range_id: str, action: str) -> tuple[int, dict]
     body = {"ok": False, "message": message}
     if isinstance(payload, dict):
         body["result"] = payload
+        if payload.get("reason") == "range_released":
+            body["recovery"] = {
+                "label": "Reclaim ports & start",
+                "payload": {"action": "reclaim-start", "project": project, "rangeId": range_id},
+            }
     return code, body
 
 
@@ -4100,7 +4180,7 @@ def _cli_result(code: int, payload, stdout: str) -> tuple[int, dict]:
 
 def dispatch_ui_action(body: dict) -> tuple[int, dict]:
     action = body.get("action")
-    if action in ("start", "stop", "release"):
+    if action in ("start", "reclaim-start", "stop", "release"):
         project = body.get("project")
         range_id = body.get("rangeId")
         if not isinstance(project, str) or not isinstance(range_id, str):
@@ -5087,6 +5167,15 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/state":
             self._send_json(200, load_registry())
             return
+        if path == "/api/service-status":
+            raw = load_registry()
+            services = []
+            for project, entry in raw.get("projects", {}).items():
+                for item in entry.get("ranges", []):
+                    services.append({"id": item.get("id"), "project": project,
+                                     **observed_range_status(raw, item)})
+            self._send_json(200, {"services": services})
+            return
         if path == "/iterate/state":
             self._send_json(200, iterate_state_payload())
             return
@@ -5490,7 +5579,8 @@ def serve_http(
                 flush=True,
             )
             apply_portskill_tailscale_serve(True, persist=True, port=bound_port)
-    except Exception as exc:  # noqa: BLE001 — soft-fail; chip will show state
+    except (Exception, SystemExit) as exc:  # CLI helpers exit on unavailable Tailscale.
+        # Sharing is optional: its failure must not abort the local HTTP server.
         print(f"serve_portskill_on_tailscale re-apply soft-failed: {exc}", flush=True)
 
     url = listen_payload["ui_url"]

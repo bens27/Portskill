@@ -211,7 +211,16 @@ class CollapsedMarkupTests(unittest.TestCase):
             "presets": {},
             "settings": {},
         }
-        with IsolatedConfig() as iso:
+        from unittest.mock import patch
+
+        # Keep this markup fixture independent of listeners on the host.
+        with IsolatedConfig() as iso, patch(
+            "port_registry_app.server.observed_range_status",
+            side_effect=lambda registry, item: {
+                "state": item["state"], "allocation_state": item["state"],
+                "reachable": item["state"] == "active",
+            },
+        ):
             iso.write_registry(raw)
             html = render_page(
                 build_view(raw),
