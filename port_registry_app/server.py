@@ -22,6 +22,7 @@ import time
 import uuid
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import TCPServer
 from urllib.parse import urlparse, unquote
 
 from . import __version__
@@ -97,6 +98,16 @@ BIND_RETRIES = 5
 
 # Runtime listen broadcast (set after successful bind)
 _ACTIVE_LISTEN: dict | None = None
+
+
+class PortskillThreadingHTTPServer(ThreadingHTTPServer):
+    """Threading HTTP server that avoids reverse DNS during bind."""
+
+    def server_bind(self) -> None:
+        TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = int(port)
 
 # --- Iterate Mode (UI iteration; local package writes only) -----------------
 _PACKAGE_DIR = pathlib.Path(__file__).resolve().parent.parent
@@ -5519,7 +5530,7 @@ def serve_http(
                 break
         try_port = int(candidates.pop(0))
         try:
-            server = ThreadingHTTPServer((host, try_port), Handler)
+            server = PortskillThreadingHTTPServer((host, try_port), Handler)
             server.portskill_bind_host = host
             bound_port = try_port
             break

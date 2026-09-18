@@ -2,14 +2,56 @@
 import json
 import subprocess
 import sys
+import threading
 import time
 import unittest
 import urllib.request
+from unittest import mock
 
 from tests.helpers import IsolatedConfig, ROOT
 
 
 class StartupTailscaleTests(unittest.TestCase):
+    def test_http_server_bind_and_serving_do_not_require_reverse_dns(self):
+        from port_registry_app import server as server_mod
+
+        with IsolatedConfig():
+            httpd = None
+            thread = None
+            with mock.patch.object(
+                server_mod.socket,
+                "getfqdn",
+                side_effect=RuntimeError("reverse dns unavailable"),
+            ):
+                httpd = server_mod.PortskillThreadingHTTPServer(
+                    ("127.0.0.1", 0),
+                    server_mod.Handler,
+                )
+                httpd.portskill_bind_host = "127.0.0.1"
+                host, port = httpd.server_address[:2]
+                self.assertEqual(host, "127.0.0.1")
+                self.assertIsInstance(port, int)
+                self.assertGreater(port, 0)
+                self.assertEqual(httpd.server_name, "127.0.0.1")
+                self.assertEqual(httpd.server_port, port)
+
+                thread = threading.Thread(target=httpd.serve_forever)
+                thread.start()
+                try:
+                    with urllib.request.urlopen(
+                        f"http://127.0.0.1:{port}/health",
+                        timeout=2,
+                    ) as response:
+                        self.assertEqual(response.status, 200)
+                        self.assertEqual(
+                            json.loads(response.read().decode("utf-8")),
+                            {"ok": True, "service": "portskill"},
+                        )
+                finally:
+                    httpd.shutdown()
+                    thread.join(timeout=5)
+                    httpd.server_close()
+
     def test_local_ui_and_mcp_survive_unavailable_tailscale(self):
         for mode in ('missing', 'stopped'):
             with self.subTest(mode=mode), IsolatedConfig() as iso:
