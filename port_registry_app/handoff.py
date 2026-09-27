@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 from typing import Any
@@ -38,12 +39,16 @@ LEDGER_TOOL_NAMES = frozenset(
     }
 )
 
-SKILL_REL = pathlib.Path("codex") / "skills" / "session-handoff" / "SKILL.md"
+# Kit 0.11+ ships one skill folder (skills/session-handoff: skill, hooks,
+# install.py); the plugin paths are fallbacks for kit overrides <= 0.10.
+SKILL_DIR_REL = pathlib.Path("skills") / "session-handoff"
+SKILL_REL = SKILL_DIR_REL / "SKILL.md"
 SKILL_REL_PLUGIN = (
     pathlib.Path("plugins") / "session-handoff" / "skills" / "session-handoff" / "SKILL.md"
 )
-TEMPLATE_REL = pathlib.Path("codex") / "skills" / "session-handoff" / "handoff-template.md"
-LEDGER_REL = pathlib.Path("codex") / "hooks" / "handoff_ledger.py"
+TEMPLATE_REL = SKILL_DIR_REL / "handoff-template.md"
+LEDGER_REL = SKILL_DIR_REL / "hooks" / "handoff_ledger.py"
+INSTALL_REL = SKILL_DIR_REL / "install.py"
 PACKAGE_SH_REL = pathlib.Path("scripts") / "package.sh"
 HANDOFF_SKILL_FILENAME = "handoff-skill.md"
 HANDOFF_SKILL_MAX_BYTES = 256 * 1024
@@ -229,7 +234,7 @@ def package_script(settings: dict | None = None) -> pathlib.Path | None:
 
 
 def codex_install_script(settings: dict | None = None) -> pathlib.Path | None:
-    path = kit_root(settings) / "codex" / "install.sh"
+    path = kit_root(settings) / INSTALL_REL
     return path if path.is_file() else None
 
 
@@ -354,7 +359,7 @@ def _codex_probe() -> dict:
         "detectable": True,
         "hooks_merged": hooks_ok,
         "paths": hits,
-        "how": "bash <kit>/codex/install.sh  (then enable hooks in ~/.codex/config.toml)",
+        "how": "copy <kit>/skills/session-handoff to ~/.codex/skills, run its install.py codex  (then enable hooks in ~/.codex/config.toml)",
     }
 
 
@@ -426,9 +431,9 @@ def _surface_manage(settings: dict | None = None) -> dict[str, dict]:
         },
         "codex": {
             "action": "handoff-codex-install",
-            "button": "Run install.sh",
+            "button": "Install for Codex",
             "honesty": (
-                "Writes $CODEX_HOME (default ~/.codex): hooks + skill + hooks.json merge. "
+                "Writes $CODEX_HOME (default ~/.codex): skill folder copy + hooks.json merge. "
                 "Still enable [features] hooks = true in config.toml and approve hook trust. "
                 "Portskill does not edit config.toml."
             ),
@@ -549,7 +554,8 @@ def install_help_text(settings: dict | None = None) -> str:
         "  Open dist/session-handoff.plugin in a Cowork conversation and click install.\n"
         "\n"
         "Codex CLI\n"
-        f"  bash {root / 'codex' / 'install.sh'}\n"
+        f"  cp -R {root / SKILL_DIR_REL} ~/.codex/skills/\n"
+        "  python3 ~/.codex/skills/session-handoff/install.py codex\n"
         "  Enable hooks in ~/.codex/config.toml ([features] hooks = true).\n"
         "\n"
         "Claude chat / Claude Desktop\n"
@@ -562,7 +568,7 @@ def install_help_text(settings: dict | None = None) -> str:
         "\n"
         "Do not invent agent skill folders. Copy SKILL.md only into the skills "
         "directory your agent already documents (Claude Code plugin install and "
-        "codex/install.sh are the supported paths).\n"
+        "skills/session-handoff/install.py are the supported paths).\n"
     )
 
 
@@ -632,20 +638,27 @@ def run_package_sh(settings: dict | None = None) -> dict:
 
 
 def run_codex_install(settings: dict | None = None, codex_home: str | None = None) -> dict:
-    """Run the vendored codex/install.sh. Honors CODEX_HOME; does not edit config.toml."""
+    """Copy the kit's skill folder into $CODEX_HOME/skills (left untouched if
+    present) and run its install.py codex, so the hooks point at that copy.
+    Honors CODEX_HOME; does not edit config.toml."""
     script = codex_install_script(settings)
     if script is None:
         return {
             "ok": False,
             "error": "codex_install_missing",
-            "message": "codex/install.sh not found in the Session Handoff kit",
+            "message": "skills/session-handoff/install.py not found in the Session Handoff kit",
         }
     env = os.environ.copy()
     home = (codex_home or env.get("CODEX_HOME") or str(_home() / ".codex")).strip()
     env["CODEX_HOME"] = home
+    installed = pathlib.Path(home) / "skills" / "session-handoff"
     try:
+        if not installed.exists():
+            shutil.copytree(script.parent, installed, ignore=shutil.ignore_patterns("__pycache__"))
+        if (installed / "install.py").is_file():
+            script = installed / "install.py"
         completed = subprocess.run(
-            ["bash", str(script)],
+            [sys.executable, str(script), "codex"],
             capture_output=True,
             text=True,
             check=False,
@@ -656,7 +669,7 @@ def run_codex_install(settings: dict | None = None, codex_home: str | None = Non
         return {"ok": False, "error": "codex_install_failed", "message": str(exc)}
     out = ((completed.stdout or "") + (completed.stderr or "")).strip()
     honesty = (
-        "install.sh writes hooks + skill and merges hooks.json. "
+        "Copied the skill folder (if absent) and merged hooks.json. "
         "Enable [features] hooks = true in config.toml and approve hook trust. "
         "Portskill does not edit config.toml."
     )

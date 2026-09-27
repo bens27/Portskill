@@ -11,7 +11,7 @@ description: >
   commit messages, or status updates while the session is continuing, and do
   not use it as a general note-taking or memory tool.
 metadata:
-  version: "0.10.1"
+  version: "0.11.0"
 ---
 
 # Session Handoff
@@ -23,9 +23,10 @@ untransferred work automatically and stay silent about work already picked up.
 A handoff is a checkpoint of evidence, not an order: the user's live request
 and the live state of the workspace always win over anything it says.
 
-`<hooks-dir>` below is the directory of the ledger path the `[context-watch]`
-notice names. To customize this skill, or to run it where no hooks are
-installed, read `reference.md` beside this file first.
+`<hooks-dir>` below is the `hooks/` folder beside this file (the directory of
+the ledger path the `[context-watch]` notice names). To install the hooks,
+customize this skill, or run it where no hooks are installed, read
+`reference.md` beside this file first.
 
 ## §1 Wind-down protocol (when the trigger fires mid-task)
 
@@ -80,8 +81,9 @@ line — so announcements can order handoffs newest first.
 ## §3 Document structure
 
 The shape of the handoff document — front matter, body outline, length rules —
-lives in `handoff-template.md`, beside this file. Read it and write the handoff
-to that template.
+lives in `handoff-template.md`, beside this file. `new-path --json` prints it
+as its `template` field: write the handoff to that template. Read the file
+only if the field is empty.
 
 ## §4 Resuming
 

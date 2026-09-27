@@ -13,8 +13,8 @@ from tests.helpers import IsolatedConfig
 from tests.test_ui_collapsed import _details_tags, _has_open_attr
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-LEDGER = ROOT / "vendor" / "session-handoff-kit" / "codex" / "hooks" / "handoff_ledger.py"
-SKILL = ROOT / "vendor" / "session-handoff-kit" / "codex" / "skills" / "session-handoff" / "SKILL.md"
+LEDGER = ROOT / "vendor" / "session-handoff-kit" / "skills" / "session-handoff" / "hooks" / "handoff_ledger.py"
+SKILL = ROOT / "vendor" / "session-handoff-kit" / "skills" / "session-handoff" / "SKILL.md"
 
 HANDOFF_TOOLS = (
     "handoff_status",
@@ -64,7 +64,7 @@ class HandoffMarkupTests(unittest.TestCase):
         self.assertIn("package.sh", html)
         self.assertIn("Copy add commands", html)
         self.assertIn("Package plugin", html)
-        self.assertIn("Run install.sh", html)
+        self.assertIn("Install for Codex", html)
         self.assertIn("Package skill", html)
         self.assertIn("Copy extension path", html)
         self.assertIn("Portskill cannot run /plugin", html)
@@ -171,7 +171,7 @@ class HandoffMcpTests(unittest.TestCase):
 
     def test_vendored_md_pins_kit_sha(self) -> None:
         text = (ROOT / "vendor" / "session-handoff-kit" / "VENDORED.md").read_text(encoding="utf-8")
-        self.assertIn("7587834", text)
+        self.assertIn("a57e23a", text)
         self.assertNotIn("/Users/", text)
         self.assertIn("Session Handoff Kit", text)
 
@@ -227,7 +227,7 @@ class HandoffMcpTests(unittest.TestCase):
         self.assertIsNone(st.get("error"))
         sk = skill["result"]["structuredContent"]
         self.assertIn("name: session-handoff", sk.get("text") or "")
-        self.assertIn("0.7.0", sk.get("text") or "")
+        self.assertIn("0.11.0", sk.get("text") or "")
         tm = template["result"]["structuredContent"]
         self.assertIn("status:", tm.get("text") or "")
 
@@ -380,10 +380,11 @@ class HandoffMcpTests(unittest.TestCase):
             result = run_codex_install(codex_home=tmp)
             home = pathlib.Path(tmp)
             self.assertTrue(result.get("ok"), result)
-            self.assertTrue((home / "hooks" / "handoff_ledger.py").is_file())
-            self.assertTrue((home / "hooks" / "context_watch.py").is_file())
-            self.assertTrue((home / "skills" / "session-handoff" / "SKILL.md").is_file())
-            self.assertTrue((home / "hooks.json").is_file())
+            skill = home / "skills" / "session-handoff"
+            self.assertTrue((skill / "SKILL.md").is_file())
+            self.assertTrue((skill / "hooks" / "handoff_ledger.py").is_file())
+            self.assertIn(str(skill / "hooks" / "context_watch.py"),
+                          (home / "hooks.json").read_text(encoding="utf-8"))
             self.assertIn("config.toml", result.get("honesty") or "")
 
     def test_list_fails_closed_when_kit_override_invalid(self) -> None:
@@ -523,7 +524,7 @@ class HandoffVendorTests(unittest.TestCase):
         self.assertTrue(SKILL.is_file())
         text = SKILL.read_text(encoding="utf-8")
         self.assertIn("name: session-handoff", text)
-        self.assertIn("0.7.0", text)
+        self.assertIn("0.11.0", text)
         self.assertIn("context-watch", text)
         readme = ROOT / "vendor" / "session-handoff-kit" / "README.md"
         self.assertTrue(readme.is_file())

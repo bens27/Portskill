@@ -35,7 +35,7 @@ Session Handoff is disabled by default. Opt-in controls MCP discovery/calls and 
 
 - The kit at `vendor/session-handoff-kit/` is local stdlib (Python / bash). Portskill does not add a network client for it.
 - Ledger writes go only through the vendored `handoff_ledger.py`. Files land in the project's `./.handoffs/` when that directory exists, otherwise `~/.claude/handoffs/<project-basename>/`.
-- Codex `install.sh` writes `$CODEX_HOME` (default `~/.codex`): hook scripts, a skill copy, and a `hooks.json` merge. It does **not** enable the hooks feature flag or approve hook trust. Portskill does not edit `config.toml`.
+- The Codex install action writes `$CODEX_HOME` (default `~/.codex`): a copy of the kit's `skills/session-handoff/` folder (skipped if present) and a `hooks.json` merge by its `install.py` pointing at that copy. It does **not** enable the hooks feature flag or approve hook trust. Portskill does not edit `config.toml`.
 - The Chrome extension is loaded in the user's browser (typically against `claude.ai`). Portskill only points at `chrome-extension/`; it does not inject into other sites.
 - Handoff MCP tools use **flat** names (`handoff_status`, `handoff_list`, …) on `tools/list` — not nested `session-handoff/*`. The kit’s nested SKILL folders stay as vendored layout.
 - Those tools share the **same HTTP listener** as the HTML UI and `POST /mcp`. Agents auto-invoke registry lifecycle tools; humans use the HTML UI for maintenance and defaults. Widening `--host` is still a documented footgun, not an open LAN listener.

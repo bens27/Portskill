@@ -125,7 +125,7 @@ def main() -> int:
     if "Add / manage" not in html or 'data-pr-action="handoff-copy"' not in html:
         fail("Session Handoff install matrix missing add/manage actions")
     if 'data-pr-action="handoff-codex-install"' not in html:
-        fail("Session Handoff matrix missing Codex install.sh action")
+        fail("Session Handoff matrix missing Codex install action")
     if "Export Workspace" not in html:
         fail("Export Workspace missing from rendered UI")
     if "Require compatibility" not in html or 'id="pr-require-compat"' not in html:
