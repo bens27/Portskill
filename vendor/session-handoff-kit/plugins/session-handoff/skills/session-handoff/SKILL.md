@@ -1,16 +1,41 @@
 ---
 name: session-handoff
-description: Save or resume work across sessions. Use on [context-watch] notices, imminent context exhaustion, requests to hand off or resume parked work, or announced open handoffs. Excludes routine status updates and general note-taking.
+description: >
+  Use immediately whenever a "[context-watch]" or "context-watch:" message
+  appears in conversation.
+  Also run whenever the user says a variation of "hand off", "wrap up the
+  session", "park this work", or "save this for later", or when context is
+  nearly exhausted or auto-compaction is imminent. Also use it to resume: at
+  session start when open handoffs are announced, or whenever the user asks to
+  resume or pick up parked work. Do not use for ordinary progress summaries,
+  commit messages, or status updates while the session is continuing, and do
+  not use it as a general note-taking or memory tool.
 metadata:
-  version: "0.7.0"
+  version: "0.8.1"
 ---
 
 # Session Handoff
 
 Preserve working state across a context boundary. Produce a handoff document a
 fresh session can resume from with zero shared context, then stop. Handoffs
-carry an `open`/`resumed`/`superseded` status so session starts can announce
+carry an `open`/`resumed`/`superseded`/`abandoned` status so session starts can announce
 untransferred work automatically and stay silent about work already picked up.
+
+## How this file is organized
+
+Each numbered section below is a self-contained policy, deliberately bounded
+so it can be customized on its own without touching the others:
+
+- **§1 Wind-down protocol** — what to do the moment the trigger fires.
+- **§2 Naming and location** — where handoff files live and how they are
+  named. Swap in your own naming convention here.
+- **§3 Document structure** — delegates to `handoff-template.md`. Replace the
+  body outline with your own preferred structure there, not here.
+- **§4 Resuming** — how announced handoffs are retrieved and adopted.
+- **§5 After resuming** — the extension point for actions that should always
+  run right after retrieval (loading another skill, running a status
+  command, opening a tracker). Empty by default; add yours here.
+- **§6 Mechanics** — how the hooks and ledger work. Reference, not policy.
 
 **Invariants the hooks depend on — keep these through any customization:**
 handoff files end in `.md` and live in the directory
@@ -18,7 +43,7 @@ handoff files end in `.md` and live in the directory
 per-project fallback `~/.claude/handoffs/<project>/`) — the ledger reads both
 locations plus legacy `./HANDOFF.md`; front matter is fenced by `---` lines; new handoffs carry `status: open` plus a one-line
 `description:`; state changes go through the ledger commands
-(`handoff_ledger.py resume|supersede <path>`), never by hand-editing status
+(`handoff_ledger.py claim|resume|supersede|abandon <path>`), never by hand-editing status
 on a whim. Everything else — section names, body structure, naming pattern,
 post-resume actions — is yours to change.
 
@@ -38,7 +63,10 @@ post-resume actions — is yours to change.
    keystroke: tell the user to type `/clear` — the cleared session will
    announce this handoff and resume it automatically. Otherwise: start a new
    session in this directory and the open handoff will be announced
-   automatically (or `claude "resume"` / `codex "resume"`).
+   automatically (or `claude "resume"` / `codex "resume"`). If the notice
+   said fully automatic mode is active, do not address the user or ask
+   anything: end the turn at once — the Stop hook or the `auto` runner
+   clears the session and resumes the handoff by itself.
 5. Stop. Do not begin any of the "Next steps" in this session.
 
 ## §2 Naming and location
@@ -66,14 +94,23 @@ The shape of the handoff document — front matter, body outline, length rules �
 lives in `handoff-template.md`, beside this file. Read it and write the handoff
 to that template.
 
+It is a separate file so the structure of a handoff can be experimented with on
+its own: rewrite `handoff-template.md` and nothing in this file changes. The
+front matter is the load-bearing part (`status: open` plus a one-line
+`description:` are what the session-start announcer reads); the body outline
+under it is yours to replace.
+
 ## §4 Resuming
 
-At session start, a `[context-watch]` notice lists any open handoffs, each
+At session start, a `[context-watch]` or `context-watch:` notice lists any open handoffs, each
 with its description.
 
 - **One open handoff**: run
   `python3 <hooks-dir>/handoff_ledger.py resolve <topic> [dir]` using the
-  topic from the announcement, then read the `authoritative` file and every
+  topic from the announcement, then run
+  `python3 <hooks-dir>/handoff_ledger.py claim <path>` on the `authoritative`
+  path (this hides it from any parallel session for two hours), then read the
+  `authoritative` file and every
   path listed in `must_also_read` before any other action, restate the
   objective and the first next step in one or two sentences, confirm with the
   user unless configuration or the user has said to proceed, then continue
@@ -81,6 +118,8 @@ with its description.
 - **Multiple open handoffs**: before any other work, present the list and ask
   which one to resume — use an interactive question tool if available —
   including a "none of these" option. Then resume the chosen one as above.
+  In fully automatic mode (`HANDOFF_AUTO=1`) the announcer names only the
+  newest one: resume it without asking.
 - **Either way**: if the user's opening request is an unrelated explicit task,
   mention the open handoff(s) in one sentence and do their task instead; the
   handoffs stay open for next time.
@@ -102,6 +141,11 @@ before continuing the work. Defaults:
   the work depends on — that is what makes a `/clear` cycle come back with
   the right skills and only those.
 - Read `LESSONS.md` if the handoff references it.
+- If the front matter has `git: <branch>@<sha>`, run
+  `git log --oneline <sha>..HEAD` and `git status --short`, and reconcile
+  them against "Current state" — another session may have moved the work on.
+- If `resolve` printed `missing_references:`, say which referenced files are
+  gone before relying on the handoff.
 
 Projects and users add their own always-run actions here — the pattern is
 one imperative bullet each, for example:
@@ -117,14 +161,21 @@ handoff's "Next steps".
 
 - The deterministic trigger is a lifecycle hook (`hooks/context_watch.py`)
   that reads the session's own transcript token usage and fires once per
-  session; a `SessionStart` hook runs the announcer. `hooks/handoff_ledger.py`
-  tracks open vs resumed vs superseded and can be run directly: `list`,
-  `resolve <topic-or-path>`, `resume <path>`,
-  `supersede <path> [--by <new-path>]`, `save-path [dir]`, and
+  session, with one SECOND NOTICE if the first is not acted on: only after
+  the model has taken a turn since the first, and once occupancy is a further
+  quarter of the threshold past it and at least 1.25x the threshold (both re-arm once occupancy falls below half the threshold); a
+  `SessionStart` hook runs the announcer. `hooks/handoff_ledger.py`
+  tracks open vs resumed vs superseded vs abandoned and can be run directly:
+  `list`, `resolve <topic-or-path>`, `claim <path>`, `resume <path>`,
+  `supersede <path> [--by <new-path>]`, `abandon <path>`, `save-path [dir]`, and
   `new-path <topic> [dir] [--json]`.
 - Thresholds are absolute tokens per model, set by the operator via `HANDOFF_AT`
   (per-launch) or the `CONTEXT_WATCH_*` knobs; `AUTORESUME=1` resumes a single
-  open handoff at session start without asking. Precedence and the full knob
+  open handoff at session start without asking. `HANDOFF_AUTO=1` is fully
+  automatic: inside tmux a Stop hook types `/clear` then `resume` once a
+  fresh handoff exists; headless, `context_watch.py auto [--max N]
+  [--prompt TEXT] -- <agent command>` re-runs the agent until no new handoff
+  is left. Precedence and the full knob
   list are owner configuration, documented in the plugin README — the trigger
   notice already tells this skill whether autoresume is active (§1).
 - In environments without hooks, this skill still works: run

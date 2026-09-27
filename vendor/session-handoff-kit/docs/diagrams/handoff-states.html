@@ -71,18 +71,18 @@
       <rect width="100%" height="100%" fill="#f4efe6"/>
 
       <!-- ============ closed region (drawn first: connectors and boxes run over it) ============ -->
-      <rect x="768" y="120" width="456" height="400" rx="8" fill="rgba(26,23,20,0.025)" stroke="rgba(26,23,20,0.20)" stroke-width="1" stroke-dasharray="6,4"/>
-      <text x="792" y="148" fill="#6e675d" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" letter-spacing="0.14em">CLOSED &middot; THE ANNOUNCER SKIPS THESE</text>
+      <rect x="768" y="96" width="456" height="480" rx="8" fill="rgba(26,23,20,0.025)" stroke="rgba(26,23,20,0.20)" stroke-width="1" stroke-dasharray="6,4"/>
+      <text x="792" y="124" fill="#6e675d" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" letter-spacing="0.14em">CLOSED &middot; THE ANNOUNCER SKIPS THESE</text>
 
       <!-- ============ transitions (drawn before states) ============ -->
       <!-- T1. start -> open -->
       <line x1="96" y1="320" x2="192" y2="320" stroke="#5c564e" stroke-width="1" marker-end="url(#arrow)"/>
 
       <!-- T2. open -> resumed -->
-      <path d="M 480 300 H 632 A 8 8 0 0 0 640 292 V 244 A 8 8 0 0 1 648 236 H 808" fill="none" stroke="#5c564e" stroke-width="1" marker-end="url(#arrow)"/>
+      <path d="M 480 300 H 632 A 8 8 0 0 0 640 292 V 220 A 8 8 0 0 1 648 212 H 808" fill="none" stroke="#5c564e" stroke-width="1" marker-end="url(#arrow)"/>
 
       <!-- T3. open -> superseded -->
-      <path d="M 480 340 H 632 A 8 8 0 0 1 640 348 V 396 A 8 8 0 0 0 648 404 H 808" fill="none" stroke="#5c564e" stroke-width="1" marker-end="url(#arrow)"/>
+      <path d="M 480 340 H 632 A 8 8 0 0 1 640 348 V 452 A 8 8 0 0 0 648 460 H 808" fill="none" stroke="#5c564e" stroke-width="1" marker-end="url(#arrow)"/>
 
       <!-- T4. open -> open : the guard. announcing reads, it never writes -->
       <path d="M 296 260 V 208 A 8 8 0 0 1 304 200 H 376 A 8 8 0 0 1 384 208 V 256" fill="none" stroke="#c24a28" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
@@ -91,11 +91,11 @@
       <rect x="108" y="300" width="72" height="12" rx="2" fill="#f4efe6"/>
       <text x="144" y="309" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">NEW HANDOFF</text>
 
-      <rect x="684" y="216" width="88" height="12" rx="2" fill="#f4efe6"/>
-      <text x="728" y="225" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">RESUME &lt;PATH&gt;</text>
+      <rect x="684" y="192" width="88" height="12" rx="2" fill="#f4efe6"/>
+      <text x="728" y="201" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">RESUME &lt;PATH&gt;</text>
 
-      <rect x="680" y="384" width="96" height="12" rx="2" fill="#f4efe6"/>
-      <text x="728" y="393" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">SUPERSEDE --BY</text>
+      <rect x="680" y="440" width="96" height="12" rx="2" fill="#f4efe6"/>
+      <text x="728" y="449" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">SUPERSEDE --BY</text>
 
       <rect x="296" y="148" width="88" height="44" rx="2" fill="#f4efe6"/>
       <text x="340" y="160" fill="#9a3a1e" font-size="8" font-weight="500" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.06em">SESSION START</text>
@@ -116,27 +116,27 @@
       <text x="340" y="348" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">the only announced status</text>
 
       <!-- resumed -->
-      <rect x="816" y="176" width="360" height="120" rx="8" fill="#f4efe6"/>
-      <rect x="816" y="176" width="360" height="120" rx="8" fill="rgba(26,23,20,0.05)" stroke="#5c564e" stroke-width="1"/>
-      <rect x="824" y="184" width="56" height="12" rx="2" fill="transparent" stroke="rgba(26,23,20,0.30)" stroke-width="0.8"/>
-      <text x="852" y="193" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">CLOSED</text>
-      <text x="996" y="228" fill="#1a1714" font-size="12" font-weight="600" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">resumed</text>
-      <text x="996" y="248" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">status: resumed &middot; resumed: &lt;ts&gt;</text>
-      <text x="996" y="264" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">a session picked the work up</text>
+      <rect x="816" y="152" width="360" height="120" rx="8" fill="#f4efe6"/>
+      <rect x="816" y="152" width="360" height="120" rx="8" fill="rgba(26,23,20,0.05)" stroke="#5c564e" stroke-width="1"/>
+      <rect x="824" y="160" width="56" height="12" rx="2" fill="transparent" stroke="rgba(26,23,20,0.30)" stroke-width="0.8"/>
+      <text x="852" y="169" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">CLOSED</text>
+      <text x="996" y="204" fill="#1a1714" font-size="12" font-weight="600" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">resumed</text>
+      <text x="996" y="224" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">status: resumed &middot; resumed: &lt;ts&gt;</text>
+      <text x="996" y="240" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">a session picked the work up</text>
 
       <!-- superseded -->
-      <rect x="816" y="344" width="360" height="120" rx="8" fill="#f4efe6"/>
-      <rect x="816" y="344" width="360" height="120" rx="8" fill="rgba(26,23,20,0.05)" stroke="#5c564e" stroke-width="1"/>
-      <rect x="824" y="352" width="56" height="12" rx="2" fill="transparent" stroke="rgba(26,23,20,0.30)" stroke-width="0.8"/>
-      <text x="852" y="361" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">CLOSED</text>
-      <text x="996" y="396" fill="#1a1714" font-size="12" font-weight="600" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">superseded</text>
-      <text x="996" y="416" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">status: superseded &middot; superseded_by:</text>
-      <text x="996" y="432" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">a newer handoff replaced it</text>
+      <rect x="816" y="400" width="360" height="120" rx="8" fill="#f4efe6"/>
+      <rect x="816" y="400" width="360" height="120" rx="8" fill="rgba(26,23,20,0.05)" stroke="#5c564e" stroke-width="1"/>
+      <rect x="824" y="408" width="56" height="12" rx="2" fill="transparent" stroke="rgba(26,23,20,0.30)" stroke-width="0.8"/>
+      <text x="852" y="417" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">CLOSED</text>
+      <text x="996" y="452" fill="#1a1714" font-size="12" font-weight="600" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">superseded</text>
+      <text x="996" y="472" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">status: superseded &middot; superseded_by:</text>
+      <text x="996" y="488" fill="#5c564e" font-size="8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" text-anchor="middle">a newer handoff replaced it</text>
 
       <!-- ============ editorial callout ============ -->
-      <text x="920" y="568" fill="#1a1714" font-size="16" font-style="italic" font-family="'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif">no transition leads back to open</text>
-      <path d="M 912 552 Q 944 520 996 472" fill="none" stroke="rgba(26,23,20,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
-      <circle cx="996" cy="472" r="2" fill="#1a1714"/>
+      <text x="920" y="616" fill="#1a1714" font-size="16" font-style="italic" font-family="'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif">no transition leads back to open</text>
+      <path d="M 912 600 Q 944 568 996 528" fill="none" stroke="rgba(26,23,20,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+      <circle cx="996" cy="528" r="2" fill="#1a1714"/>
 
       <!-- ============ legend ============ -->
       <line x1="40" y1="648" x2="1240" y2="648" stroke="rgba(26,23,20,0.10)" stroke-width="0.8"/>
