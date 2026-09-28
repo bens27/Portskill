@@ -2547,6 +2547,40 @@ def run_stop_script_if_ready(item, project):
                 stderr=subprocess.STDOUT,
             )
         life["last_exit_code"] = result.returncode
+        return {"ran": True, "exit_code": result.returncode, "path": str(stop_script)}
+    return {"ran": False, "exit_code": None, "path": str(stop_script)}
+
+
+def reachable_range_ports(item, timeout=0.1):
+    """Return locally reachable TCP ports in the range without inferring ownership."""
+    import socket
+
+    try:
+        start = int(item.get("start"))
+        end = int(item.get("end", start))
+    except (TypeError, ValueError):
+        return []
+    if start <= 0 or end < start or end > 65535:
+        return []
+    reachable = []
+    for port in range(start, end + 1):
+        for host in ("127.0.0.1", "::1"):
+            try:
+                with socket.create_connection((host, port), timeout=timeout):
+                    reachable.append(port)
+                    break
+            except OSError:
+                pass
+    return reachable
+
+
+def wait_for_range_ports_to_close(item, timeout=1.0):
+    deadline = time.monotonic() + timeout
+    occupied = reachable_range_ports(item)
+    while occupied and time.monotonic() < deadline:
+        time.sleep(0.05)
+        occupied = reachable_range_ports(item)
+    return occupied
 
 
 def terminate_lifecycle_processes(item):
@@ -2570,7 +2604,9 @@ def terminate_lifecycle_processes(item):
                 tracked_pids.append(pid_int)
         except (TypeError, ValueError):
             pass
-    if pgid_int is not None and pgid_int > 0 and (live_pid or live_group):
+    current_group = os.getpgrp()
+    safe_group = pgid_int is not None and pgid_int > 0 and pgid_int != current_group
+    if safe_group and (live_pid or live_group):
         try:
             os.killpg(pgid_int, signal.SIGTERM)
         except ProcessLookupError:
@@ -2581,9 +2617,25 @@ def terminate_lifecycle_processes(item):
             except ProcessLookupError:
                 pass
             wait_for_processes_to_exit(tracked_pids, 5.0)
-    life["pid"] = None
-    life["pgid"] = None
-    life["stopped_at"] = utc_now()
+    elif live_pid:
+        # A recorded PID without a safe PGID is still owned process identity.
+        # Never widen that authority to listeners discovered only by port.
+        pid_int = int(pid)
+        if pid_int != os.getpid():
+            try:
+                os.kill(pid_int, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            if not wait_for_processes_to_exit([pid_int], 5.0):
+                try:
+                    os.kill(pid_int, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                wait_for_processes_to_exit([pid_int], 5.0)
+    if not range_has_live_process(item):
+        life["pid"] = None
+        life["pgid"] = None
+        life["stopped_at"] = utc_now()
 
 
 def activate_item(item, project, range_id, tailnet_arg):
@@ -2847,7 +2899,8 @@ def run_stop_bulk(mode="all", also_release=None):
                     "reason": "default_on",
                 })
                 continue
-            live = range_has_live_process(item)
+            remote = is_remote_range(registry, item)
+            live = False if remote else range_has_live_process(item)
             is_active = item.get("state") == "active"
             if not live and not is_active:
                 skipped.append({
@@ -2856,7 +2909,9 @@ def run_stop_bulk(mode="all", also_release=None):
                     "reason": "not_running",
                 })
                 continue
-            ok, detail = park_item_for_exit(item, project, also_release=also)
+            ok, detail = park_item_for_exit(
+                item, project, also_release=also, registry=registry
+            )
             detail = dict(detail)
             detail["project"] = project
             detail["range_id"] = item.get("id")
@@ -2901,9 +2956,17 @@ def cmd_start(args):
             fail("not_found", f"range id not found for project: {args.range_id}")
         if is_remote_range(registry, item):
             refuse_remote_process(registry, item, action="start")
+        occupied = reachable_range_ports(item)
         if item.get("state") == "released":
+            if occupied:
+                fail(
+                    "port_in_use",
+                    f"Released range is occupied by TCP listener(s) on {occupied}. "
+                    "Stop the owning service before reclaiming or starting it.",
+                    occupied_ports=occupied,
+                )
             if not getattr(args, "reclaim", False):
-                fail("range_released", "Stop released this service's ports. Reclaim them to start again.",
+                fail("range_released", "This range is released. Reclaim its free ports to start the service.",
                      hint=f"start --project {shlex.quote(project)} --range-id {shlex.quote(args.range_id)} --reclaim")
             reclaim_range(registry, item)
         life = lifecycle(item)
@@ -2914,6 +2977,13 @@ def cmd_start(args):
         if life.get("pid") is not None:
             life["pid"] = None
             life["pgid"] = None
+        if occupied:
+            fail(
+                "port_in_use",
+                f"Range is occupied by TCP listener(s) on {occupied}. "
+                "Portskill will not launch a duplicate service or assume ownership.",
+                occupied_ports=occupied,
+            )
         recorded_mode = item.get("tailnet", {}).get("mode")
         if args.tailnet is None and recorded_mode is None:
             emit(needs_tailnet(project, args.range_id))
@@ -3024,10 +3094,12 @@ def cmd_stop(args):
         item = find_project_range(registry, project, args.range_id)
         if item is None:
             fail("not_found", f"range id not found for project: {args.range_id}")
-        if item.get("state") == "released":
-            return {"status": "ok", "range": item, "also_release": resolve_stop_also_release(registry, override=override), "action": "already_released"}, []
+        if is_remote_range(registry, item):
+            refuse_remote_process(registry, item, action="stop")
         also = resolve_stop_also_release(registry, override=override)
-        ok, detail = park_item_for_exit(item, project, also_release=also)
+        ok, detail = park_item_for_exit(
+            item, project, also_release=also, registry=registry
+        )
         if not ok:
             fail(
                 detail.get("reason") or "stop_failed",
@@ -3416,6 +3488,14 @@ def start_item_for_apply(item, project, registry=None):
         except SystemExit:
             return False, {"reason": "activate_failed", "range_id": item.get("id")}
         return True, {"action": "already_live", "range": item}
+    occupied = reachable_range_ports(item)
+    if occupied:
+        return False, {
+            "reason": "port_in_use",
+            "range_id": item.get("id"),
+            "occupied_ports": occupied,
+            "message": f"TCP listener(s) already occupy {occupied}; refusing duplicate start",
+        }
     if life.get("pid") is not None:
         life["pid"] = None
         life["pgid"] = None
@@ -3463,26 +3543,11 @@ def start_item_for_apply(item, project, registry=None):
     return True, {"action": "started", "range": item}
 
 
-def stop_item_for_apply(item, project):
+def stop_item_for_apply(item, project, registry=None):
     """Stop a live Off range during apply-defaults --also-stop-off."""
-    if item.get("state") == "released":
-        return True, {"action": "already_released", "range": item}
-    life = lifecycle(item)
-    has_live_pid = pid_alive(life.get("pid"))
-    live_group_pids = process_group_pids(life.get("pgid")) if life.get("pgid") else []
-    has_live_group = any(pid_alive(pid) for pid in live_group_pids)
-    if has_live_pid or has_live_group:
-        run_stop_script_if_ready(item, project)
-        terminate_lifecycle_processes(item)
-    else:
-        life["pid"] = None
-        life["pgid"] = None
-        life["stopped_at"] = utc_now()
-    try:
-        release_item(item)
-    except SystemExit:
-        return False, {"reason": "release_failed", "range_id": item.get("id")}
-    return True, {"action": "stopped", "range": item}
+    return park_item_for_exit(
+        item, project, also_release=True, registry=registry
+    )
 
 
 def run_apply_defaults(
@@ -3511,7 +3576,8 @@ def run_apply_defaults(
         changed = set()
         for project, item in list(iter_project_ranges(registry, filters)):
             default_state = normalize_default_state(item.get("default_state"))
-            live = range_has_live_process(item)
+            remote = is_remote_range(registry, item)
+            live = False if remote else range_has_live_process(item)
             if default_state == "on":
                 if live and item.get("state") == "active":
                     skipped.append({
@@ -3534,8 +3600,8 @@ def run_apply_defaults(
                     # placeholder skip does not mutate; other partial may have
                     if "range" in detail:
                         changed.add(project)
-            elif also_stop_off and live:
-                ok, detail = stop_item_for_apply(item, project)
+            elif also_stop_off and (live or item.get("state") == "active"):
+                ok, detail = stop_item_for_apply(item, project, registry=registry)
                 detail = dict(detail)
                 detail["project"] = project
                 if ok:
@@ -3596,24 +3662,68 @@ def item_matches_preset_service(project, item, service):
     return (item.get("note") or None) == (service.get("note") or None)
 
 
-def park_item_for_exit(item, project, also_release=False):
+def park_item_for_exit(item, project, also_release=False, registry=None):
     """Stop.sh + tracked pgid terminate + tailnet off.
 
     When also_release is false, the range stays reserved (deactivate / Stop
     without Release). When true, fully release via release_item.
     """
+    if registry is not None and is_remote_range(registry, item):
+        return False, {
+            "reason": "remote_machine",
+            "range_id": item.get("id"),
+            "message": "Remote ranges are links only; stop them on their owning machine",
+        }
     if item.get("state") == "released":
+        occupied = reachable_range_ports(item)
+        if occupied:
+            return False, {
+                "reason": "ports_still_listening",
+                "range_id": item.get("id"),
+                "occupied_ports": occupied,
+                "message": (
+                    f"Released range still has TCP listener(s) on {occupied}. "
+                    "Portskill does not own those listeners; stop them in the original terminal."
+                ),
+            }
         return True, {"action": "already_released", "range": item}
     life = lifecycle(item)
     has_live = range_has_live_process(item)
+    hook = run_stop_script_if_ready(item, project)
     if has_live:
-        run_stop_script_if_ready(item, project)
         terminate_lifecycle_processes(item)
     else:
         life["pid"] = None
         life["pgid"] = None
-        if not life.get("stopped_at"):
-            life["stopped_at"] = utc_now()
+    occupied = wait_for_range_ports_to_close(item)
+    tracked_alive = range_has_live_process(item)
+    if occupied or tracked_alive:
+        details = {
+            "reason": "stop_verification_failed",
+            "range_id": item.get("id"),
+            "occupied_ports": occupied,
+            "tracked_process_alive": tracked_alive,
+            "message": (
+                "Stop could not be verified: "
+                + (f"TCP port(s) {occupied} are still listening. " if occupied else "")
+                + ("A tracked process is still running. " if tracked_alive else "")
+                + "The listener may have been started outside Portskill; stop it in the original terminal."
+            ),
+        }
+        if hook.get("ran"):
+            details["stop_hook_exit_code"] = hook.get("exit_code")
+        return False, details
+    if hook.get("ran") and hook.get("exit_code") != 0:
+        return False, {
+            "reason": "stop_hook_failed",
+            "range_id": item.get("id"),
+            "stop_hook_exit_code": hook.get("exit_code"),
+            "message": (
+                f"Stop hook exited with {hook.get('exit_code')}; allocation was preserved."
+            ),
+        }
+    if not life.get("stopped_at"):
+        life["stopped_at"] = utc_now()
     if also_release:
         try:
             release_item(item)
@@ -3667,7 +3777,8 @@ def run_exit_house(project_filter=None, preset_name=None, also_release=False, cl
             else:
                 if normalize_default_state(item.get("default_state")) != "on":
                     continue
-            live = range_has_live_process(item)
+            remote = is_remote_range(registry, item)
+            live = False if remote else range_has_live_process(item)
             is_active = item.get("state") == "active"
             if not live and not is_active:
                 skipped.append({
@@ -3676,7 +3787,9 @@ def run_exit_house(project_filter=None, preset_name=None, also_release=False, cl
                     "reason": "not_running",
                 })
                 continue
-            ok, detail = park_item_for_exit(item, project, also_release=also_release)
+            ok, detail = park_item_for_exit(
+                item, project, also_release=also_release, registry=registry
+            )
             detail = dict(detail)
             detail["project"] = project
             if ok:
@@ -5716,29 +5829,21 @@ def enrich_range_for_status(registry, item, tailscale_self=None):
 
 def observed_range_status(registry, item):
     """Keep saved allocation state separate from a current local TCP observation."""
-    import socket
-
     saved = item.get("state") or "reserved"
     result = {"allocation_state": saved, "state": saved, "reachable": None}
-    if saved == "released":
-        return result
     if is_remote_range(registry, item):
         result["state"] = "unknown"
         return result
-    port = item.get("start")
-    reachable = False
-    if isinstance(port, int) and 0 < port < 65536:
-        for host in ("127.0.0.1", "::1"):
-            try:
-                with socket.create_connection((host, port), timeout=0.15):
-                    reachable = True
-                    break
-            except OSError:
-                pass
+    listening_ports = reachable_range_ports(item, timeout=0.15)
+    reachable = bool(listening_ports)
     result["reachable"] = reachable
+    result["listening_ports"] = listening_ports
     pid = (item.get("lifecycle") or {}).get("pid")
     result["process_alive"] = pid_alive(pid) if pid else None
-    result["state"] = "active" if reachable and result["process_alive"] is not False else "inactive"
+    if saved == "released":
+        result["state"] = "occupied" if reachable else "released"
+    else:
+        result["state"] = "active" if reachable else "inactive"
     return result
 
 

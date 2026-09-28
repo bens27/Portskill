@@ -1,0 +1,106 @@
+specification {
+  element system
+  element component
+  element store
+  relationship uses
+}
+model {
+  clients = system 'Developers and agents' {
+    description 'Use the dashboard, a terminal, or an MCP client.'
+    metadata { uid 'clients' evidence 'README.md' }
+    browser = component 'Browser dashboard' {
+      description 'Renders services and sends lifecycle actions over HTTP.'
+      metadata { uid 'browser' evidence 'port_registry_app/server.py' }
+    }
+    agent = component 'MCP client' {
+      description 'Calls enabled tools through HTTP or stdio.'
+      metadata { uid 'agent' evidence ['README.md', 'port_registry_app/mcp.py'] }
+    }
+    terminal = component 'Terminal' {
+      description 'Invokes the Python CLI directly.'
+      metadata { uid 'terminal' evidence ['scripts/cli.sh', 'port_registry_app/cli.py'] }
+    }
+  }
+  portskill = system 'Portskill' {
+    description 'Reserves local ports and coordinates service lifecycles.'
+    technology 'Python standard library'
+    metadata { uid 'portskill' evidence ['README.md', 'port_registry_app/__main__.py'] }
+    http = component 'HTTP UI and API' {
+      description 'One listener serves the dashboard, actions, and /mcp. Loopback by default; optional passkey gate.'
+      metadata { uid 'http' evidence 'port_registry_app/server.py' }
+    }
+    mcp = component 'MCP dispatcher' {
+      description 'Checks enabled tools and dispatches CLI-backed tools. Stdio bypasses HTTP authentication.'
+      metadata { uid 'mcp' evidence ['port_registry_app/mcp.py', 'port_registry_app/server.py'] }
+    }
+    commands = component 'Shared CLI operations' {
+      description 'UI actions and core MCP tools invoke CLI subprocesses; terminals call the same command layer.'
+      metadata { uid 'commands' evidence ['port_registry_app/cli.py', 'port_registry_app/mcp.py', 'port_registry_app/server.py'] }
+      allocation = component 'Allocation and persistence' {
+        description 'Locks the global registry; reserves, reclaims, and releases ranges. Writes project mirrors.'
+        metadata { uid 'allocation' evidence 'port_registry_app/cli.py' }
+      }
+      lifecycle = component 'Start and Stop' {
+        description 'Checks occupancy before launch. Runs a configured stop hook, terminates tracked processes, then verifies shutdown before success.'
+        metadata { uid 'lifecycle' evidence ['port_registry_app/cli.py', 'tests/test_stop_verification.py'] }
+      }
+      observation = component 'Listener observation' {
+        description 'Probes every local TCP port in a range. Reachability is separate from allocation and ownership; released plus reachable means occupied.'
+        metadata { uid 'observation' evidence ['port_registry_app/cli.py', 'tests/test_stop_verification.py'] }
+      }
+      sharing = component 'Optional Tailnet sharing' {
+        description 'Configures Serve or Funnel mappings. Sharing does not supply HTTP authentication or remote process management.'
+        metadata { uid 'sharing' evidence ['port_registry_app/cli.py', 'README.md'] }
+      }
+    }
+  }
+  registry = store 'Registry and local files' {
+    description 'Global registry.json is authoritative; project mirrors and lifecycle logs are derived local files. listen.json records the UI/MCP endpoint.'
+    technology 'JSON and files'
+    metadata { uid 'registry' evidence ['port_registry_app/cli.py', 'port_registry_app/server.py', 'README.md'] }
+  }
+  services = system 'Local project services' {
+    description 'Configured project commands and independently started TCP listeners can coexist.'
+    metadata { uid 'services' evidence 'port_registry_app/cli.py' }
+    tracked = component 'Tracked processes' {
+      description 'Start records PID and process group. Stop can terminate tracked processes after the project hook.'
+      metadata { uid 'tracked' evidence 'port_registry_app/cli.py' }
+    }
+    untracked = component 'Other TCP listeners' {
+      description 'Observed for occupancy only. Portskill does not kill an untracked listener by port or working directory.'
+      metadata { uid 'untracked' evidence ['port_registry_app/cli.py', 'tests/test_stop_verification.py'] }
+    }
+    hooks = component 'Project hooks' {
+      description 'Configured executable start/stop scripts run with the current user permissions. Hooks can perform project-defined cleanup.'
+      metadata { uid 'hooks' evidence 'port_registry_app/cli.py' }
+    }
+  }
+  tailscale = system 'Tailscale' {
+    description 'Optional external CLI and daemon for Serve or Funnel exposure.'
+    metadata { uid 'tailscale' evidence ['port_registry_app/cli.py', 'README.md'] }
+  }
+  mac = system 'Optional macOS shell' {
+    description 'Native menu app starts Python, or a launchd daemon supervises Python in external-server mode.'
+    metadata { uid 'mac' evidence ['macos/PortskillMenu/main.swift', 'scripts/portskill-daemon.sh'] }
+  }
+  clients.browser .uses portskill.http 'UI and actions' { metadata { uid 'browser-http' } }
+  clients.agent .uses portskill.http 'HTTP MCP' { metadata { uid 'agent-http' } }
+  clients.agent .uses portskill.mcp 'Stdio MCP' { metadata { uid 'agent-stdio' } }
+  clients.terminal .uses portskill.commands 'CLI commands' { metadata { uid 'terminal-cli' } }
+  portskill.http .uses portskill.mcp 'Dispatch /mcp' { metadata { uid 'http-mcp' } }
+  portskill.http .uses portskill.commands 'Run UI action' { metadata { uid 'http-cli' } }
+  portskill.mcp .uses portskill.commands 'Run enabled core tool' { metadata { uid 'mcp-cli' } }
+  portskill.commands.lifecycle .uses portskill.commands.allocation 'Commit verified state' { metadata { uid 'lifecycle-allocation' } }
+  portskill.commands.lifecycle .uses portskill.commands.observation 'Check occupancy and shutdown' { metadata { uid 'lifecycle-observation' } }
+  portskill.commands.lifecycle .uses portskill.commands.sharing 'Activate or tear down mapping' { metadata { uid 'lifecycle-sharing' } }
+  portskill.commands.allocation .uses registry 'Lock, read, and persist' { metadata { uid 'allocation-registry' } }
+  portskill.http .uses registry 'Read view; publish endpoint' { metadata { uid 'http-registry' } }
+  portskill.http .uses portskill.commands.observation 'Observe dashboard status' { metadata { uid 'http-observation' } }
+  portskill.commands.lifecycle .uses services.tracked 'Spawn and terminate tracked processes' { metadata { uid 'lifecycle-tracked' } }
+  portskill.commands.lifecycle .uses services.hooks 'Execute configured hooks' { metadata { uid 'lifecycle-hooks' } }
+  portskill.commands.observation .uses services.tracked 'Probe TCP reachability' { metadata { uid 'observation-tracked' } }
+  portskill.commands.observation .uses services.untracked 'Probe TCP reachability only' { metadata { uid 'observation-untracked' } }
+  portskill.commands.sharing .uses tailscale 'Configure Serve / Funnel' { metadata { uid 'sharing-tailscale' } }
+  mac .uses portskill.http 'Launch or supervise server' { metadata { uid 'mac-http' } }
+}
+views { view index { include * } }

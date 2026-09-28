@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "id": "portskill",
+  "title": "Portskill",
+  "description": "Local port allocation, service control, and truthful listener status.",
+  "provenance": "Authored 2026-09-23 from the working tree at base commit 714b4e2, including uncommitted Stop verification changes. Responsibilities group code within cli.py; they are not separate deployed services. Focused on core lifecycle and access paths, not an exhaustive feature inventory. Evidence paths are repository-relative; current means source-supported, not a live runtime assertion.",
+  "boundaries": [
+    {
+      "id": "local-user",
+      "title": "Current user authority",
+      "description": "CLI operations, project hooks, and managed commands execute with the user's permissions. This is not sandbox isolation.",
+      "kind": "authority",
+      "members": [
+        "commands",
+        "tracked",
+        "hooks"
+      ],
+      "color": "#739886"
+    },
+    {
+      "id": "http-access",
+      "title": "Optional HTTP passkey gate",
+      "description": "HTTP UI/API/MCP can use the optional gate. Stdio MCP and direct CLI do not traverse it.",
+      "kind": "access",
+      "members": [
+        "http"
+      ],
+      "color": "#7994ad"
+    },
+    {
+      "id": "observed-only",
+      "title": "Observation does not grant ownership",
+      "description": "Other listeners can occupy reserved or released ranges. No implicit permission to terminate them.",
+      "kind": "ownership",
+      "members": [
+        "untracked"
+      ],
+      "color": "#b59b72"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "overview",
+      "title": "One local service registry",
+      "description": "Developers and agents share allocation state and service controls.",
+      "expanded": [],
+      "proposed": false,
+      "lens": "structure",
+      "theme": "grove"
+    },
+    {
+      "id": "runtime",
+      "title": "UI, MCP, and CLI converge",
+      "description": "HTTP actions and MCP tools converge on shared operations; dashboard status also reads local observations.",
+      "scope": "portskill",
+      "expanded": [
+        "portskill"
+      ],
+      "proposed": false,
+      "lens": "structure",
+      "theme": "grove"
+    },
+    {
+      "id": "lifecycle",
+      "title": "Allocation, observation, and control",
+      "description": "Verify shutdown before changing allocation; TCP reachability alone does not establish process ownership.",
+      "scope": "commands",
+      "expanded": [
+        "commands"
+      ],
+      "proposed": false,
+      "lens": "trust",
+      "theme": "graphite"
+    },
+    {
+      "id": "ownership",
+      "title": "What Portskill can stop",
+      "description": "Tracked processes and configured hooks carry control authority. Other listeners are observed only.",
+      "expanded": [
+        "services"
+      ],
+      "proposed": false,
+      "lens": "trust",
+      "theme": "graphite",
+      "layout": "elk-layered-down"
+    }
+  ]
+}
