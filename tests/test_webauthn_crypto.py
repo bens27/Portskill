@@ -8,7 +8,7 @@ from tests.helpers import IsolatedConfig
 
 class P256VectorTests(unittest.TestCase):
     def test_rfc6979_p256_sha256_sample(self) -> None:
-        from port_registry_app import p256
+        from portskill import p256
 
         # RFC 6979 A.2.5 — NIST P-256, SHA-256, message "sample"
         d = 0xC9AFA9D845BA75166B5C215767B1D6934E50C3DB36E89B127B8A622B120F6721
@@ -25,7 +25,7 @@ class P256VectorTests(unittest.TestCase):
         self.assertFalse(p256.verify(pub, b"other", r, s))
 
     def test_roundtrip_keygen(self) -> None:
-        from port_registry_app import p256
+        from portskill import p256
 
         d, pub = p256.generate_keypair()
         r, s = p256.sign(d, b"portskill")
@@ -35,7 +35,7 @@ class P256VectorTests(unittest.TestCase):
 
 class CborLiteTests(unittest.TestCase):
     def test_map_bytes_roundtrip(self) -> None:
-        from port_registry_app import cbor_lite
+        from portskill import cbor_lite
 
         value = {"fmt": "none", "authData": b"\x00\x01\x02", 1: 2, 3: -7}
         raw = cbor_lite.dumps(value)
@@ -44,7 +44,7 @@ class CborLiteTests(unittest.TestCase):
 
 class PasskeyStoreIsolationTests(unittest.TestCase):
     def test_credentials_stay_out_of_registry_json(self) -> None:
-        from port_registry_app.webauthn import (
+        from portskill.webauthn import (
             passkey_path,
             set_http_passkey_gate,
             write_passkey_doc,

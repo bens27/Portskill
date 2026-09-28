@@ -9,7 +9,7 @@ from tests.helpers import IsolatedConfig, parse_cli_json
 
 class ServePortskillDefaultTests(unittest.TestCase):
     def test_default_settings_and_normalize(self) -> None:
-        from port_registry_app.cli import default_settings, initial_registry, normalize_settings
+        from portskill.cli import default_settings, initial_registry, normalize_settings
 
         self.assertFalse(default_settings().get("serve_portskill_on_tailscale"))
         self.assertFalse(initial_registry(20000, 29999)["settings"].get("serve_portskill_on_tailscale"))
@@ -20,8 +20,8 @@ class ServePortskillDefaultTests(unittest.TestCase):
         self.assertTrue(normalize_settings({"serve_portskill_on_tailscale": "on"}).get("serve_portskill_on_tailscale"))
 
     def test_existing_true_registry_is_not_flipped(self) -> None:
-        from port_registry_app.cli import normalize_settings
-        from port_registry_app.server import load_registry
+        from portskill.cli import normalize_settings
+        from portskill.server import load_registry
 
         with IsolatedConfig() as iso:
             iso.write_registry({"settings": {"serve_portskill_on_tailscale": True}})
@@ -48,7 +48,7 @@ class ServePortskillDefaultTests(unittest.TestCase):
             self.assertFalse(parse_cli_json(off)["settings"].get("serve_portskill_on_tailscale"))
 
     def test_ui_toggle_defaults_unchecked(self) -> None:
-        from port_registry_app.server import build_view, portskill_serve_toggle_html
+        from portskill.server import build_view, portskill_serve_toggle_html
 
         with IsolatedConfig() as iso:
             iso.write_registry({"settings": {}})

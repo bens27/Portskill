@@ -7,8 +7,8 @@ from argparse import Namespace
 from io import StringIO
 from unittest.mock import patch
 
-from port_registry_app import cli
-from port_registry_app.cli import DOCTOR_FAIL_CLOSED_EXIT, DOCTOR_HARD_CHECKS
+from portskill import cli
+from portskill.cli import DOCTOR_FAIL_CLOSED_EXIT, DOCTOR_HARD_CHECKS
 from tests.helpers import IsolatedConfig, free_loopback_port, parse_cli_json
 
 
@@ -43,13 +43,13 @@ class DoctorContractTests(unittest.TestCase):
         self.assertNotIn("token", payload.get("http_auth") or {})
         self.assertIsNone(payload.get("message"))
         hk = payload.get("handoff_kit") or {}
-        self.assertTrue(hk.get("present"), hk)
-        self.assertEqual(hk.get("source"), "vendored")
+        self.assertFalse(hk.get("present"), hk)
+        self.assertEqual(hk.get("source"), "fetched")
         self.assertFalse(hk.get("configured"))
-        self.assertIn("vendor/session-handoff-kit", hk.get("path") or "")
+        self.assertTrue(str(hk.get("path") or "").endswith("handoff-kit/current"))
         handoff_check = next(c for c in payload["checks"] if c.get("name") == "handoff_kit")
         self.assertTrue(handoff_check.get("ok"))
-        self.assertIn("configured=no", handoff_check.get("detail") or "")
+        self.assertIn("optional kit not installed", handoff_check.get("detail") or "")
 
     def test_offline_idempotent_twice(self) -> None:
         with IsolatedConfig() as iso:
@@ -142,7 +142,11 @@ class DoctorContractTests(unittest.TestCase):
 
     def test_enabled_reports_configured(self) -> None:
         with IsolatedConfig() as iso:
-            iso.write_registry({"settings": {"handoff_enabled": True}})
+            kit = iso.root / "kit"
+            (kit / "skills" / "session-handoff" / "hooks").mkdir(parents=True)
+            (kit / "README.md").write_text("# kit\n", encoding="utf-8")
+            (kit / "skills" / "session-handoff" / "hooks" / "handoff_ledger.py").write_text("print('ok')\n", encoding="utf-8")
+            iso.write_registry({"settings": {"handoff_enabled": True, "handoff_kit": str(kit)}})
             code, payload = _doctor(iso)
         self.assertEqual(code, 0)
         hk = payload.get("handoff_kit") or {}
@@ -242,9 +246,9 @@ class DoctorContractTests(unittest.TestCase):
         self.assertFalse(names["mcp_reachability"].get("ok"))
 
     def test_missing_optional_kit_is_healthy_only_when_not_configured(self) -> None:
-        from port_registry_app.handoff import doctor_handoff
+        from portskill.handoff import doctor_handoff
 
-        with IsolatedConfig() as iso, patch("port_registry_app.handoff.VENDOR_KIT", iso.root / "absent-kit"):
+        with IsolatedConfig():
             for settings, expected in (({}, True), ({"handoff_enabled": True}, False)):
                 check, info = doctor_handoff(settings)
                 self.assertEqual(check["ok"], expected)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Thin wrapper — UI helpers live in port_registry_app.server."""
+"""Thin wrapper — UI helpers live in portskill.server."""
 from __future__ import annotations
 
 import pathlib
@@ -9,7 +9,7 @@ _ROOT = pathlib.Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from port_registry_app.server import (  # noqa: F401
+from portskill.server import (  # noqa: F401
     Handler,
     build_view,
     load_registry,

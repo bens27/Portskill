@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build a self-contained Portskill.app (UI+MCP + Dock + menubar).
-# Embeds port_registry_app under Contents/Resources/python/ so the bundle
+# Embeds portskill under Contents/Resources/python/ so the bundle
 # does not reach outside for the Python package.
 #
 # Output: <package>/dist/Portskill.app
@@ -42,8 +42,8 @@ copy_python_tree() {
 echo "== Portskill.app build =="
 echo "Package: ${PACKAGE_ROOT}"
 
-if [[ ! -f "${PACKAGE_ROOT}/port_registry_app/__main__.py" ]]; then
-  echo "missing port_registry_app/__main__.py under ${PACKAGE_ROOT}" >&2
+if [[ ! -f "${PACKAGE_ROOT}/portskill/__main__.py" ]]; then
+  echo "missing portskill/__main__.py under ${PACKAGE_ROOT}" >&2
   exit 1
 fi
 
@@ -76,8 +76,8 @@ done
 
 # Embed Python package (stdlib module tree only; skip caches)
 copy_python_tree \
-  "${PACKAGE_ROOT}/port_registry_app" \
-  "${CONTENTS}/Resources/python/port_registry_app"
+  "${PACKAGE_ROOT}/portskill" \
+  "${CONTENTS}/Resources/python/portskill"
 
 # Bash fallback always written
 BASH_SRC="${TEMPLATE_DIR}/Portskill.bash"
@@ -130,8 +130,8 @@ replace_app_bundle "${STAGE}/Portskill.app" "${DIST_APP}"
 # (dev tree still has package-root fallback; embedded python makes either path work)
 mkdir -p "${MACOS_APP}/Contents/Resources/python"
 copy_python_tree \
-  "${PACKAGE_ROOT}/port_registry_app" \
-  "${MACOS_APP}/Contents/Resources/python/port_registry_app"
+  "${PACKAGE_ROOT}/portskill" \
+  "${MACOS_APP}/Contents/Resources/python/portskill"
 cp "${CONTENTS}/MacOS/Portskill.bash" "${MACOS_APP}/Contents/MacOS/Portskill.bash"
 chmod +x "${MACOS_APP}/Contents/MacOS/Portskill.bash"
 cp "${CONTENTS}/MacOS/Portskill" "${MACOS_APP}/Contents/MacOS/Portskill"
@@ -196,5 +196,5 @@ echo
 echo "Open once:"
 echo "  open \"${DIST_APP}\""
 echo "Or verify without thrashing keepalive:"
-echo "  test -f \"${DIST_APP}/Contents/Resources/python/port_registry_app/__main__.py\""
-echo "  PYTHONPATH=\"${DIST_APP}/Contents/Resources/python\" python3 -c 'import port_registry_app'"
+echo "  test -f \"${DIST_APP}/Contents/Resources/python/portskill/__main__.py\""
+echo "  PYTHONPATH=\"${DIST_APP}/Contents/Resources/python\" python3 -c 'import portskill'"

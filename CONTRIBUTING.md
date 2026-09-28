@@ -20,7 +20,7 @@ For behavior changes, add a regression test for the observable result. Preserve
 stdlib-only runtime support, fail-closed handling of corrupt data, and existing
 CLI/MCP compatibility. Keep optional features disabled unless explicitly enabled.
 
-`port_registry_app/server.py` renders the live dashboard; files in `ui/` are
+`portskill/server.py` renders the live dashboard; files in `ui/` are
 reference/preview assets. Maintain agent instructions in `skill/SKILL.md` and its conditional references;
 the root `SKILL.md` is a compatibility entrypoint. Keep both discovery descriptions
 aligned. The sidecar installer must copy the supporting references. Do not commit runtime registries, auth files,

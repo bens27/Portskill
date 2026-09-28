@@ -8,7 +8,7 @@ import unittest
 from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 
-from port_registry_app.server import Handler, http_host_name, trusted_http_host
+from portskill.server import Handler, http_host_name, trusted_http_host
 from tests.helpers import IsolatedConfig
 
 
@@ -48,8 +48,8 @@ class HttpHostValidationTests(unittest.TestCase):
 
     def test_rebinding_host_cannot_read_inventory_or_dispatch_action(self) -> None:
         evil = "attacker.example:8765"
-        with patch("port_registry_app.server.dispatch_ui_action") as dispatch:
-            for method, path in (("GET", "/api/state"), ("GET", "/health"), ("POST", "/port-registry/actions"), ("POST", "/mcp")):
+        with patch("portskill.server.dispatch_ui_action") as dispatch:
+            for method, path in (("GET", "/api/state"), ("GET", "/health"), ("POST", "/portskill/actions"), ("POST", "/mcp")):
                 with self.subTest(method=method, path=path):
                     status, body = self.request([evil], method=method, path=path, origin="http://" + evil)
                     self.assertEqual(status, 403)
@@ -60,8 +60,8 @@ class HttpHostValidationTests(unittest.TestCase):
         for host in ("127.0.0.1:8765", "localhost:8765", "LOCALHOST.:8765", "[::1]:8765"):
             with self.subTest(host=host):
                 self.assertEqual(self.request([host])[0], 200)
-                with patch("port_registry_app.server.dispatch_ui_action", return_value=(0, {"ok": True})) as dispatch:
-                    status, body = self.request([host], method="POST", path="/port-registry/actions", origin="http://" + host)
+                with patch("portskill.server.dispatch_ui_action", return_value=(0, {"ok": True})) as dispatch:
+                    status, body = self.request([host], method="POST", path="/portskill/actions", origin="http://" + host)
                     self.assertEqual(status, 200, body)
                     dispatch.assert_called_once_with({"action": "test"})
 
@@ -84,7 +84,7 @@ class HttpHostValidationTests(unittest.TestCase):
     def test_tailscale_requires_opt_in_and_exact_self_dns_name(self) -> None:
         own = "devbox.example-tailnet.ts.net"
         status = {"Self": {"DNSName": own + "."}, "Peer": {"one": {"DNSName": "peer.example-tailnet.ts.net."}}}
-        with patch("port_registry_app.server.probe_tailscale_status", return_value=status) as probe:
+        with patch("portskill.server.probe_tailscale_status", return_value=status) as probe:
             self.assertEqual(self.request([own])[0], 403)
             probe.assert_not_called()
             self.config.registry_path.write_text(json.dumps({"settings": {"serve_portskill_on_tailscale": True}}))
@@ -98,7 +98,7 @@ class HttpHostValidationTests(unittest.TestCase):
 
     def test_tailscale_probe_failure_does_not_allow_unknown_hosts(self) -> None:
         self.config.registry_path.write_text(json.dumps({"settings": {"serve_portskill_on_tailscale": True}}))
-        with patch("port_registry_app.server.probe_tailscale_status", side_effect=OSError("unavailable")):
+        with patch("portskill.server.probe_tailscale_status", side_effect=OSError("unavailable")):
             self.assertEqual(self.request(["devbox.example-tailnet.ts.net"])[0], 403)
             self.assertEqual(self.request(["127.0.0.1"])[0], 200)
 

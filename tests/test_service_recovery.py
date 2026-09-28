@@ -7,7 +7,7 @@ from tests.helpers import IsolatedConfig, free_loopback_port, parse_cli_json
 
 class ServiceRecoveryTests(unittest.TestCase):
     def test_released_start_offers_working_recovery(self):
-        from port_registry_app.server import dispatch_ui_action
+        from portskill.server import dispatch_ui_action
         with IsolatedConfig() as iso:
             project = (iso.root / 'service').resolve()
             project.mkdir()
@@ -32,7 +32,7 @@ class ServiceRecoveryTests(unittest.TestCase):
                 iso.run_cli(['stop', '--project', str(project), '--range-id', rid])
 
     def test_reclaim_refuses_occupied_ports_without_mutating(self):
-        from port_registry_app.server import dispatch_ui_action
+        from portskill.server import dispatch_ui_action
         with IsolatedConfig() as iso, socket.socket() as listener:
             project = (iso.root / 'service').resolve()
             project.mkdir()
@@ -50,8 +50,8 @@ class ServiceRecoveryTests(unittest.TestCase):
             self.assertEqual(iso.registry_path.read_text(), before)
 
     def test_sharing_https_does_not_leak_into_local_fallback_link(self):
-        from port_registry_app.cli import resolve_range_url
-        from port_registry_app.server import build_view
+        from portskill.cli import resolve_range_url
+        from portskill.server import build_view
         item = {'id': 'roster', 'start': 20003, 'end': 20003,
                 'state': 'active', 'scheme': 'https',
                 'tailnet': {'mode': 'serve'}}
@@ -68,8 +68,8 @@ class ServiceRecoveryTests(unittest.TestCase):
                          'https://127.0.0.1:20003/')
 
     def test_active_tracks_listener_without_changing_saved_allocation(self):
-        from port_registry_app.cli import enrich_range_for_status
-        from port_registry_app.server import build_view
+        from portskill.cli import enrich_range_for_status
+        from portskill.server import build_view
         with IsolatedConfig() as iso, socket.socket() as listener:
             listener.bind(('127.0.0.1', 0))
             port = listener.getsockname()[1]

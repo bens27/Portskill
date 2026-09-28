@@ -3,7 +3,7 @@ import Foundation
 import Darwin
 
 /// Portskill native shell: Dock icon (regular activation) + menubar status item.
-/// Spawns `python3 -m port_registry_app --no-open` and keeps it alive as a child.
+/// Spawns `python3 -m portskill --no-open` and keeps it alive as a child.
 /// Built into macos/Portskill.app or standalone PortskillMenu.app.
 @main
 enum PortskillNativeMain {
@@ -49,13 +49,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var serverPipe: Pipe?
     private var stopping = false
 
-    /// Prefer sticky ~/.config/port-registry/listen.json; fall back to historical :8765.
+    /// Prefer sticky ~/.config/portskill/listen.json; fall back to historical :8765.
     private var uiURL: URL {
         resolvedListenURL() ?? URL(string: "http://127.0.0.1:8765/")!
     }
 
     private func resolvedListenURL() -> URL? {
-        let path = NSString(string: "~/.config/port-registry/listen.json").expandingTildeInPath
+        let path = NSString(string: "~/.config/portskill/listen.json").expandingTildeInPath
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
@@ -110,9 +110,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let exe = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
         let macos = exe.deletingLastPathComponent() // MacOS
         let contents = macos.deletingLastPathComponent() // Contents
-        // Bundled layout: Contents/Resources/python/port_registry_app
+        // Bundled layout: Contents/Resources/python/portskill
         let embedded = contents.appendingPathComponent("Resources/python")
-        let embeddedModule = embedded.appendingPathComponent("port_registry_app")
+        let embeddedModule = embedded.appendingPathComponent("portskill")
         var isDir: ObjCBool = false
         if FileManager.default.fileExists(atPath: embeddedModule.path, isDirectory: &isDir), isDir.boolValue {
             return embedded.path
@@ -225,7 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let root = packageRoot()
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: py)
-        proc.arguments = ["-m", "port_registry_app", "--no-open"]
+        proc.arguments = ["-m", "portskill", "--no-open"]
         var env = ProcessInfo.processInfo.environment
         let existing = env["PYTHONPATH"] ?? ""
         env["PYTHONPATH"] = existing.isEmpty ? root : "\(root):\(existing)"
@@ -299,7 +299,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let urlText = uiURL.absoluteString
         alert.informativeText = ok
             ? "UI+MCP server is responding at \(urlText)"
-            : "Server not reachable at \(urlText) (see ~/.config/port-registry/listen.json)"
+            : "Server not reachable at \(urlText) (see ~/.config/portskill/listen.json)"
         alert.runModal()
     }
 
@@ -330,7 +330,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopRecordedServer() {
         // A LaunchAgent-owned server is not our child. Target the recorded PID,
         // and verify its command before signalling it; never pkill all Python/MCP sessions.
-        let path = NSString(string: "~/.config/port-registry/listen.json").expandingTildeInPath
+        let path = NSString(string: "~/.config/portskill/listen.json").expandingTildeInPath
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let pid = obj["pid"] as? Int32, pid > 1 else { return }
@@ -346,7 +346,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let command = String(data: data, encoding: .utf8) ?? ""
             let fields = command.split(maxSplits: 1, whereSeparator: { $0.isWhitespace })
             guard fields.count == 2, fields[0] == String(getuid()),
-                  fields[1].contains("-m port_registry_app"),
+                  fields[1].contains("-m portskill"),
                   !fields[1].contains("--mcp-stdio") else { return }
             kill(pid, SIGTERM)
         } catch { NSLog("Portskill: could not inspect server: %@", "\(error)") }

@@ -5,7 +5,42 @@ application's UI, MCP server, and CLI.
 
 ## Unreleased
 
-No additional changes queued.
+### Added
+
+- `portskill-cli handoff fetch` (and the `handoff-fetch` dashboard action)
+  downloads a pinned release of the standalone Session Handoff kit into the
+  Portskill config directory, so wheel and Mac installs no longer need a
+  source checkout. Kit resolution: `--handoff-kit` override, then the fetched kit.
+- `settings.default_tailnet` (`none` or `serve`) and a "Start also Tailscale Serve"
+  dashboard toggle: `portskill` start/restart then registers, Serves and runs by default.
+- Services receive `PORT` (the range start), and `$PORT` / `${PORT}` in a start
+  command is replaced with it.
+
+### Changed
+
+- Session Handoff is no longer vendored. The kit lives in
+  `bens27/session-handoff-kit` (v0.8.0): hashed workspace identity, validated
+  resume references, recoverable claims, richer checkpoint contract, compaction
+  re-arm, atomic ledger writes, thresholds capped to the window, and
+  result-preserving hook output.
+- Everything is named Portskill. The Python package is `portskill` (was
+  `port_registry_app`), the only console scripts are `portskill` and
+  `portskill-cli`, the skill ID is `portskill`, config lives in
+  `~/.config/portskill/`, project files in `.portskill/` and `.portskill.json`,
+  env vars are `PORTSKILL_*` (`PORTSKILL_REGISTRY_PATH` replaces
+  `PORT_REGISTRY_PATH`), and the dashboard action route is `/portskill/actions`.
+  Existing installs migrate automatically: the old config directory and project
+  folders are moved and left as symlinks, stored `.port-registry/` script paths are
+  rewritten, `PORT_REGISTRY_*` env vars are still read, and `install-skill.sh`
+  removes old `port-registry` skill copies.
+- `portskill` MCP tool, server and skill descriptions name the actions that should
+  trigger them (register a port, host, serve, run or expose a project).
+
+### Fixed
+
+- Stopping a range whose Tailscale Serve was never configured (login skipped) no
+  longer tries to tear Serve down; a missing Tailscale binary is a clean
+  `tailscale_missing` error instead of a traceback.
 
 ## [0.1.1] — release prepared
 

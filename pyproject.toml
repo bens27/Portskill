@@ -21,14 +21,11 @@ Issues = "https://github.com/bens27/Portskill/issues"
 Changelog = "https://github.com/bens27/Portskill/blob/main/CHANGELOG.md"
 
 [project.scripts]
-portskill = "port_registry_app.server:main"
-portskill-cli = "port_registry_app.cli:main"
-# Legacy aliases (same entrypoints)
-port-registry = "port_registry_app.cli:main"
-port-registry-app = "port_registry_app.server:main"
+portskill = "portskill.server:main"
+portskill-cli = "portskill.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["port_registry_app*"]
+include = ["portskill*"]
 
 [tool.setuptools.package-data]
-port_registry_app = ["static/**/*"]
+portskill = ["static/**/*"]

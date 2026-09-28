@@ -1,13 +1,13 @@
 # Portskill administration
 
-Commands below follow `portskill-cli` or `python3 -m port_registry_app.cli`.
+Commands below follow `portskill-cli` or `python3 -m portskill.cli`.
 Use the command's `--help` for additional flags.
 
 ## MCP connection and tool availability
 
 HTTP MCP uses `POST /mcp` for JSON-RPC and `GET /mcp` for discovery on the UI's
-listener. Read the actual endpoint from `~/.config/port-registry/listen.json`.
-Stdio runs with `python3 -m port_registry_app --mcp-stdio`.
+listener. Read the actual endpoint from `~/.config/portskill/listen.json`.
+Stdio runs with `python3 -m portskill --mcp-stdio`.
 
 `settings set --mcp-tools-profile full|lean` changes tool discovery:
 
@@ -27,6 +27,7 @@ internal primitive, disabled in lean. Settings are stored in `mcp_tools` and
 | Set a range's default | `set-default --range-id ID --state on|off --project PATH` |
 | Start default services | `apply-defaults --project PATH` |
 | Keep reservations on stop | `settings set --stop-also-release off` |
+| Make start also Tailscale Serve by default | `settings set --default-tailnet serve` |
 | Export an environment | `environment export --name NAME --out PATH --project PATH` |
 | Import an environment | `environment import --file PATH` |
 | Save live ranges as a preset | `preset save --name NAME --project PATH` |
@@ -54,7 +55,7 @@ recorded listener that is unreachable, an unauthorized non-loopback bind, or an
 invalid enabled/explicitly configured Handoff kit. Placeholder hooks and absent
 Tailscale are informational, so doctor success alone does not prove a service ran.
 
-Tailscale binary resolution: `PORT_REGISTRY_TAILSCALE_BIN`, then `tailscale` on
+Tailscale binary resolution: `PORTSKILL_TAILSCALE_BIN`, then `tailscale` on
 PATH, then the Mac app bundle. Remote-machine management is not implemented.
 
 The optional HTTP passkey gate is controlled by `http-auth gate on|off`.
@@ -70,8 +71,8 @@ Session Handoff is disabled by default. Enable when requested with
 the ledger and direct/chained `handoff_*` calls are rejected. Per-tool switches
 and lean-profile restrictions still apply after enabling.
 
-A wheel or Mac app needs a source kit configured with
-`settings set --handoff-kit /absolute/path/to/session-handoff-kit`;
+Install the separate kit with `handoff fetch`, or point at a checkout with
+`settings set --handoff-kit /absolute/path/to/session-handoff-kit`.
 `PORTSKILL_HANDOFF_KIT` overrides that path. An enabled or explicitly configured
 missing kit fails doctor. Toggling Handoff does not install or uninstall external
 agent hooks. Use the kit's matching surface skill for the actual handoff workflow.

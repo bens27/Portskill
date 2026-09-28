@@ -15,7 +15,7 @@ def _has_open_attr(tag: str) -> bool:
 
 class CollapsedMarkupTests(unittest.TestCase):
     def _render_with_project(self) -> str:
-        from port_registry_app.server import build_view, render_page
+        from portskill.server import build_view, render_page
 
         raw = {
             "version": 1,
@@ -97,7 +97,7 @@ class CollapsedMarkupTests(unittest.TestCase):
             self.assertNotIn("pr-mcp-system-details", tag)
 
     def test_serve_url_details_start_collapsed_with_chevron_hint(self) -> None:
-        from port_registry_app.server import portskill_serve_chip_html
+        from portskill.server import portskill_serve_chip_html
 
         html = portskill_serve_chip_html(
             {
@@ -177,7 +177,7 @@ class CollapsedMarkupTests(unittest.TestCase):
         self.assertIn('id="pr-mcp-connect-http"', html)
 
     def test_collapsed_project_summary_shows_counts(self) -> None:
-        from port_registry_app.server import build_view, render_page
+        from portskill.server import build_view, render_page
 
         from tests.helpers import IsolatedConfig
 
@@ -215,7 +215,7 @@ class CollapsedMarkupTests(unittest.TestCase):
 
         # Keep this markup fixture independent of listeners on the host.
         with IsolatedConfig() as iso, patch(
-            "port_registry_app.server.observed_range_status",
+            "portskill.server.observed_range_status",
             side_effect=lambda registry, item: {
                 "state": item["state"], "allocation_state": item["state"],
                 "reachable": item["state"] == "active",
@@ -237,7 +237,7 @@ class CollapsedMarkupTests(unittest.TestCase):
         self.assertIn("data-pr-project-counts", html)
 
     def test_service_rows_are_full_bleed_and_dense(self) -> None:
-        from port_registry_app.server import console_css
+        from portskill.server import console_css
 
         css = console_css()
         self.assertIn(".pr-services-body{padding:0", css)

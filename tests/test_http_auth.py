@@ -14,7 +14,7 @@ from tests.helpers import IsolatedConfig, free_loopback_port, parse_cli_json
 
 
 def _start_handler(host: str = "127.0.0.1") -> tuple[ThreadingHTTPServer, int]:
-    from port_registry_app.server import Handler
+    from portskill.server import Handler
 
     port = free_loopback_port()
     httpd = ThreadingHTTPServer((host, port), Handler)
@@ -63,7 +63,7 @@ def _http_json(
 
 class HttpAuthTokenTests(unittest.TestCase):
     def test_mint_show_regenerate_and_doctor_hides_secret(self) -> None:
-        from port_registry_app.cli import (
+        from portskill.cli import (
             ensure_http_auth_token,
             http_auth_public_status,
             http_auth_token,
@@ -121,7 +121,7 @@ class HttpAuthTokenTests(unittest.TestCase):
 
 class HttpAuthGateTests(unittest.TestCase):
     def test_personal_listen_ui_and_apis_open_without_bearer(self) -> None:
-        from port_registry_app.cli import ensure_http_auth_token
+        from portskill.cli import ensure_http_auth_token
 
         with IsolatedConfig() as iso:
             iso.write_registry({
@@ -182,7 +182,7 @@ class HttpAuthGateTests(unittest.TestCase):
                 httpd.server_close()
 
     def test_stdio_initialize_does_not_need_http_token(self) -> None:
-        from port_registry_app.mcp import mcp_handle
+        from portskill.mcp import mcp_handle
 
         with IsolatedConfig() as iso:
             iso.write_registry()
@@ -203,7 +203,7 @@ class HttpAuthGateTests(unittest.TestCase):
 
 class PasskeyGateTests(unittest.TestCase):
     def test_gate_default_off_and_cli_toggle(self) -> None:
-        from port_registry_app.webauthn import http_passkey_gate_enabled
+        from portskill.webauthn import http_passkey_gate_enabled
 
         with IsolatedConfig() as iso:
             self.assertFalse(http_passkey_gate_enabled())
@@ -221,7 +221,7 @@ class PasskeyGateTests(unittest.TestCase):
             self.assertFalse(http_passkey_gate_enabled())
 
     def test_gate_on_fails_closed_without_session_or_bearer(self) -> None:
-        from port_registry_app.webauthn import set_http_passkey_gate
+        from portskill.webauthn import set_http_passkey_gate
 
         with IsolatedConfig() as iso:
             iso.write_registry({
@@ -260,7 +260,7 @@ class PasskeyGateTests(unittest.TestCase):
                 self.assertEqual(code, 401)
 
                 code, payload = _http_json(
-                    f"http://127.0.0.1:{port}/port-registry/actions",
+                    f"http://127.0.0.1:{port}/portskill/actions",
                     method="POST",
                     body={"action": "status"},
                 )
@@ -282,8 +282,8 @@ class PasskeyGateTests(unittest.TestCase):
                 httpd.server_close()
 
     def test_gate_on_accepts_bearer_or_session(self) -> None:
-        from port_registry_app.cli import ensure_http_auth_token
-        from port_registry_app.webauthn import (
+        from portskill.cli import ensure_http_auth_token
+        from portskill.webauthn import (
             HTTP_SESSION_COOKIE_NAME,
             mint_http_session,
             set_http_passkey_gate,
@@ -340,8 +340,8 @@ class PasskeyGateTests(unittest.TestCase):
     def test_webauthn_register_and_assert_sets_session_cookie(self) -> None:
         import hashlib
 
-        from port_registry_app import cbor_lite, p256
-        from port_registry_app.webauthn import (
+        from portskill import cbor_lite, p256
+        from portskill.webauthn import (
             HTTP_SESSION_COOKIE_NAME,
             b64url_encode,
             encode_der_signature,
@@ -466,7 +466,7 @@ class MutatingHttpGuardTests(unittest.TestCase):
     def test_helper_origin_and_content_type(self) -> None:
         from email.message import Message
 
-        from port_registry_app.server import (
+        from portskill.server import (
             json_content_type_ok,
             looks_like_cross_site_browser,
             mutating_request_refusal,
@@ -534,7 +534,7 @@ class MutatingHttpGuardTests(unittest.TestCase):
             iso.write_registry()
             httpd, port = _start_handler()
             host = f"127.0.0.1:{port}"
-            url = f"http://{host}/port-registry/actions"
+            url = f"http://{host}/portskill/actions"
             try:
                 code, payload = _http_json(
                     url,
@@ -645,8 +645,8 @@ class PasskeyBootstrapTests(unittest.TestCase):
     def test_non_loopback_bootstrap_refused(self) -> None:
         from unittest.mock import patch
 
-        from port_registry_app.server import Handler
-        from port_registry_app.webauthn import http_passkey_gate_enabled
+        from portskill.server import Handler
+        from portskill.webauthn import http_passkey_gate_enabled
 
         with IsolatedConfig() as iso:
             iso.write_registry()
@@ -676,7 +676,7 @@ class PasskeyBootstrapTests(unittest.TestCase):
 
 class FunnelListenRefuseTests(unittest.TestCase):
     def test_funnel_of_listen_port_refused_serve_allowed(self) -> None:
-        from port_registry_app import cli
+        from portskill import cli
 
         with IsolatedConfig() as iso:
             iso.write_listen({
@@ -696,7 +696,7 @@ class FunnelListenRefuseTests(unittest.TestCase):
             self.assertEqual(payload.get("reason"), "funnel_listen_refused")
             self.assertIn("listen", (payload.get("message") or "").lower())
 
-            with patch("port_registry_app.cli.subprocess.run") as run:
+            with patch("portskill.cli.subprocess.run") as run:
                 run.return_value = type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
                 cli.run_tailnet("serve", 20050, off=False)
                 self.assertTrue(run.called)

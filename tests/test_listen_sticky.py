@@ -15,8 +15,8 @@ class ListenStickyTests(unittest.TestCase):
         return HOME_LISTEN.read_text(encoding="utf-8")
 
     def test_listen_path_follows_registry_dir(self) -> None:
-        from port_registry_app.cli import listen_path
-        from port_registry_app.server import listen_path as server_listen_path
+        from portskill.cli import listen_path
+        from portskill.server import listen_path as server_listen_path
 
         with IsolatedConfig() as iso:
             self.assertEqual(listen_path(), iso.listen_path)
@@ -25,7 +25,7 @@ class ListenStickyTests(unittest.TestCase):
             self.assertTrue(str(listen_path()).startswith(str(iso.root)))
 
     def test_write_read_listen_stays_in_temp(self) -> None:
-        from port_registry_app.server import read_listen_file, write_listen_file
+        from portskill.server import read_listen_file, write_listen_file
 
         before = self._home_snapshot()
         with IsolatedConfig() as iso:
@@ -45,7 +45,7 @@ class ListenStickyTests(unittest.TestCase):
             self.assertNotEqual(iso.listen_path.resolve(), HOME_LISTEN.resolve())
 
     def test_select_listen_port_prefers_sticky(self) -> None:
-        from port_registry_app.server import select_listen_port, write_listen_file
+        from portskill.server import select_listen_port, write_listen_file
 
         before = self._home_snapshot()
         with IsolatedConfig() as iso:
@@ -69,7 +69,7 @@ class ListenStickyTests(unittest.TestCase):
             self.assertTrue(iso.listen_path.is_file())
 
     def test_select_listen_port_uses_portskill_claim_when_no_sticky(self) -> None:
-        from port_registry_app.server import PORTSKILL_NOTE, _portskill_project_path, select_listen_port
+        from portskill.server import PORTSKILL_NOTE, _portskill_project_path, select_listen_port
 
         before = self._home_snapshot()
         with IsolatedConfig() as iso:
@@ -98,7 +98,7 @@ class ListenStickyTests(unittest.TestCase):
             self.assertEqual(self._home_snapshot(), before)
 
     def test_busy_sticky_falls_through_to_claim_without_rewriting_home(self) -> None:
-        from port_registry_app.server import (
+        from portskill.server import (
             PORTSKILL_NOTE,
             _portskill_project_path,
             select_listen_port,

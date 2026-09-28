@@ -22,10 +22,13 @@ venv/
 .env.*
 !.env.example
 
-# Local Portskill / registry runtime (never publish — live store is ~/.config/port-registry/)
+# Local Portskill / registry runtime (never publish — live store is ~/.config/portskill/)
+.portskill/
+.portskill.json
+.portskill*
+# Pre-rename names (existing projects; migrated to .portskill on load)
 .port-registry/
 .port-registry.json
-.port-registry*
 .portskill-collab/
 *.log
 # Accidental copies of live listen/registry into the package tree
@@ -59,3 +62,8 @@ macos/PortskillMenu/.build/
 # Agent session state is not distribution source
 .handoffs/
 **/.claude/RESUME.md
+.mcp.json
+.agentsroom/handoff-transcript-*.txt
+.agentsroom/handoff-summary-*.md
+.agentsroom/fork-context-*.txt
+.cursor/mcp.json

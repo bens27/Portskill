@@ -1,28 +1,28 @@
 ---
-name: port-registry
-description: Manage shared local development ports and project services with Portskill. Use to prevent port collisions, start or stop services, inspect the registry, connect its UI or MCP, or configure Tailscale exposure.
+name: portskill
+description: Manage shared local development ports and project services with Portskill. Use when the user asks to register a port, reserve or claim a port, register, host, serve, run or expose a project on Portskill or over Tailscale, to prevent port collisions, start or stop services, inspect the registry, connect its UI or MCP, or configure Tailscale exposure.
 ---
 
 # Portskill
 
-The skill ID remains `port-registry` for install compatibility. Use the connected
+Use the connected
 `portskill` MCP tool for lifecycle operations, or the CLI below.
 
 ## Entrypoints
 
 ```bash
-python3 -m port_registry_app              # HTML UI + HTTP MCP
-python3 -m port_registry_app --mcp-stdio  # stdio MCP
-python3 -m port_registry_app.cli <subcommand> [flags]
+python3 -m portskill              # HTML UI + HTTP MCP
+python3 -m portskill --mcp-stdio  # stdio MCP
+python3 -m portskill.cli <subcommand> [flags]
 ```
 
 Installed commands are `portskill` (app) and `portskill-cli` (CLI). In a source
-checkout, run from its root; an installed sidecar also provides `port_registry.py`
+checkout, run from its root; an installed sidecar also provides `portskill_cli.py`
 and `app.py` wrappers at its root. Use absolute wrapper paths when working in
 another project, and pass that project's path explicitly.
 
 The HTML UI and HTTP MCP share the same local listener. Open the printed URL or
-read `ui_url` / `mcp_url` from `~/.config/port-registry/listen.json`; the port is
+read `ui_url` / `mcp_url` from `~/.config/portskill/listen.json`; the port is
 allocated and reused, so do not assume `8765`.
 
 ## Service workflow
@@ -35,11 +35,11 @@ allocated and reused, so do not assume `8765`.
 3. For individual operations, `allocate --count N --project PATH` returns a
    range `id`; pass it as `--range-id ID` to `start`, `stop`, or `release`.
    Reserve ports before launching services to avoid collisions between agents.
-4. Before starting, inspect the configured command or `.port-registry/start.sh`.
+4. Before starting, inspect the configured command or `.portskill/start.sh`.
    Allocation scaffolds hooks, but the start placeholder refuses to launch.
    Preserve customized hooks and configure the service to use its assigned port.
 5. Verify the service endpoint and registry status before reporting it running.
-   Start/stop logs are in `.port-registry/start.log` and `stop.log`.
+   Start/stop logs are in `.portskill/start.log` and `stop.log`.
 
 `stop` terminates the tracked process group and removes Tailnet mappings. It also
 releases the range by default (`settings.stop_also_release`); pass
@@ -69,7 +69,7 @@ of that port defaults off. Stdio MCP does not use HTTP authentication.
 
 ## State and conditional guidance
 
-`~/.config/port-registry/registry.json` is authoritative; `.port-registry.json`
+`~/.config/portskill/registry.json` is authoritative; `.portskill.json`
 is an optional project mirror. Use the tools to update state. Report corrupt
 registry/listen files without overwriting them.
 

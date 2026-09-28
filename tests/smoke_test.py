@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-LISTEN = pathlib.Path.home() / ".config" / "port-registry" / "listen.json"
+LISTEN = pathlib.Path.home() / ".config" / "portskill" / "listen.json"
 
 
 def fail(msg: str, code: int = 1) -> None:
@@ -34,22 +34,22 @@ def _pyproject_version() -> str:
 def main() -> int:
     # 1) import + version consistency (pyproject ↔ package ↔ MCP SERVER_VERSION)
     try:
-        import port_registry_app  # noqa: F401
-        from port_registry_app import __version__
-        from port_registry_app.mcp import SERVER_VERSION
+        import portskill  # noqa: F401
+        from portskill import __version__
+        from portskill.mcp import SERVER_VERSION
     except Exception as exc:  # pragma: no cover
-        fail(f"import port_registry_app: {exc}")
+        fail(f"import portskill: {exc}")
     pkg_ver = __version__
     py_ver = _pyproject_version()
     if pkg_ver != py_ver:
         fail(f"version mismatch: __version__={pkg_ver!r} pyproject={py_ver!r}")
     if SERVER_VERSION != pkg_ver:
         fail(f"version mismatch: SERVER_VERSION={SERVER_VERSION!r} __version__={pkg_ver!r}")
-    ok(f"import port_registry_app version={pkg_ver} ({getattr(port_registry_app, '__file__', '?')})")
+    ok(f"import portskill version={pkg_ver} ({getattr(portskill, '__file__', '?')})")
 
     # 1b) Friend UI must not advertise unfinished Workspaces / Remotes / Presets.
     try:
-        from port_registry_app.server import (
+        from portskill.server import (
             build_view,
             env_rail_html,
             environment_rail_html,
@@ -80,7 +80,7 @@ def main() -> int:
         fail("System tools disclosure missing from rendered UI")
     mcp_html = html
     try:
-        from port_registry_app.server import handoff_panel_html, mcp_tools_panel_html
+        from portskill.server import handoff_panel_html, mcp_tools_panel_html
 
         mcp_html = mcp_tools_panel_html(view)
         handoff_html = handoff_panel_html(view)
@@ -206,8 +206,10 @@ def main() -> int:
                 if "token" in http_auth:
                     fail("doctor http_auth leaked token field")
                 hk = payload.get("handoff_kit")
-                if not isinstance(hk, dict) or not hk.get("present"):
-                    fail(f"doctor handoff_kit not present: {hk!r}")
+                if not isinstance(hk, dict) or "present" not in hk:
+                    fail(f"doctor handoff_kit missing: {hk!r}")
+                if hk.get("present"):
+                    fail(f"doctor expected no bundled kit: {hk!r}")
             ok(f"cli {cmd} status={payload.get('status')!r}")
 
     # Live server probing is explicit so routine tests do not depend on user state.

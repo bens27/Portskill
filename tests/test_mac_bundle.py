@@ -44,7 +44,7 @@ class MacBundleHelperTests(unittest.TestCase):
         """A release checkout must build without ignored local app artifacts."""
         with tempfile.TemporaryDirectory(prefix="portskill-clean-build-") as tmp:
             checkout = pathlib.Path(tmp) / "checkout"
-            for directory in ("scripts", "macos", "port_registry_app"):
+            for directory in ("scripts", "macos", "portskill"):
                 shutil.copytree(
                     ROOT / directory,
                     checkout / directory,
@@ -73,7 +73,7 @@ class MacBundleHelperTests(unittest.TestCase):
                 contents = checkout / location / "Contents"
                 with (contents / "Info.plist").open("rb") as stream:
                     self.assertEqual(plistlib.load(stream)["CFBundleExecutable"], "Portskill")
-                self.assertTrue((contents / "Resources/python/port_registry_app/__main__.py").is_file())
+                self.assertTrue((contents / "Resources/python/portskill/__main__.py").is_file())
                 launcher = contents / "MacOS/Portskill"
                 self.assertTrue(os.access(launcher, os.X_OK))
                 result = subprocess.run(

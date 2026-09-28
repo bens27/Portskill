@@ -4,12 +4,12 @@ from __future__ import annotations
 import unittest
 
 from tests.helpers import IsolatedConfig
-from port_registry_app.handoff import HANDOFF_TOOL_NAMES
+from portskill.handoff import HANDOFF_TOOL_NAMES
 
 
 class McpToolToggleTests(unittest.TestCase):
     def test_tools_list_omits_disabled(self) -> None:
-        from port_registry_app.mcp import TOOL_DEFS, enabled_tool_defs, mcp_handle
+        from portskill.mcp import TOOL_DEFS, enabled_tool_defs, mcp_handle
 
         with IsolatedConfig() as iso:
             iso.write_registry({"settings": {"mcp_tools": {"allocate": False, "status": True}}})
@@ -26,7 +26,7 @@ class McpToolToggleTests(unittest.TestCase):
             self.assertIn("status", rpc_names)
 
     def test_tools_call_disabled_rejected(self) -> None:
-        from port_registry_app.mcp import mcp_handle
+        from portskill.mcp import mcp_handle
 
         with IsolatedConfig() as iso:
             iso.write_registry({"settings": {"mcp_tools": {"allocate": False}}})
@@ -42,7 +42,7 @@ class McpToolToggleTests(unittest.TestCase):
         self.assertIn("allocate", resp["error"]["message"])
 
     def test_missing_toggle_defaults_enabled(self) -> None:
-        from port_registry_app.mcp import enabled_tool_defs, mcp_handle
+        from portskill.mcp import enabled_tool_defs, mcp_handle
 
         with IsolatedConfig() as iso:
             iso.write_registry({"settings": {"mcp_tools": {}}})
@@ -88,8 +88,8 @@ class McpToolsProfileTests(unittest.TestCase):
         return parse_cli_json(proc)
 
     def test_default_install_stays_full(self) -> None:
-        from port_registry_app.cli import default_settings, normalize_settings
-        from port_registry_app.mcp import enabled_tool_defs, TOOL_DEFS
+        from portskill.cli import default_settings, normalize_settings
+        from portskill.mcp import enabled_tool_defs, TOOL_DEFS
 
         settings = default_settings()
         self.assertEqual(settings.get("mcp_tools_profile"), "full")
@@ -103,7 +103,7 @@ class McpToolsProfileTests(unittest.TestCase):
             self.assertEqual(names & all_system, all_system - set(HANDOFF_TOOL_NAMES))
 
     def test_apply_lean_writes_map_and_hides_disabled(self) -> None:
-        from port_registry_app.mcp import LEAN_MCP_TOOLS_ENABLED, enabled_tool_defs, mcp_handle
+        from portskill.mcp import LEAN_MCP_TOOLS_ENABLED, enabled_tool_defs, mcp_handle
 
         with IsolatedConfig() as iso:
             iso.write_registry({"settings": {"mcp_tools": {}}})
@@ -132,7 +132,7 @@ class McpToolsProfileTests(unittest.TestCase):
             self.assertNotIn("activate", rpc_names)
 
     def test_lean_disabled_tools_call_rejected(self) -> None:
-        from port_registry_app.mcp import mcp_handle
+        from portskill.mcp import mcp_handle
 
         with IsolatedConfig() as iso:
             iso.write_registry({"settings": {"mcp_tools": {}}})
@@ -167,7 +167,7 @@ class McpToolsProfileTests(unittest.TestCase):
             self.assertIn("result", ok)
 
     def test_apply_full_restores_core_tools_without_enabling_beta(self) -> None:
-        from port_registry_app.mcp import TOOL_DEFS, enabled_tool_defs, mcp_handle
+        from portskill.mcp import TOOL_DEFS, enabled_tool_defs, mcp_handle
 
         with IsolatedConfig() as iso:
             iso.write_registry({"settings": {"mcp_tools": {}}})
@@ -190,7 +190,7 @@ class McpToolsProfileTests(unittest.TestCase):
             self.assertEqual(resp["error"]["code"], -32001)
 
     def test_settings_set_mcp_applies_lean_profile(self) -> None:
-        from port_registry_app.mcp import enabled_tool_defs, mcp_handle
+        from portskill.mcp import enabled_tool_defs, mcp_handle
 
         with IsolatedConfig() as iso:
             iso.write_registry({"settings": {"mcp_tools": {}}})

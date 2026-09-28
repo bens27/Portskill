@@ -20,8 +20,8 @@ def _pyproject_version() -> str:
 
 class VersionIdentityTests(unittest.TestCase):
     def test_pyproject_matches_package_and_mcp(self) -> None:
-        from port_registry_app import __version__
-        from port_registry_app.mcp import SERVER_NAME, SERVER_VERSION
+        from portskill import __version__
+        from portskill.mcp import SERVER_NAME, SERVER_VERSION
 
         py_ver = _pyproject_version()
         self.assertEqual(__version__, py_ver)
@@ -29,7 +29,7 @@ class VersionIdentityTests(unittest.TestCase):
         self.assertEqual(SERVER_NAME, "portskill")
 
     def test_doctor_version_matches_package(self) -> None:
-        from port_registry_app import __version__
+        from portskill import __version__
 
         with IsolatedConfig() as iso:
             proc = iso.run_cli(["doctor"])

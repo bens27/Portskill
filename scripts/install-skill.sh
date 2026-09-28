@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # OPTIONAL agent skill sidecar installer — NOT the primary product.
 # Primary product: run the Portskill:
-#   python3 -m port_registry_app
+#   python3 -m portskill
 #   portskill
 #   open macos/Portskill.app
 #
@@ -12,17 +12,33 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-CANONICAL_DIR="${PORT_REGISTRY_SKILL_DIR:-${HOME}/.agents/skills/port-registry}"
-REGISTRY_DIR="${HOME}/.config/port-registry"
+CANONICAL_DIR="${PORTSKILL_SKILL_DIR:-${HOME}/.agents/skills/portskill}"
+REGISTRY_DIR="${HOME}/.config/portskill"
 REGISTRY_FILE="${REGISTRY_DIR}/registry.json"
-CLAUDE_LINK="${HOME}/.claude/skills/port-registry"
-CODEX_DIR="${HOME}/.codex/skills/port-registry"
+CLAUDE_LINK="${HOME}/.claude/skills/portskill"
+CODEX_DIR="${HOME}/.codex/skills/portskill"
 
-echo "port-registry skill sidecar install (optional)"
+echo "portskill skill sidecar install (optional)"
 echo "  package:   ${PACKAGE_DIR}"
 echo "  canonical: ${CANONICAL_DIR}"
-echo "  tip:       run the app with:  python3 -m port_registry_app"
+echo "  tip:       run the app with:  python3 -m portskill"
 echo "             (from ${PACKAGE_DIR} with PYTHONPATH, or after pip install -e .)"
+
+# Pre-rename installs: move ~/.config/port-registry before creating anything, so the
+# existing registry is kept (symlink left for old absolute paths), and drop old skill
+# copies named port-registry so agents do not see the skill twice.
+LEGACY_REGISTRY_DIR="${HOME}/.config/port-registry"
+if [[ -d "${LEGACY_REGISTRY_DIR}" && ! -L "${LEGACY_REGISTRY_DIR}" && ! -e "${REGISTRY_DIR}" ]]; then
+  mv "${LEGACY_REGISTRY_DIR}" "${REGISTRY_DIR}"
+  ln -s "${REGISTRY_DIR}" "${LEGACY_REGISTRY_DIR}"
+  echo "  migrated:  ${LEGACY_REGISTRY_DIR} -> ${REGISTRY_DIR}"
+fi
+for legacy in "${HOME}/.agents/skills/port-registry" "${HOME}/.claude/skills/port-registry" "${HOME}/.codex/skills/port-registry"; do
+  if [[ -L "${legacy}" ]] || grep -qs '^name: port-registry$' "${legacy}/SKILL.md"; then
+    rm -rf "${legacy}"
+    echo "  removed:   legacy skill ${legacy}"
+  fi
+done
 
 mkdir -p "${CANONICAL_DIR}"
 
@@ -36,16 +52,16 @@ else
 fi
 
 # Thin wrappers + importable package + ui + examples + pyproject
-cp "${PACKAGE_DIR}/port_registry.py" "${CANONICAL_DIR}/port_registry.py"
+cp "${PACKAGE_DIR}/portskill_cli.py" "${CANONICAL_DIR}/portskill_cli.py"
 cp "${PACKAGE_DIR}/serve_ui.py" "${CANONICAL_DIR}/serve_ui.py"
 cp "${PACKAGE_DIR}/app.py" "${CANONICAL_DIR}/app.py"
 cp "${PACKAGE_DIR}/pyproject.toml" "${CANONICAL_DIR}/pyproject.toml"
-chmod +x "${CANONICAL_DIR}/port_registry.py" "${CANONICAL_DIR}/serve_ui.py" "${CANONICAL_DIR}/app.py"
+chmod +x "${CANONICAL_DIR}/portskill_cli.py" "${CANONICAL_DIR}/serve_ui.py" "${CANONICAL_DIR}/app.py"
 
-rm -rf "${CANONICAL_DIR}/port_registry_app"
-cp -R "${PACKAGE_DIR}/port_registry_app" "${CANONICAL_DIR}/port_registry_app"
+rm -rf "${CANONICAL_DIR}/portskill"
+cp -R "${PACKAGE_DIR}/portskill" "${CANONICAL_DIR}/portskill"
 # Drop bytecode from copy
-find "${CANONICAL_DIR}/port_registry_app" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+find "${CANONICAL_DIR}/portskill" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
 rm -rf "${CANONICAL_DIR}/ui"
 cp -R "${PACKAGE_DIR}/ui" "${CANONICAL_DIR}/ui"
@@ -56,9 +72,9 @@ cp -R "${PACKAGE_DIR}/examples" "${CANONICAL_DIR}/examples"
 rm -rf "${CANONICAL_DIR}/macos"
 cp -R "${PACKAGE_DIR}/macos" "${CANONICAL_DIR}/macos"
 
-echo "  updated:   ${CANONICAL_DIR}/{SKILL.md,skill/,port_registry_app/,ui/,app.py,examples/,macos/}"
+echo "  updated:   ${CANONICAL_DIR}/{SKILL.md,skill/,portskill/,ui/,app.py,examples/,macos/}"
 
-# Claude Code: symlink ~/.claude/skills/port-registry → canonical
+# Claude Code: symlink ~/.claude/skills/portskill → canonical
 mkdir -p "$(dirname "${CLAUDE_LINK}")"
 if [[ -L "${CLAUDE_LINK}" ]]; then
   current="$(readlink "${CLAUDE_LINK}")"
@@ -84,13 +100,13 @@ rsync -a --delete \
   "${CANONICAL_DIR}/" "${CODEX_DIR}/" 2>/dev/null || {
   # fallback without rsync
   cp "${CANONICAL_DIR}/SKILL.md" "${CODEX_DIR}/SKILL.md"
-  cp "${CANONICAL_DIR}/port_registry.py" "${CODEX_DIR}/port_registry.py"
+  cp "${CANONICAL_DIR}/portskill_cli.py" "${CODEX_DIR}/portskill_cli.py"
   cp "${CANONICAL_DIR}/serve_ui.py" "${CODEX_DIR}/serve_ui.py"
   cp "${CANONICAL_DIR}/app.py" "${CODEX_DIR}/app.py"
   cp "${CANONICAL_DIR}/pyproject.toml" "${CODEX_DIR}/pyproject.toml"
-  chmod +x "${CODEX_DIR}/port_registry.py" "${CODEX_DIR}/serve_ui.py" "${CODEX_DIR}/app.py"
-  rm -rf "${CODEX_DIR}/port_registry_app" "${CODEX_DIR}/ui" "${CODEX_DIR}/skill" "${CODEX_DIR}/examples" "${CODEX_DIR}/macos"
-  cp -R "${CANONICAL_DIR}/port_registry_app" "${CODEX_DIR}/port_registry_app"
+  chmod +x "${CODEX_DIR}/portskill_cli.py" "${CODEX_DIR}/serve_ui.py" "${CODEX_DIR}/app.py"
+  rm -rf "${CODEX_DIR}/portskill" "${CODEX_DIR}/ui" "${CODEX_DIR}/skill" "${CODEX_DIR}/examples" "${CODEX_DIR}/macos"
+  cp -R "${CANONICAL_DIR}/portskill" "${CODEX_DIR}/portskill"
   cp -R "${CANONICAL_DIR}/ui" "${CODEX_DIR}/ui"
   cp -R "${CANONICAL_DIR}/skill" "${CODEX_DIR}/skill" 2>/dev/null || true
   cp -R "${CANONICAL_DIR}/examples" "${CODEX_DIR}/examples"
@@ -98,10 +114,10 @@ rsync -a --delete \
 }
 echo "  codex:     real copy at ${CODEX_DIR} (synced from canonical)"
 
-if [[ -n "${PORT_REGISTRY_SKILL_DIR:-}" ]]; then
-  echo "  cursor:    PORT_REGISTRY_SKILL_DIR override in use (${PORT_REGISTRY_SKILL_DIR})"
+if [[ -n "${PORTSKILL_SKILL_DIR:-}" ]]; then
+  echo "  cursor:    PORTSKILL_SKILL_DIR override in use (${PORTSKILL_SKILL_DIR})"
 else
-  echo "  cursor:    use canonical ${CANONICAL_DIR} (or set PORT_REGISTRY_SKILL_DIR before install)"
+  echo "  cursor:    use canonical ${CANONICAL_DIR} (or set PORTSKILL_SKILL_DIR before install)"
 fi
 
 mkdir -p "${REGISTRY_DIR}"
@@ -115,9 +131,9 @@ fi
 echo
 echo "Skill sidecar install complete (optional)."
 echo "Run the app:"
-echo "  cd ${PACKAGE_DIR} && PYTHONPATH=. python3 -m port_registry_app"
+echo "  cd ${PACKAGE_DIR} && PYTHONPATH=. python3 -m portskill"
 echo "  # or from canonical:"
-echo "  PYTHONPATH=${CANONICAL_DIR} python3 -m port_registry_app"
+echo "  PYTHONPATH=${CANONICAL_DIR} python3 -m portskill"
 echo "CLI:"
-echo "  PYTHONPATH=${CANONICAL_DIR} python3 -m port_registry_app.cli status"
-echo "  PYTHONPATH=${CANONICAL_DIR} python3 -m port_registry_app.cli doctor"
+echo "  PYTHONPATH=${CANONICAL_DIR} python3 -m portskill.cli status"
+echo "  PYTHONPATH=${CANONICAL_DIR} python3 -m portskill.cli doctor"
