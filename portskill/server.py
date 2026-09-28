@@ -88,7 +88,7 @@ from .webauthn import (
     set_http_passkey_gate,
 )
 
-DEFAULT_REGISTRY_PATH = "~/.config/port-registry/registry.json"
+DEFAULT_REGISTRY_PATH = "~/.config/portskill/registry.json"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765  # historical default only; launch prefers sticky/allocate
 LISTEN_FILENAME = "listen.json"
@@ -123,14 +123,14 @@ _ITERATE_WORKING_SET: dict = {
 
 
 def _config_dir() -> pathlib.Path:
-    return pathlib.Path(os.path.expanduser("~/.config/port-registry"))
+    return pathlib.Path(os.path.expanduser("~/.config/portskill"))
 
 
 def listen_path() -> pathlib.Path:
     """Broadcast file beside registry.json (never wipes registry).
 
-    Honors PORTSKILL_LISTEN_PATH or the directory of PORT_REGISTRY_PATH so
-    tests can use temp dirs without touching ~/.config/port-registry/.
+    Honors PORTSKILL_LISTEN_PATH or the directory of PORTSKILL_REGISTRY_PATH so
+    tests can use temp dirs without touching ~/.config/portskill/.
     """
     return cli_listen_path()
 
@@ -169,7 +169,7 @@ def read_listen_file() -> dict | None:
 
 
 def write_listen_file(payload: dict) -> pathlib.Path:
-    """Atomic write of listen.json under ~/.config/port-registry/."""
+    """Atomic write of listen.json under ~/.config/portskill/."""
     path = listen_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     raw = json.dumps(payload, indent=2, sort_keys=True) + "\n"
@@ -219,7 +219,7 @@ def build_listen_payload(host: str, port: int) -> dict:
         "mcp_url": mcp,
         "mcp_post": f"POST {mcp} (JSON-RPC)",
         "mcp_get_discovery": f"GET {mcp}",
-        "stdio": "python3 -m port_registry_app --mcp-stdio",
+        "stdio": "python3 -m portskill --mcp-stdio",
         "registry_path": str(registry_path()),
         "listen_path": str(path),
         "pid": os.getpid(),
@@ -227,7 +227,7 @@ def build_listen_payload(host: str, port: int) -> dict:
         "setup": {
             "cursor_mcp_stdio_hint": (
                 "Stdio MCP is an available agent install option — "
-                "examples/mcp.stdio.json or python3 -m port_registry_app --mcp-stdio"
+                "examples/mcp.stdio.json or python3 -m portskill --mcp-stdio"
             ),
             "cursor_mcp_http_hint": (
                 "HTTP MCP uses the same local listener as the HTML UI. "
@@ -408,10 +408,10 @@ def select_listen_port(host: str) -> tuple[int, str]:
 
 
 def resolve_explicit_port(args_port: int | None) -> int | None:
-    """CLI --port / PORTSKILL_PORT / PORT_REGISTRY_APP_PORT win when set."""
+    """CLI --port / PORTSKILL_PORT win when set."""
     if args_port is not None:
         return int(args_port)
-    for key in ("PORTSKILL_PORT", "PORT_REGISTRY_APP_PORT"):
+    for key in ("PORTSKILL_PORT",):
         raw = os.environ.get(key)
         if raw is None or str(raw).strip() == "":
             continue
@@ -423,7 +423,7 @@ def resolve_explicit_port(args_port: int | None) -> int | None:
 
 
 def collab_inbox_path() -> pathlib.Path:
-    """Prefer ~/.config/port-registry/collab/inbox.jsonl; else package .portskill-collab/."""
+    """Prefer ~/.config/portskill/collab/inbox.jsonl; else package .portskill-collab/."""
     preferred = _config_dir() / "collab" / "inbox.jsonl"
     try:
         preferred.parent.mkdir(parents=True, exist_ok=True)
@@ -575,7 +575,7 @@ def _static_content_type(name: str) -> str:
 
 
 def serve_static_file(handler: "Handler", rel: str) -> bool:
-    """Serve a file under port_registry_app/static/ only. Returns True if handled."""
+    """Serve a file under portskill/static/ only. Returns True if handled."""
     rel = unquote(rel).lstrip("/")
     if ".." in rel.split("/") or rel.startswith("/"):
         handler._send_json(400, {"ok": False, "message": "bad path"})
@@ -594,7 +594,7 @@ def serve_static_file(handler: "Handler", rel: str) -> bool:
 
 
 def registry_path() -> pathlib.Path:
-    configured = os.environ.get("PORT_REGISTRY_PATH", DEFAULT_REGISTRY_PATH)
+    configured = os.environ.get("PORTSKILL_REGISTRY_PATH", DEFAULT_REGISTRY_PATH)
     return pathlib.Path(configured).expanduser()
 
 
@@ -1597,7 +1597,7 @@ def settings_panel_html(view: dict) -> str:
     cred_n = int(pk.get("count") or 0)
     gate_label = (
         f"Gate {'ON' if pk.get('gate') else 'OFF'} — {cred_n} passkey"
-        f"{'' if cred_n == 1 else 's'} stored under ~/.config/port-registry/"
+        f"{'' if cred_n == 1 else 's'} stored under ~/.config/portskill/"
     )
     cred_items = []
     for cred in pk.get("credentials") or []:
@@ -2245,7 +2245,7 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
 
     listen = _ACTIVE_LISTEN or read_listen_file() or {}
     mcp_url = listen.get("mcp_url") or "/mcp"
-    stdio = listen.get("stdio") or "python3 -m port_registry_app --mcp-stdio"
+    stdio = listen.get("stdio") or "python3 -m portskill --mcp-stdio"
     settings = (view or {}).get("settings") or {}
     prefs = settings.get("mcpTools") if isinstance(settings.get("mcpTools"), dict) else {}
     user_cmds = settings.get("mcpUserCommands") if isinstance(settings.get("mcpUserCommands"), dict) else {}
@@ -2390,7 +2390,7 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         '  "mcpServers": {\n'
         '    "portskill": {\n'
         '      "command": "python3",\n'
-        '      "args": ["-m", "port_registry_app", "--mcp-stdio"]\n'
+        '      "args": ["-m", "portskill", "--mcp-stdio"]\n'
         '    }\n'
         '  }\n'
         '}'
@@ -2573,7 +2573,7 @@ def handoff_panel_html(view: dict | None = None) -> str:
         f"{err_html}"
         f"<h4>Write-a-Handoff skill</h4>"
         f'<p class="pr-mcp-meta" style="margin:0">Download the bundled skill to review, then upload a replacement. '
-        f"The choice persists under <code>~/.config/port-registry/</code> (reload keeps it). "
+        f"The choice persists under <code>~/.config/portskill/</code> (reload keeps it). "
         f"Stdio MCP is unchanged.</p>"
         f'<div class="pr-handoff-row" id="pr-handoff-skill">'
         f'<span class="tag" id="pr-handoff-skill-source">skill: {skill_src}</span>'
@@ -2830,7 +2830,7 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
     return headers;
   }}
   function postAction(payload){{
-    return fetch('/port-registry/actions',{{method:'POST',headers:authHeaders({{'content-type':'application/json'}}),body:JSON.stringify(payload)}})
+    return fetch('/portskill/actions',{{method:'POST',headers:authHeaders({{'content-type':'application/json'}}),body:JSON.stringify(payload)}})
       .then(function(res){{return res.json().then(function(body){{return {{ok:res.ok,body:body,status:res.status}};}});}});
   }}
   function refreshServiceStatus(){{
@@ -2914,7 +2914,7 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
   function handleResult(result, btn){{
     if(result.ok){{
       if(result.body&&result.body.download){{
-        var fname=result.body.filename||'port-registry-workspace.json';
+        var fname=result.body.filename||'portskill-workspace.json';
         var mime=result.body.mime||(/\\.md$/i.test(fname)?'text/markdown;charset=utf-8':'application/json');
         var blob=new Blob([result.body.download],{{type:mime}});
         var a=document.createElement('a');
@@ -4141,7 +4141,7 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
 background:#fafbf9;border-top:1px solid var(--line);font-size:11px;color:var(--muted);
 font-family:ui-monospace,Menlo,monospace">
   HTML UI + HTTP MCP (same listener): <a href="{mcp_footer_url}" style="color:var(--cobalt)">{mcp_footer_label}</a>
-  · Stdio MCP (agent install option): <code>python3 -m port_registry_app --mcp-stdio</code>
+  · Stdio MCP (agent install option): <code>python3 -m portskill --mcp-stdio</code>
   · listen: <span title="Sticky broadcast">{mcp_listen_path}</span>
 </footer>
 </body>
@@ -5159,7 +5159,7 @@ class Handler(BaseHTTPRequestHandler):
                 payload.pop("credentials", None)
             self._send_json(200, payload)
             return
-        if path in ("/", "/port-registry"):
+        if path in ("/", "/portskill"):
             if self._gate_required() and not self._access_ok():
                 page = render_passkey_login_page().encode("utf-8")
                 self._send(200, page, "text/html; charset=utf-8")
@@ -5401,7 +5401,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return
 
-        if path != "/port-registry/actions":
+        if path != "/portskill/actions":
             self._send_json(404, {"ok": False, "message": "not found"})
             return
         length = int(self.headers.get("Content-Length") or "0")
@@ -5698,8 +5698,8 @@ def main(argv=None) -> int:
         default=None,
         help=(
             "Bind port (explicit; wins over sticky/allocate). "
-            "Also: env PORTSKILL_PORT or PORT_REGISTRY_APP_PORT. "
-            "Default: sticky ~/.config/port-registry/listen.json or a registry allocate."
+            "Also: env PORTSKILL_PORT. "
+            "Default: sticky ~/.config/portskill/listen.json or a registry allocate."
         ),
     )
     parser.add_argument(

@@ -1,13 +1,13 @@
 # Portskill administration
 
-Commands below follow `portskill-cli` or `python3 -m port_registry_app.cli`.
+Commands below follow `portskill-cli` or `python3 -m portskill.cli`.
 Use the command's `--help` for additional flags.
 
 ## MCP connection and tool availability
 
 HTTP MCP uses `POST /mcp` for JSON-RPC and `GET /mcp` for discovery on the UI's
-listener. Read the actual endpoint from `~/.config/port-registry/listen.json`.
-Stdio runs with `python3 -m port_registry_app --mcp-stdio`.
+listener. Read the actual endpoint from `~/.config/portskill/listen.json`.
+Stdio runs with `python3 -m portskill --mcp-stdio`.
 
 `settings set --mcp-tools-profile full|lean` changes tool discovery:
 
@@ -55,7 +55,7 @@ recorded listener that is unreachable, an unauthorized non-loopback bind, or an
 invalid enabled/explicitly configured Handoff kit. Placeholder hooks and absent
 Tailscale are informational, so doctor success alone does not prove a service ran.
 
-Tailscale binary resolution: `PORT_REGISTRY_TAILSCALE_BIN`, then `tailscale` on
+Tailscale binary resolution: `PORTSKILL_TAILSCALE_BIN`, then `tailscale` on
 PATH, then the Mac app bundle. Remote-machine management is not implemented.
 
 The optional HTTP passkey gate is controlled by `http-auth gate on|off`.

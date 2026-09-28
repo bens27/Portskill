@@ -13,7 +13,7 @@ A local port registry for developers and AI agents. Reserve project port ranges,
 - Optionally expose registered services through Tailscale Serve.
 - Run with Python's standard library: no Node.js or runtime pip dependencies.
 
-Portskill is early-stage software for personal development machines. The registry lives at `~/.config/port-registry/registry.json`; project folders do not need their own copy. The Python module remains `port_registry_app` for compatibility.
+Portskill is early-stage software for personal development machines. The registry lives at `~/.config/portskill/registry.json`; project folders do not need their own copy. The Python module remains `portskill` for compatibility.
 
 ## Quick start
 
@@ -30,7 +30,7 @@ The server prints its URL and opens the dashboard. Use `./scripts/run.sh --no-op
 To retrieve the current URL:
 
 ```bash
-python3 -c "import json,pathlib; print(json.loads((pathlib.Path.home()/'.config/port-registry/listen.json').read_text())['ui_url'])"
+python3 -c "import json,pathlib; print(json.loads((pathlib.Path.home()/'.config/portskill/listen.json').read_text())['ui_url'])"
 ```
 
 In the dashboard, reserve a project range, configure a service, then use **Start** and **Stop**. The **Settings** panel controls defaults; **Agent connection** has MCP setup instructions.
@@ -45,7 +45,7 @@ In the dashboard, reserve a project range, configure a service, then use **Start
 
 ## Connect an agent
 
-HTTP MCP uses the **same local listener** as the HTML UI. Read `mcp_url` from `~/.config/port-registry/listen.json` for the endpoint. It accepts JSON-RPC at `POST /mcp`; `GET /mcp` provides discovery information.
+HTTP MCP uses the **same local listener** as the HTML UI. Read `mcp_url` from `~/.config/portskill/listen.json` for the endpoint. It accepts JSON-RPC at `POST /mcp`; `GET /mcp` provides discovery information.
 
 For stdio MCP, use [examples/mcp.stdio.json](examples/mcp.stdio.json), replacing the path with your checkout:
 
@@ -54,7 +54,7 @@ For stdio MCP, use [examples/mcp.stdio.json](examples/mcp.stdio.json), replacing
   "mcpServers": {
     "portskill": {
       "command": "python3",
-      "args": ["-m", "port_registry_app", "--mcp-stdio"],
+      "args": ["-m", "portskill", "--mcp-stdio"],
       "env": {"PYTHONPATH": "/absolute/path/to/Portskill"}
     }
   }
@@ -119,7 +119,7 @@ When disabled, Handoff tools are absent from MCP discovery, direct and chained M
 
 Enabling in Portskill does **not** install agent hooks. Use the section's install help and the [kit README](https://github.com/bens27/session-handoff-kit/blob/v0.8.0/README.md) to choose a surface. Disabling in Portskill does **not** remove hooks or extensions you previously installed; manage those in the agent or browser where you installed them. Existing explicit `handoff_enabled: true` settings remain enabled.
 
-The kit is its own project, [bens27/session-handoff-kit](https://github.com/bens27/session-handoff-kit). Portskill does not ship a copy. Fetch the pinned release into the Portskill config directory (`~/.config/port-registry/handoff-kit/<ref>/`), or point at a checkout:
+The kit is its own project, [bens27/session-handoff-kit](https://github.com/bens27/session-handoff-kit). Portskill does not ship a copy. Fetch the pinned release into the Portskill config directory (`~/.config/portskill/handoff-kit/<ref>/`), or point at a checkout:
 
 ```bash
 portskill-cli handoff fetch            # pinned release; --ref <tag|sha> for another

@@ -7,8 +7,8 @@ This package ships three ways to see/use the Portskill UI. Node is **not** requi
 Open the pre-rendered Roster-style page in a browser:
 
 ```bash
-open ui/port-registry-preview.html
-# or: xdg-open ui/port-registry-preview.html
+open ui/portskill-preview.html
+# or: xdg-open ui/portskill-preview.html
 ```
 
 This uses baked-in sample projects/ranges and shows Start / Stop / Release buttons. Action clicks will fail against a `file://` origin (no server); use the live UI below for real actions.
@@ -18,10 +18,10 @@ This uses baked-in sample projects/ranges and shows Start / Stop / Release butto
 Preferred entrypoint (Portskill **app**):
 
 ```bash
-PYTHONPATH=. python3 -m port_registry_app
+PYTHONPATH=. python3 -m portskill
 # optional: … --port 8765 --no-open
-# MCP stdio only: python3 -m port_registry_app --mcp-stdio
-# or after pip install -e .: port-registry-app
+# MCP stdio only: python3 -m portskill --mcp-stdio
+# or after pip install -e .: portskill
 # macOS: open macos/Port\ Registry.app
 ```
 
@@ -29,10 +29,10 @@ Thin wrappers `app.py` / `serve_ui.py` still call the same package.
 
 Then open the printed URL (default `http://127.0.0.1:8765/`).
 
-- Reads `PORT_REGISTRY_PATH` or `~/.config/port-registry/registry.json`
-- `GET /` and `GET /port-registry` → HTML console (sidebar, stats, range cards, Start/Stop/Release)
+- Reads `PORTSKILL_REGISTRY_PATH` or `~/.config/portskill/registry.json`
+- `GET /` and `GET /portskill` → HTML console (sidebar, stats, range cards, Start/Stop/Release)
 - `GET /api/state` → raw registry JSON
-- `POST /port-registry/actions` → invokes `port_registry_app.cli` (see contract below)
+- `POST /portskill/actions` → invokes `portskill.cli` (see contract below)
 - `POST /mcp` → MCP JSON-RPC (`initialize`, `tools/list`, `tools/call`); `GET /mcp` → discovery
 - Binds `127.0.0.1` only; no Node
 - MCP tools: portskill (one MCP tool for your agent to handle all port management functions), allocate, start, stop, release, status, doctor
@@ -43,35 +43,35 @@ Self-contained TypeScript extracts (no `@roster/*` imports):
 
 | Module | Role |
 |--------|------|
-| `port-registry.ts` | Shared raw/action types |
-| `port-registry-view.ts` | `buildPortRegistryView`, HTML builders, CSS subset |
-| `port-registry-api.ts` | `portRegistryStateHttpResponse`, `portRegistryActionHttpResponse` |
+| `portskill.ts` | Shared raw/action types |
+| `portskill-view.ts` | `buildPortskillView`, HTML builders, CSS subset |
+| `portskill-api.ts` | `portskillStateHttpResponse`, `portskillActionHttpResponse` |
 
 Example host wiring:
 
 ```ts
-import { buildPortRegistryView, renderPortRegistryPageHtml } from "./port-registry-view.ts";
+import { buildPortskillView, renderPortskillPageHtml } from "./portskill-view.ts";
 import {
-  portRegistryStateHttpResponse,
-  portRegistryActionHttpResponse
-} from "./port-registry-api.ts";
-import type { PortRegistryRawState } from "./port-registry.ts";
+  portskillStateHttpResponse,
+  portskillActionHttpResponse
+} from "./portskill-api.ts";
+import type { PortskillRawState } from "./portskill.ts";
 
 // GET /api/state
-await portRegistryStateHttpResponse({ read: () => loadRegistry() });
+await portskillStateHttpResponse({ read: () => loadRegistry() });
 
-// POST /port-registry/actions
-await portRegistryActionHttpResponse(request, {
+// POST /portskill/actions
+await portskillActionHttpResponse(request, {
   run: async (project, rangeId, action) => runCli(project, rangeId, action)
 });
 
 // Or render HTML yourself:
-const html = renderPortRegistryPageHtml(buildPortRegistryView(raw as PortRegistryRawState));
+const html = renderPortskillPageHtml(buildPortskillView(raw as PortskillRawState));
 ```
 
-Point your HTTP gateway at those helpers; implement `PortRegistryStateSource.read` and `PortRegistryActionRunner.run` against the same registry schema the CLI uses.
+Point your HTTP gateway at those helpers; implement `PortskillStateSource.read` and `PortskillActionRunner.run` against the same registry schema the CLI uses.
 
-## 4. POST `/port-registry/actions` contract
+## 4. POST `/portskill/actions` contract
 
 Request JSON:
 
@@ -112,7 +112,7 @@ The live `serve_ui.py` passes `--tailnet none` on `start` when needed to avoid e
 
 ## Reference only
 
-`ui/reference/port-registry-console.e2e.test.ts` is the original Roster vitest coverage. It depends on the Roster test harness and full packages — do not run it standalone from this skill package.
+`ui/reference/portskill-console.e2e.test.ts` is the original Roster vitest coverage. It depends on the Roster test harness and full packages — do not run it standalone from this skill package.
 
 ## 5. MCP connect
 

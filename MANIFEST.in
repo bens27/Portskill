@@ -1,5 +1,5 @@
 include LICENSE README.md CHANGELOG.md SECURITY.md CONTRIBUTING.md SKILL.md
-include app.py port_registry.py serve_ui.py install.sh
+include app.py portskill_cli.py serve_ui.py install.sh
 recursive-include docs *.md
 recursive-include scripts *.sh
 recursive-include skill *.md

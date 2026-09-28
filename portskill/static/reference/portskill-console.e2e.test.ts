@@ -1,24 +1,24 @@
 import { describe, expect, it } from "vitest";
 import type {
-  PortRegistryAction,
-  PortRegistryActionResult,
-  PortRegistryRawState
-} from "../packages/interfaces/src/port-registry";
-import { buildPortRegistryView, renderRosterConsoleHtml } from "../packages/web/src/index";
+  PortskillAction,
+  PortskillActionResult,
+  PortskillRawState
+} from "../packages/interfaces/src/portskill";
+import { buildPortskillView, renderRosterConsoleHtml } from "../packages/web/src/index";
 import type {
   HttpRequest,
-  PortRegistryActionRunner,
-  PortRegistryStateSource
+  PortskillActionRunner,
+  PortskillStateSource
 } from "../packages/api/src/index";
 import {
-  portRegistryActionHttpResponse,
-  portRegistryStateHttpResponse
+  portskillActionHttpResponse,
+  portskillStateHttpResponse
 } from "../packages/api/src/index";
 
 describe("port registry console view", () => {
   it("groups ranges by project, sorts them, and computes pool/active stats", () => {
     const raw = sampleRegistry();
-    const view = buildPortRegistryView(raw);
+    const view = buildPortskillView(raw);
 
     expect(view.pool).toEqual({ start: 20000, end: 29999 });
     expect(view.projects.map((project) => project.projectLabel)).toEqual([
@@ -37,7 +37,7 @@ describe("port registry console view", () => {
   });
 
   it("defaults an unrecognized state and tailnet mode rather than throwing", () => {
-    const raw: PortRegistryRawState = {
+    const raw: PortskillRawState = {
       pool: { start: 20000, end: 20099 },
       projects: {
         "/tmp/weird": {
@@ -54,7 +54,7 @@ describe("port registry console view", () => {
       }
     };
 
-    const view = buildPortRegistryView(raw);
+    const view = buildPortskillView(raw);
     const range = view.projects[0]?.ranges[0];
     expect(range?.state).toBe("reserved");
     expect(range?.tailnetMode).toBeNull();
@@ -63,10 +63,10 @@ describe("port registry console view", () => {
 
 describe("port registry console rendering", () => {
   it("renders the nav link, project groups, badges, and action button states", () => {
-    const view = buildPortRegistryView(sampleRegistry());
+    const view = buildPortskillView(sampleRegistry());
     const html = renderRosterConsoleHtml(rosterViewStub(), {
       activeView: "ports",
-      portRegistry: view
+      portskill: view
     });
 
     expect(html).toContain('href="#ports"');
@@ -86,7 +86,7 @@ describe("port registry console rendering", () => {
 
     expect(html).toContain("Allocated ranges");
     expect(html).toContain("Pool ports used");
-    expect(html).toContain("/port-registry/actions");
+    expect(html).toContain("/portskill/actions");
   });
 
   it("shows an empty state when no registry data is provided", () => {
@@ -97,29 +97,29 @@ describe("port registry console rendering", () => {
 
 describe("port registry API handlers", () => {
   it("returns the raw registry state from an injected source", async () => {
-    const source: PortRegistryStateSource = { read: () => sampleRegistry() };
-    const response = await portRegistryStateHttpResponse(source);
+    const source: PortskillStateSource = { read: () => sampleRegistry() };
+    const response = await portskillStateHttpResponse(source);
     expect(response.status).toBe(200);
     expect(response.body).toEqual(sampleRegistry());
   });
 
   it("invokes the action runner with a well-formed request and returns its result", async () => {
-    const calls: Array<{ project: string; rangeId: string; action: PortRegistryAction }> = [];
-    const runner: PortRegistryActionRunner = {
+    const calls: Array<{ project: string; rangeId: string; action: PortskillAction }> = [];
+    const runner: PortskillActionRunner = {
       run: (project, rangeId, action) => {
         calls.push({ project, rangeId, action });
-        return { ok: true } satisfies PortRegistryActionResult;
+        return { ok: true } satisfies PortskillActionResult;
       }
     };
 
     const request: HttpRequest = {
       method: "POST",
-      path: "/port-registry/actions",
+      path: "/portskill/actions",
       headers: {},
       body: { project: "/Users/example/dev/web-app", rangeId: "r1", action: "stop" }
     };
 
-    const response = await portRegistryActionHttpResponse(request, runner);
+    const response = await portskillActionHttpResponse(request, runner);
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ ok: true });
     expect(calls).toEqual([
@@ -129,7 +129,7 @@ describe("port registry API handlers", () => {
 
   it("rejects a malformed action request without calling the runner", async () => {
     let called = false;
-    const runner: PortRegistryActionRunner = {
+    const runner: PortskillActionRunner = {
       run: () => {
         called = true;
         return { ok: true };
@@ -138,35 +138,35 @@ describe("port registry API handlers", () => {
 
     const request: HttpRequest = {
       method: "POST",
-      path: "/port-registry/actions",
+      path: "/portskill/actions",
       headers: {},
       body: { project: "/x", rangeId: "r1", action: "reboot" }
     };
 
-    const response = await portRegistryActionHttpResponse(request, runner);
+    const response = await portskillActionHttpResponse(request, runner);
     expect(response.status).toBe(400);
     expect(called).toBe(false);
   });
 
   it("surfaces a failed action as a 422 without throwing", async () => {
-    const runner: PortRegistryActionRunner = {
+    const runner: PortskillActionRunner = {
       run: () => ({ ok: false, message: "start_script_placeholder" })
     };
 
     const request: HttpRequest = {
       method: "POST",
-      path: "/port-registry/actions",
+      path: "/portskill/actions",
       headers: {},
       body: { project: "/x", rangeId: "r1", action: "start" }
     };
 
-    const response = await portRegistryActionHttpResponse(request, runner);
+    const response = await portskillActionHttpResponse(request, runner);
     expect(response.status).toBe(422);
     expect(response.body).toEqual({ ok: false, message: "start_script_placeholder" });
   });
 });
 
-function sampleRegistry(): PortRegistryRawState {
+function sampleRegistry(): PortskillRawState {
   return {
     version: 1,
     pool: { start: 20000, end: 29999 },

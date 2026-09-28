@@ -12,10 +12,10 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-HOME_LISTEN = pathlib.Path.home() / ".config" / "port-registry" / "listen.json"
+HOME_LISTEN = pathlib.Path.home() / ".config" / "portskill" / "listen.json"
 
 _ISOLATE_KEYS = (
-    "PORT_REGISTRY_PATH",
+    "PORTSKILL_REGISTRY_PATH",
     "PORTSKILL_LISTEN_PATH",
     "PORTSKILL_HTTP_AUTH_PATH",
     "PORTSKILL_HTTP_PASSKEY_PATH",
@@ -23,14 +23,14 @@ _ISOLATE_KEYS = (
     "HOME",
     "XDG_CONFIG_HOME",
     "PORTSKILL_HANDOFF_KIT",
-    "PORT_REGISTRY_TAILSCALE_BIN",
+    "PORTSKILL_TAILSCALE_BIN",
 )
 
 
 class IsolatedConfig:
     """Temp registry + listen dir. Pins env so tests never touch user home.
 
-    Sets PORT_REGISTRY_PATH, PORTSKILL_LISTEN_PATH, HOME, and XDG_CONFIG_HOME.
+    Sets PORTSKILL_REGISTRY_PATH, PORTSKILL_LISTEN_PATH, HOME, and XDG_CONFIG_HOME.
     Clears PORTSKILL_HANDOFF_KIT (pass extra= to restore an override for one call).
     Restores the previous values on close. Subprocess helpers copy this env so
     a leaked PORTSKILL_LISTEN_PATH / leftover home listen.json cannot flake CI.
@@ -52,12 +52,12 @@ class IsolatedConfig:
             self._prev[key] = os.environ.get(key)
         self.home_dir.mkdir(parents=True, exist_ok=True)
         self.xdg_config.mkdir(parents=True, exist_ok=True)
-        os.environ["PORT_REGISTRY_PATH"] = str(self.registry_path)
+        os.environ["PORTSKILL_REGISTRY_PATH"] = str(self.registry_path)
         os.environ["PORTSKILL_LISTEN_PATH"] = str(self.listen_path)
         os.environ["HOME"] = str(self.home_dir)
         os.environ["XDG_CONFIG_HOME"] = str(self.xdg_config)
         os.environ.pop("PORTSKILL_HANDOFF_KIT", None)
-        os.environ["PORT_REGISTRY_TAILSCALE_BIN"] = str(self.root / "tailscale-not-installed")
+        os.environ["PORTSKILL_TAILSCALE_BIN"] = str(self.root / "tailscale-not-installed")
         os.environ.pop("PORTSKILL_HTTP_AUTH_PATH", None)
         os.environ.pop("PORTSKILL_HTTP_PASSKEY_PATH", None)
         os.environ.pop("PORTSKILL_HTTP_SESSIONS_PATH", None)
@@ -74,7 +74,7 @@ class IsolatedConfig:
     def subprocess_env(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         """Env for CLI/script subprocesses: isolated paths + PYTHONPATH."""
         env = os.environ.copy()
-        env["PORT_REGISTRY_PATH"] = str(self.registry_path)
+        env["PORTSKILL_REGISTRY_PATH"] = str(self.registry_path)
         env["PORTSKILL_LISTEN_PATH"] = str(self.listen_path)
         env["HOME"] = str(self.home_dir)
         env["XDG_CONFIG_HOME"] = str(self.xdg_config)
@@ -82,7 +82,7 @@ class IsolatedConfig:
             os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
         )
         env.pop("PORTSKILL_HANDOFF_KIT", None)
-        env["PORT_REGISTRY_TAILSCALE_BIN"] = str(self.root / "tailscale-not-installed")
+        env["PORTSKILL_TAILSCALE_BIN"] = str(self.root / "tailscale-not-installed")
         env.pop("PORTSKILL_HTTP_AUTH_PATH", None)
         env.pop("PORTSKILL_HTTP_PASSKEY_PATH", None)
         env.pop("PORTSKILL_HTTP_SESSIONS_PATH", None)
@@ -97,7 +97,7 @@ class IsolatedConfig:
         extra: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [sys.executable, "-m", "port_registry_app.cli", *argv],
+            [sys.executable, "-m", "portskill.cli", *argv],
             cwd=str(ROOT),
             env=self.subprocess_env(extra),
             capture_output=True,
@@ -230,7 +230,7 @@ def hold_loopback_port(port: int | None = None) -> tuple[socket.socket, int]:
 @contextmanager
 def active_listen(payload: dict[str, Any]) -> Iterator[None]:
     """Swap server._ACTIVE_LISTEN and always restore (avoids leaked bind banners)."""
-    import port_registry_app.server as srv
+    import portskill.server as srv
 
     prev = srv._ACTIVE_LISTEN
     srv._ACTIVE_LISTEN = payload

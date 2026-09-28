@@ -133,7 +133,7 @@ TOOL_DEFS = [
     {
         "name": "release",
         "description": (
-            "Free a range that is not running (port-registry release). "
+            "Free a range that is not running (portskill release). "
             "Refuses with process_still_running if pid/pgid still live — use stop instead."
         ),
         "inputSchema": {
@@ -147,7 +147,7 @@ TOOL_DEFS = [
     },
     {
         "name": "status",
-        "description": "Inspect registry state (port-registry status).",
+        "description": "Inspect registry state (portskill status).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -206,7 +206,7 @@ TOOL_DEFS = [
     },
     {
         "name": "environment_export",
-        "description": "Export a portable environment JSON of registered services (port-registry environment export).",
+        "description": "Export a portable environment JSON of registered services (portskill environment export).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -224,7 +224,7 @@ TOOL_DEFS = [
     },
     {
         "name": "environment_import",
-        "description": "Import an environment JSON into the registry (port-registry environment import). Does not auto-start unless apply_defaults is true.",
+        "description": "Import an environment JSON into the registry (portskill environment import). Does not auto-start unless apply_defaults is true.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -239,7 +239,7 @@ TOOL_DEFS = [
     },
     {
         "name": "set_default",
-        "description": "Set default_state on|off for a range (port-registry set-default).",
+        "description": "Set default_state on|off for a range (portskill set-default).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -549,7 +549,7 @@ TOOL_DEFS = [
 
 
 def _registry_path() -> pathlib.Path:
-    configured = os.environ.get("PORT_REGISTRY_PATH", "~/.config/port-registry/registry.json")
+    configured = os.environ.get("PORTSKILL_REGISTRY_PATH", "~/.config/portskill/registry.json")
     return pathlib.Path(configured).expanduser()
 
 
@@ -730,8 +730,8 @@ def _cli_env() -> dict:
 
 
 def run_cli(argv: list[str]) -> tuple[int, Any, str]:
-    """Invoke port_registry_app.cli; return (exit_code, parsed_json_or_None, raw_stdout)."""
-    cmd = [sys.executable, "-m", "port_registry_app.cli", *argv]
+    """Invoke portskill.cli; return (exit_code, parsed_json_or_None, raw_stdout)."""
+    cmd = [sys.executable, "-m", "portskill.cli", *argv]
     try:
         completed = subprocess.run(
             cmd, capture_output=True, text=True, env=_cli_env(), check=False
@@ -1177,7 +1177,7 @@ def call_tool(name: str, arguments: dict) -> dict:
                 env_body = json.loads(raw)
             except json.JSONDecodeError:
                 env_body = None
-            if isinstance(env_body, dict) and env_body.get("kind") == "port-registry-environment":
+            if isinstance(env_body, dict) and env_body.get("kind") == "portskill-environment":
                 body = {"status": "ok", "environment": env_body}
                 return {
                     "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
@@ -1241,8 +1241,8 @@ def mcp_handle(message: dict) -> dict | None:
                     "deactivate/compat_check/preset_save/preset_list/preset_apply/preset_delete/"
                     "settings_get/settings_set/set_tailnet/tailscale_status/tailscale_login/"
                     "history_list/history_restore/history_reset/ports_discover/ports_import. "
-                    "These wrap the Portskill CLI against ~/.config/port-registry/registry.json "
-                    "(or PORT_REGISTRY_PATH). Experimental (Beta): Session Handoff is disabled by default; "
+                    "These wrap the Portskill CLI against ~/.config/portskill/registry.json "
+                    "(or PORTSKILL_REGISTRY_PATH). Experimental (Beta): Session Handoff is disabled by default; "
                     "enable it in the UI or CLI before using its flat tool names "
                     "handoff_status/handoff_skill/handoff_template/handoff_list/handoff_resolve/"
                     "handoff_new_path/handoff_resume/handoff_supersede/handoff_install_help "
@@ -1380,7 +1380,7 @@ def _listen_enrichment() -> dict:
         out["setup"] = {
             "cursor_mcp_stdio_hint": (
                 "Stdio MCP is an available agent install option — "
-                "examples/mcp.stdio.json or python3 -m port_registry_app --mcp-stdio"
+                "examples/mcp.stdio.json or python3 -m portskill --mcp-stdio"
             ),
             "cursor_mcp_http_hint": (
                 "HTTP MCP uses the same local listener as the HTML UI. "
@@ -1401,7 +1401,7 @@ def discovery_payload() -> dict:
         "protocolVersion": PROTOCOL_VERSION,
         "server": {"name": SERVER_NAME, "version": SERVER_VERSION},
         "tools": [t["name"] for t in enabled_tool_defs()],
-        "stdio": "python3 -m port_registry_app --mcp-stdio",
+        "stdio": "python3 -m portskill --mcp-stdio",
     }
     payload.update(_listen_enrichment())
     return payload

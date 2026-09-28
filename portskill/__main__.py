@@ -1,4 +1,4 @@
-"""python -m port_registry_app → launches app (UI + MCP HTTP by default)."""
+"""python -m portskill → launches app (UI + MCP HTTP by default)."""
 from __future__ import annotations
 
 from .server import main

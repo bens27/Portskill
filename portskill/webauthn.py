@@ -1,6 +1,6 @@
 """Opt-in WebAuthn/passkey store + verify for the personal HTTP listen path.
 
-Credentials and the gate flag live under ~/.config/port-registry/ (not registry.json).
+Credentials and the gate flag live under ~/.config/portskill/ (not registry.json).
 Default gate is OFF. No PyPI dependency — ES256/RS256 verify is stdlib-only.
 """
 from __future__ import annotations

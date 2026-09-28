@@ -7,8 +7,8 @@ from argparse import Namespace
 from io import StringIO
 from unittest.mock import patch
 
-from port_registry_app import cli
-from port_registry_app.cli import DOCTOR_FAIL_CLOSED_EXIT, DOCTOR_HARD_CHECKS
+from portskill import cli
+from portskill.cli import DOCTOR_FAIL_CLOSED_EXIT, DOCTOR_HARD_CHECKS
 from tests.helpers import IsolatedConfig, free_loopback_port, parse_cli_json
 
 
@@ -246,7 +246,7 @@ class DoctorContractTests(unittest.TestCase):
         self.assertFalse(names["mcp_reachability"].get("ok"))
 
     def test_missing_optional_kit_is_healthy_only_when_not_configured(self) -> None:
-        from port_registry_app.handoff import doctor_handoff
+        from portskill.handoff import doctor_handoff
 
         with IsolatedConfig():
             for settings, expected in (({}, True), ({"handoff_enabled": True}, False)):

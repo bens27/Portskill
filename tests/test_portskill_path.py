@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import unittest
 
-from port_registry_app.path import (
+from portskill.path import (
     PATH_MODES,
     PHASES_BY_MODE,
     SKIP_ACTIVATE_ACTIVE,
@@ -260,7 +260,17 @@ class PathCliMcpTests(unittest.TestCase):
             override = iso.run_cli(["path", "--mode", "start", "--project", str(proj), "--tailnet", "none"])
             self.assertEqual(override.returncode, 0, override.stderr or override.stdout)
             self.assertEqual(_skip_map(parse_cli_json(override)).get("tailnet"), SKIP_TAILNET_NOT_REQUESTED)
-            iso.run_cli(["path", "--mode", "stop", "--project", str(proj)])
+            # Serve was never configured, so stop must not try to tear it down.
+            stopped = iso.run_cli(["path", "--mode", "stop", "--project", str(proj)])
+            self.assertEqual(stopped.returncode, 0, stopped.stderr or stopped.stdout)
+
+    def test_service_launch_passes_port(self) -> None:
+        from portskill.cli import service_launch
+
+        argv, env = service_launch({"start": 20123}, "npm run dev -- --port $PORT --x ${PORT}")
+        self.assertEqual(argv, ["npm", "run", "dev", "--", "--port", "20123", "--x", "20123"])
+        self.assertEqual(env["PORT"], "20123")
+        self.assertIsNone(service_launch({"start": 20123}, None)[0])
 
     def test_funnel_listen_skipped_never_applied(self) -> None:
         with IsolatedConfig() as iso:
@@ -287,7 +297,7 @@ class PathCliMcpTests(unittest.TestCase):
             self.assertIn("allocate", _ran_phases(payload))
 
     def test_mcp_list_call_and_toggle(self) -> None:
-        from port_registry_app.mcp import enabled_tool_defs, mcp_handle
+        from portskill.mcp import enabled_tool_defs, mcp_handle
 
         with IsolatedConfig() as iso:
             proj = iso.root / "proj"

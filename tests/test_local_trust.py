@@ -13,7 +13,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 class NonLoopbackRefuseTests(unittest.TestCase):
     def test_gate_helpers(self) -> None:
-        from port_registry_app.cli import (
+        from portskill.cli import (
             ALLOW_NON_LOOPBACK_FLAG,
             is_loopback_host,
             listen_allows_non_loopback,
@@ -34,7 +34,7 @@ class NonLoopbackRefuseTests(unittest.TestCase):
         self.assertTrue(listen_allows_non_loopback({"allow_non_loopback": True}))
 
     def test_main_refuses_non_loopback_without_flag(self) -> None:
-        from port_registry_app.server import main
+        from portskill.server import main
 
         buf = io.StringIO()
         with IsolatedConfig() as iso:
@@ -53,7 +53,7 @@ class NonLoopbackRefuseTests(unittest.TestCase):
         import sys
 
         proc = subprocess.run(
-            [sys.executable, "-m", "port_registry_app", "--help"],
+            [sys.executable, "-m", "portskill", "--help"],
             cwd=str(ROOT),
             capture_output=True,
             text=True,

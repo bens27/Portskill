@@ -4,4 +4,4 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONPATH="${ROOT}${PYTHONPATH:+:$PYTHONPATH}"
 cd "${ROOT}"
-exec python3 -m port_registry_app "$@"
+exec python3 -m portskill "$@"

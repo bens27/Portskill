@@ -60,7 +60,7 @@ while [[ "$STOP" -eq 0 ]]; do
   ensure_native
   echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] starting python UI+MCP"
   set +e
-  "${PY}" -m port_registry_app --no-open
+  "${PY}" -m portskill --no-open
   rc=$?
   set -e
   echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] python exited rc=${rc}"

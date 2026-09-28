@@ -338,6 +338,7 @@ def _launch_start(item, project):
         lifecycle,
         normalize_optional_str,
         resolve_project_relative,
+        service_launch,
         utc_now,
         validate_start_script,
     )
@@ -353,8 +354,10 @@ def _launch_start(item, project):
     with start_log.open("a", encoding="utf-8") as log:
         if command:
             try:
+                argv, env = service_launch(item, command)
                 process = subprocess.Popen(
-                    shlex.split(command),
+                    argv,
+                    env=env,
                     cwd=cwd_override,
                     stdin=subprocess.DEVNULL,
                     stdout=log,
@@ -369,6 +372,7 @@ def _launch_start(item, project):
             try:
                 process = subprocess.Popen(
                     [str(start_script)],
+                    env=service_launch(item, None)[1],
                     cwd=cwd_override,
                     stdin=subprocess.DEVNULL,
                     stdout=log,

@@ -25,7 +25,7 @@ import webbrowser
 
 
 VERSION = 1
-DEFAULT_REGISTRY_PATH = "~/.config/port-registry/registry.json"
+DEFAULT_REGISTRY_PATH = "~/.config/portskill/registry.json"
 LISTEN_FILENAME = "listen.json"
 HTTP_AUTH_FILENAME = "http_auth.json"
 HTTP_AUTH_COOKIE_NAME = "portskill_http"
@@ -47,12 +47,12 @@ DOCTOR_HARD_CHECKS = frozenset({
 DEFAULT_TAILSCALE_BIN = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
 DEFAULT_POOL_START = 20000
 DEFAULT_POOL_END = 29999
-DEFAULT_LIFECYCLE_DIR = ".port-registry"
-DEFAULT_START_SCRIPT = ".port-registry/start.sh"
-DEFAULT_STOP_SCRIPT = ".port-registry/stop.sh"
-DEFAULT_START_LOG = ".port-registry/start.log"
-DEFAULT_STOP_LOG = ".port-registry/stop.log"
-PLACEHOLDER_SENTINEL = "port-registry: edit .port-registry/"
+DEFAULT_LIFECYCLE_DIR = ".portskill"
+DEFAULT_START_SCRIPT = ".portskill/start.sh"
+DEFAULT_STOP_SCRIPT = ".portskill/stop.sh"
+DEFAULT_START_LOG = ".portskill/start.log"
+DEFAULT_STOP_LOG = ".portskill/stop.log"
+PLACEHOLDER_SENTINEL = "portskill: edit .portskill/"
 
 
 class JsonArgumentParser(argparse.ArgumentParser):
@@ -70,15 +70,15 @@ def emit(payload):
 
 
 def registry_path():
-    configured = os.environ.get("PORT_REGISTRY_PATH", DEFAULT_REGISTRY_PATH)
+    configured = os.environ.get("PORTSKILL_REGISTRY_PATH", DEFAULT_REGISTRY_PATH)
     return pathlib.Path(configured).expanduser()
 
 
 def listen_path():
     """Sticky listen.json beside the registry, or PORTSKILL_LISTEN_PATH.
 
-    Default (~/.config/port-registry/registry.json) keeps listen.json in the
-    same directory as today. Tests set PORT_REGISTRY_PATH to a temp file so
+    Default (~/.config/portskill/registry.json) keeps listen.json in the
+    same directory as today. Tests set PORTSKILL_REGISTRY_PATH to a temp file so
     listen.json never touches the user's home config.
     """
     configured = os.environ.get("PORTSKILL_LISTEN_PATH")
@@ -257,8 +257,8 @@ def http_bearer_matches(provided):
 
 def pool_bounds():
     try:
-        start = int(os.environ.get("PORT_REGISTRY_POOL_START", str(DEFAULT_POOL_START)))
-        end = int(os.environ.get("PORT_REGISTRY_POOL_END", str(DEFAULT_POOL_END)))
+        start = int(os.environ.get("PORTSKILL_POOL_START", str(DEFAULT_POOL_START)))
+        end = int(os.environ.get("PORTSKILL_POOL_END", str(DEFAULT_POOL_END)))
     except ValueError:
         fail("invalid_config", "pool bounds must be integers")
     if start > end:
@@ -271,7 +271,7 @@ def project_path(value):
 
 
 def local_registry_path(project):
-    return pathlib.Path(project) / ".port-registry.json"
+    return pathlib.Path(project) / ".portskill.json"
 
 
 def require_project_directory(project):
@@ -1118,7 +1118,9 @@ def normalize_registry(data, start, end):
     if not isinstance(projects, dict):
         projects = {}
     data["projects"] = projects
-    for project_entry in projects.values():
+    for project_key, project_entry in projects.items():
+        if isinstance(project_key, str) and project_key.startswith("/"):
+            migrate_legacy_project_files(project_key)
         ranges = project_entry.get("ranges")
         if isinstance(ranges, list):
             for item in ranges:
@@ -1600,13 +1602,37 @@ def default_lifecycle():
     }
 
 
+LEGACY_LIFECYCLE_DIR = ".port-registry"  # pre-rename name; migrated on load
+
+
 def normalize_lifecycle(lifecycle):
     normalized = default_lifecycle()
     if isinstance(lifecycle, dict):
         for key in normalized:
             if key in lifecycle:
                 normalized[key] = lifecycle[key]
+    for key in ("start_script", "stop_script", "start_log", "stop_log"):
+        value = normalized.get(key)
+        if isinstance(value, str) and value.startswith(LEGACY_LIFECYCLE_DIR + "/"):
+            normalized[key] = DEFAULT_LIFECYCLE_DIR + value[len(LEGACY_LIFECYCLE_DIR):]
     return normalized
+
+
+def migrate_legacy_project_files(project):
+    """Move <project>/.port-registry(.json) to the Portskill names, leaving a symlink
+    at the old name so scripts that still reference it keep working."""
+    root = pathlib.Path(project)
+    for old_name, new_name in (
+        (LEGACY_LIFECYCLE_DIR, DEFAULT_LIFECYCLE_DIR),
+        (LEGACY_LIFECYCLE_DIR + ".json", DEFAULT_LIFECYCLE_DIR + ".json"),
+    ):
+        old, new = root / old_name, root / new_name
+        try:
+            if old.exists() and not old.is_symlink() and not new.exists():
+                old.rename(new)
+                old.symlink_to(new_name)
+        except OSError:
+            pass  # read-only FS: leave it; start reports the missing script
 
 
 def normalize_default_state(value):
@@ -1685,7 +1711,7 @@ def backups_dir():
 
 
 def export_workspace_backup(registry, label="workspace"):
-    """Write timestamped workspace backup under ~/.config/port-registry/backups/.
+    """Write timestamped workspace backup under ~/.config/portskill/backups/.
 
     Returns absolute path string. Raises OSError on write failure.
     """
@@ -2156,7 +2182,7 @@ def find_project_range(registry, project, range_id):
 
 
 def resolve_tailscale_bin():
-    configured = os.environ.get("PORT_REGISTRY_TAILSCALE_BIN")
+    configured = os.environ.get("PORTSKILL_TAILSCALE_BIN")
     if configured:
         return configured
     which = shutil.which("tailscale")
@@ -2173,7 +2199,7 @@ def tailscale_base_command():
 
 
 def should_use_sudo():
-    return os.environ.get("PORT_REGISTRY_TAILSCALE_SUDO", "1") != "0"
+    return os.environ.get("PORTSKILL_TAILSCALE_SUDO", "1") != "0"
 
 
 def tailscale_command(mode, port, off=False):
@@ -2210,14 +2236,17 @@ def run_tailnet(mode, port, off=False):
     if mode == "funnel" and not off and funnel_of_listen_port(port):
         fail("funnel_listen_refused", refuse_funnel_listen_message(port))
     command = tailscale_command(mode, port, off=off)
-    result = subprocess.run(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        stdin=subprocess.DEVNULL,
-        timeout=20,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=20,
+        )
+    except FileNotFoundError:
+        fail("tailscale_missing", "Tailscale is not installed", hint="Install Tailscale or set PORTSKILL_TAILSCALE_BIN")
     if result.returncode != 0:
         fail(
             "tailnet_command_failed",
@@ -2369,7 +2398,7 @@ def ensure_tailscale_authenticated(mode):
             "tailscale_bin_missing",
             status.get("message") or "Tailscale binary not found",
             tailscale=status,
-            hint="Install Tailscale or set PORT_REGISTRY_TAILSCALE_BIN",
+            hint="Install Tailscale or set PORTSKILL_TAILSCALE_BIN",
         )
     if not status.get("logged_in"):
         fail(
@@ -2403,7 +2432,7 @@ def placeholder_content(name):
     command = name[:-3] if name.endswith(".sh") else name
     return (
         "#!/bin/sh\n"
-        f'echo "port-registry: edit .port-registry/{name} before using port-registry '
+        f'echo "portskill: edit .portskill/{name} before using portskill '
         f'{command}" >&2\n'
         "exit 64\n"
     )
@@ -2579,10 +2608,22 @@ def activate_item(item, project, range_id, tailnet_arg):
     item["activated_at"] = now
 
 
+def service_launch(item, command):
+    """argv + env for a service: PORT is the range start, and $PORT / ${PORT} in the
+    command are substituted (commands run without a shell, so nothing else expands)."""
+    port = str(item["start"])
+    env = {**os.environ, "PORT": port}
+    if command:
+        command = command.replace("${PORT}", port).replace("$PORT", port)
+        return shlex.split(command), env
+    return None, env
+
+
 def release_item(item):
     tailnet = item.setdefault("tailnet", {"mode": None, "port": None, "configured_at": None})
     mode = tailnet.get("mode")
-    if item.get("state") == "active" and mode in ("serve", "funnel"):
+    # Only tear down Serve/Funnel that was actually configured (login may have skipped it).
+    if item.get("state") == "active" and mode in ("serve", "funnel") and tailnet.get("configured_at"):
         port = tailnet.get("port") or item["start"]
         run_tailnet(mode, port, off=True)
     item["state"] = "released"
@@ -2885,9 +2926,11 @@ def cmd_start(args):
             # Prefer explicit command when set (edit-mode field)
             start_log.parent.mkdir(parents=True, exist_ok=True)
             with start_log.open("a", encoding="utf-8") as log:
+                argv, env = service_launch(item, command)
                 try:
                     process = subprocess.Popen(
-                        shlex.split(command),
+                        argv,
+                        env=env,
                         cwd=cwd_override,
                         stdin=subprocess.DEVNULL,
                         stdout=log,
@@ -2903,6 +2946,7 @@ def cmd_start(args):
                 try:
                     process = subprocess.Popen(
                         [str(start_script)],
+                        env=service_launch(item, None)[1],
                         cwd=cwd_override,
                         stdin=subprocess.DEVNULL,
                         stdout=log,
@@ -3051,7 +3095,7 @@ def build_environment_payload(registry, name, description="", project_filter=Non
         })
     return {
         "version": 1,
-        "kind": "port-registry-environment",
+        "kind": "portskill-environment",
         "name": name,
         "description": description or "",
         "exported_at": utc_now(),
@@ -3068,7 +3112,7 @@ def environment_payload_from_preset(registry, preset_name, export_name=None, des
     desc = description if description is not None else preset.get("description") or ""
     return {
         "version": 1,
-        "kind": "port-registry-environment",
+        "kind": "portskill-environment",
         "name": name,
         "description": desc,
         "exported_at": utc_now(),
@@ -3157,7 +3201,7 @@ def load_environment_file(path):
         fail("invalid_environment", f"environment JSON is corrupt: {exc.msg}")
     if not isinstance(data, dict):
         fail("invalid_environment", "environment root must be an object")
-    if data.get("kind") not in (None, "port-registry-environment"):
+    if data.get("kind") not in (None, "portskill-environment"):
         fail("invalid_environment", f"unexpected kind: {data.get('kind')}")
     services = data.get("services")
     if not isinstance(services, list):
@@ -4420,14 +4464,14 @@ def cmd_compat(args):
 
 
 def package_root():
-    """Distribution root containing port_registry_app/, ui/, skill/, etc."""
+    """Distribution root containing portskill/, ui/, skill/, etc."""
     return pathlib.Path(__file__).resolve().parent.parent
 
 
 def skill_dir():
     """Prefer package root (app layout); fall back to module parent for thin wrappers."""
     root = package_root()
-    if (root / "port_registry_app").is_dir() or (root / "pyproject.toml").exists():
+    if (root / "portskill").is_dir() or (root / "pyproject.toml").exists():
         return root
     return pathlib.Path(__file__).resolve().parent
 
@@ -4539,7 +4583,7 @@ def probe_portskill_serve_status(port=None):
     pref = False
     try:
         # Best-effort preference read without locking
-        path = pathlib.Path(os.environ.get("PORT_REGISTRY_PATH", "~/.config/port-registry/registry.json")).expanduser()
+        path = pathlib.Path(os.environ.get("PORTSKILL_REGISTRY_PATH", "~/.config/portskill/registry.json")).expanduser()
         if path.is_file():
             data = json.loads(path.read_text(encoding="utf-8"))
             settings = data.get("settings") if isinstance(data, dict) else {}
@@ -5433,12 +5477,12 @@ def cmd_doctor(args):
     })
 
     skill = skill_dir()
-    app_pkg = skill / "port_registry_app"
+    app_pkg = skill / "portskill"
     required_rel = [
-        "port_registry_app/__init__.py",
-        "port_registry_app/cli.py",
-        "port_registry_app/server.py",
-        "port_registry_app/mcp.py",
+        "portskill/__init__.py",
+        "portskill/cli.py",
+        "portskill/server.py",
+        "portskill/mcp.py",
     ]
     missing = [name for name in required_rel if not (skill / name).exists()]
     skill_md_ok = (skill / "skill" / "SKILL.md").exists() or (skill / "SKILL.md").exists()
@@ -5450,7 +5494,7 @@ def cmd_doctor(args):
     if not skill_md_ok:
         detail += "; optional agent skill sidecar not installed"
     if not ui_ok:
-        detail += "; missing ui/ (or port_registry_app/static/)"
+        detail += "; missing ui/ (or portskill/static/)"
     checks.append({"name": "skill_files", "ok": skill_ok, "detail": detail})
 
     project = project_path(args.project)
@@ -5566,7 +5610,7 @@ def cmd_doctor(args):
 
 
 def cmd_handoff_fetch(args):
-    from port_registry_app.handoff import fetch_kit
+    from portskill.handoff import fetch_kit
 
     result = fetch_kit(getattr(args, "ref", None))
     if not result.get("ok"):
@@ -5635,7 +5679,7 @@ def cmd_machine(args):
 def status_project_from_context(args):
     if args.project is not None:
         return project_path(args.project)
-    local_path = pathlib.Path.cwd() / ".port-registry.json"
+    local_path = pathlib.Path.cwd() / ".portskill.json"
     if local_path.exists():
         try:
             data = json.loads(local_path.read_text(encoding="utf-8"))

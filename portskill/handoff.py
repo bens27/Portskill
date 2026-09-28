@@ -232,7 +232,7 @@ def kit_version(root: pathlib.Path | None = None, settings: dict | None = None) 
 
 def _registry_parent() -> pathlib.Path:
     """Directory of registry.json (same convention as listen.json / http_auth.json)."""
-    configured = os.environ.get("PORT_REGISTRY_PATH", "~/.config/port-registry/registry.json")
+    configured = os.environ.get("PORTSKILL_REGISTRY_PATH", "~/.config/portskill/registry.json")
     return pathlib.Path(configured).expanduser().parent
 
 
@@ -915,7 +915,7 @@ HANDOFF_TOOL_DEFS = [
         "name": "handoff_skill",
         "description": (
             "Return Write-a-Handoff SKILL.md text from the custom file under "
-            "~/.config/port-registry/ when set, else the fetched kit (or a kit override)."
+            "~/.config/portskill/ when set, else the fetched kit (or a kit override)."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },

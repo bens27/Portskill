@@ -1,6 +1,6 @@
 #!/bin/bash
 # Install / uninstall / stop Portskill keep-alive (LaunchAgent + optional menubar).
-# Idempotent. NEVER wipes ~/.config/port-registry/registry.json.
+# Idempotent. NEVER wipes ~/.config/portskill/registry.json.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -27,8 +27,8 @@ Usage: $(basename "$0") <install|uninstall|stop|status|start>
 Package root: ${PACKAGE_ROOT}
 LaunchAgent:  ${PLIST_DST}
 Label:        ${LABEL}
-Registry:     ~/.config/port-registry/registry.json  (never modified here)
-Listen:       ~/.config/port-registry/listen.json    (written by server after bind)
+Registry:     ~/.config/portskill/registry.json  (never modified here)
+Listen:       ~/.config/portskill/listen.json    (written by server after bind)
 USAGE
 }
 
@@ -93,14 +93,14 @@ kill_menu() {
 
 kill_server() {
   pkill -f 'Portskill.app/Contents/MacOS/Portskill$' 2>/dev/null || true
-  pkill -f -- '-m port_registry_app' 2>/dev/null || true
+  pkill -f -- '-m portskill' 2>/dev/null || true
 }
 
 cmd_install() {
   echo "== Portskill keepalive install =="
   echo "Package: ${PACKAGE_ROOT}"
-  if [[ -f "${HOME}/.config/port-registry/registry.json" ]]; then
-    echo "Registry present (left untouched): ${HOME}/.config/port-registry/registry.json"
+  if [[ -f "${HOME}/.config/portskill/registry.json" ]]; then
+    echo "Registry present (left untouched): ${HOME}/.config/portskill/registry.json"
   fi
 
   if [[ -x "${PACKAGE_ROOT}/scripts/build-icons.sh" ]]; then
@@ -134,7 +134,7 @@ cmd_install() {
   bootstrap
 
   echo
-  echo "Installed. UI URL: see ~/.config/port-registry/listen.json (sticky; was historically :8765)"
+  echo "Installed. UI URL: see ~/.config/portskill/listen.json (sticky; was historically :8765)"
   echo "Disable:  ${SCRIPT_DIR}/install-keepalive.sh uninstall"
   echo "Stop now: ${SCRIPT_DIR}/install-keepalive.sh stop"
   echo "Logs:     ~/Library/Logs/Portskill/"
@@ -173,7 +173,7 @@ cmd_status() {
   echo "plist: ${PLIST_DST} $([ -f "${PLIST_DST}" ] && echo PRESENT || echo MISSING)"
   launchctl print "${DOMAIN}/${LABEL}" 2>/dev/null | head -40 || echo "(agent not loaded)"
   echo
-  LISTEN_JSON="${HOME}/.config/port-registry/listen.json"
+  LISTEN_JSON="${HOME}/.config/portskill/listen.json"
   PORT=""
   if [[ -f "${LISTEN_JSON}" ]]; then
     echo "listen.json: ${LISTEN_JSON}"
@@ -205,7 +205,7 @@ PY
   fi
   pgrep -lf "Portskill.app/Contents/MacOS/Portskill" 2>/dev/null || echo "Native Portskill.app: not running"
   pgrep -lf PortskillMenu 2>/dev/null || true
-  pgrep -lf "port_registry_app" 2>/dev/null || echo "Server module: not in pgrep"
+  pgrep -lf "portskill" 2>/dev/null || echo "Server module: not in pgrep"
 }
 
 main() {

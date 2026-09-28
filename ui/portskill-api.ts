@@ -1,12 +1,12 @@
 /**
  * Portable Portskill HTTP helpers (extracted from Roster packages/api).
- * Local types from ./port-registry.ts — no @roster imports.
+ * Local types from ./portskill.ts — no @roster imports.
  */
 import type {
-  PortRegistryAction,
-  PortRegistryActionResult,
-  PortRegistryRawState
-} from "./port-registry.ts";
+  PortskillAction,
+  PortskillActionResult,
+  PortskillRawState
+} from "./portskill.ts";
 
 /** Minimal HTTP request shape for host wiring. */
 export interface HttpRequest {
@@ -23,26 +23,26 @@ export interface HttpResponse {
   readonly body: unknown;
 }
 
-export interface PortRegistryStateSource {
-  read(): PortRegistryRawState | Promise<PortRegistryRawState>;
+export interface PortskillStateSource {
+  read(): PortskillRawState | Promise<PortskillRawState>;
 }
 
-export interface PortRegistryActionRunner {
+export interface PortskillActionRunner {
   run(
     project: string,
     rangeId: string,
-    action: PortRegistryAction
-  ): PortRegistryActionResult | Promise<PortRegistryActionResult>;
+    action: PortskillAction
+  ): PortskillActionResult | Promise<PortskillActionResult>;
 }
 
-export interface PortRegistryActionRequestBody {
+export interface PortskillActionRequestBody {
   readonly project?: unknown;
   readonly rangeId?: unknown;
   readonly action?: unknown;
 }
 
-export async function portRegistryStateHttpResponse(
-  source: PortRegistryStateSource
+export async function portskillStateHttpResponse(
+  source: PortskillStateSource
 ): Promise<HttpResponse> {
   const state = await source.read();
   return {
@@ -52,11 +52,11 @@ export async function portRegistryStateHttpResponse(
   };
 }
 
-export async function portRegistryActionHttpResponse(
+export async function portskillActionHttpResponse(
   request: HttpRequest,
-  runner: PortRegistryActionRunner
+  runner: PortskillActionRunner
 ): Promise<HttpResponse> {
-  const parsed = parsePortRegistryActionRequest(request.body);
+  const parsed = parsePortskillActionRequest(request.body);
   if (!parsed) {
     return {
       status: 400,
@@ -76,24 +76,24 @@ export async function portRegistryActionHttpResponse(
   };
 }
 
-export function parsePortRegistryActionRequest(
+export function parsePortskillActionRequest(
   body: unknown
-): { readonly project: string; readonly rangeId: string; readonly action: PortRegistryAction } | undefined {
+): { readonly project: string; readonly rangeId: string; readonly action: PortskillAction } | undefined {
   if (typeof body !== "object" || body === null) {
     return undefined;
   }
 
-  const candidate = body as PortRegistryActionRequestBody;
+  const candidate = body as PortskillActionRequestBody;
   const project = typeof candidate.project === "string" ? candidate.project : undefined;
   const rangeId = typeof candidate.rangeId === "string" ? candidate.rangeId : undefined;
   const action = typeof candidate.action === "string" ? candidate.action : undefined;
-  if (!project || !rangeId || !isPortRegistryAction(action)) {
+  if (!project || !rangeId || !isPortskillAction(action)) {
     return undefined;
   }
 
   return { project, rangeId, action };
 }
 
-function isPortRegistryAction(value: string | undefined): value is PortRegistryAction {
+function isPortskillAction(value: string | undefined): value is PortskillAction {
   return value === "start" || value === "stop" || value === "release";
 }

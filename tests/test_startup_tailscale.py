@@ -13,7 +13,7 @@ from tests.helpers import IsolatedConfig, ROOT
 
 class StartupTailscaleTests(unittest.TestCase):
     def test_http_server_bind_and_serving_do_not_require_reverse_dns(self):
-        from port_registry_app import server as server_mod
+        from portskill import server as server_mod
 
         with IsolatedConfig():
             httpd = None
@@ -61,10 +61,10 @@ class StartupTailscaleTests(unittest.TestCase):
                     binary = iso.root / 'tailscale'
                     binary.write_text('#!/bin/sh\necho "Tailscale is stopped." >&2\nexit 1\n')
                     binary.chmod(0o755)
-                    extra['PORT_REGISTRY_TAILSCALE_BIN'] = str(binary)
+                    extra['PORTSKILL_TAILSCALE_BIN'] = str(binary)
                 with (iso.root / 'server.log').open('w+') as log:
                     process = subprocess.Popen(
-                        [sys.executable, '-m', 'port_registry_app', '--no-open',
+                        [sys.executable, '-m', 'portskill', '--no-open',
                          '--no-auto-apply'],
                         cwd=ROOT, env=iso.subprocess_env(extra), stdout=log, stderr=log,
                     )

@@ -131,7 +131,7 @@ window.__ROSTER_AGENTS__ = {"example":{"id":"example","kind":"HUMAN","name":"Exa
     var rangeId=btn.getAttribute('data-range-id');
     var project=btn.getAttribute('data-project');
     btn.disabled=true;
-    fetch('/port-registry/actions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({project:project,rangeId:rangeId,action:action})})
+    fetch('/portskill/actions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({project:project,rangeId:rangeId,action:action})})
       .then(function(){window.location.reload();})
       .catch(function(){btn.disabled=false;});
   });

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "kind": "port-registry-environment",
+  "kind": "portskill-environment",
   "name": "ui-work",
   "description": "Typical frontend/UI work services",
   "exported_at": "2026-09-04T00:00:00+00:00",
