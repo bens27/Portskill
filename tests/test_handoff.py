@@ -171,7 +171,7 @@ class HandoffMcpTests(unittest.TestCase):
 
     def test_vendored_md_pins_kit_sha(self) -> None:
         text = (ROOT / "vendor" / "session-handoff-kit" / "VENDORED.md").read_text(encoding="utf-8")
-        self.assertIn("ce13cbe", text)
+        self.assertIn("a19fa9f", text)
         self.assertNotIn("/Users/", text)
         self.assertIn("Session Handoff Kit", text)
 
@@ -227,7 +227,7 @@ class HandoffMcpTests(unittest.TestCase):
         self.assertIsNone(st.get("error"))
         sk = skill["result"]["structuredContent"]
         self.assertIn("name: session-handoff", sk.get("text") or "")
-        self.assertIn("0.13.0", sk.get("text") or "")
+        self.assertIn("0.14.0", sk.get("text") or "")
         tm = template["result"]["structuredContent"]
         self.assertIn("status:", tm.get("text") or "")
 
@@ -524,7 +524,7 @@ class HandoffVendorTests(unittest.TestCase):
         self.assertTrue(SKILL.is_file())
         text = SKILL.read_text(encoding="utf-8")
         self.assertIn("name: session-handoff", text)
-        self.assertIn("0.13.0", text)
+        self.assertIn("0.14.0", text)
         self.assertIn("context-watch", text)
         readme = ROOT / "vendor" / "session-handoff-kit" / "README.md"
         self.assertTrue(readme.is_file())
