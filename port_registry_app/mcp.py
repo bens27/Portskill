@@ -18,8 +18,16 @@ from .handoff import HANDOFF_TOOL_DEFS, HANDOFF_TOOL_NAMES, call_handoff_tool, h
 MCP_TOOLS_PROFILES = ("full", "lean")
 PORTSKILL_TOOL_NAME = "portskill"
 PORTSKILL_TOOL_ALIASES = frozenset({"portskill_path"})
-PORTSKILL_TOOL_DESCRIPTION = (
-    "One MCP tool for your agent to handle all port management functions."
+PORTSKILL_TOOL_PITCH = "One MCP tool for your agent to handle all port management functions."
+PORTSKILL_TOOL_DESCRIPTION = PORTSKILL_TOOL_PITCH + (
+    " Use it whenever the user says register a port, register, add, host, serve, run, launch, expose, "
+    "put on or get onto Portskill (or the port registry), or needs a dev server, app "
+    "or project to get a port, a URL, or a Tailscale/tailnet link. "
+    "mode=start does the whole job in one call: reserves a free port, wires start.sh "
+    "to command, starts the service and, with tailnet=serve, publishes it over Tailscale Serve. "
+    "Already-done steps are skipped, so it is safe to repeat. "
+    "mode=stop, release or restart to take a service down, free its port or bounce it; "
+    "mode=status to see what is registered and running."
 )
 
 LEAN_MCP_TOOLS_ENABLED = frozenset(
@@ -42,7 +50,7 @@ PACKAGE_ROOT = pathlib.Path(__file__).resolve().parent.parent
 TOOL_DEFS = [
     {
         "name": "allocate",
-        "description": "Reserve free ports for a project (port-registry allocate).",
+        "description": "Low-level: only reserve free ports without starting anything. To register and serve a project, use portskill mode=start instead.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -90,7 +98,7 @@ TOOL_DEFS = [
     },
     {
         "name": "start",
-        "description": "Run project start.sh and activate the range (port-registry start).",
+        "description": "Low-level: run start.sh for an already-reserved range_id. To register and serve a new project, use portskill mode=start instead.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -156,7 +164,10 @@ TOOL_DEFS = [
                 "mode": {
                     "type": "string",
                     "enum": ["start", "stop", "release", "restart", "status"],
-                    "description": "start, stop, release, restart, or status",
+                    "description": (
+                        "start = register and serve (allocate, wire, activate, start, tailnet); "
+                        "stop, release, restart, or status"
+                    ),
                 },
                 "project": {"type": "string", "description": "Project directory (default .)"},
                 "count": {
@@ -170,12 +181,12 @@ TOOL_DEFS = [
                     "type": "string",
                     "enum": ["serve", "funnel", "none"],
                     "description": (
-                        "Optional user-service Tailnet. Omit/none skips Serve. "
+                        "Optional user-service Tailnet. Omitted follows settings.default_tailnet (none unless set to serve); none skips Serve. "
                         "serve requires login (needs_input to resume). "
                         "Never Funnels Portskill listen."
                     ),
                 },
-                "command": {"type": "string", "description": "Optional start command to wire"},
+                "command": {"type": "string", "description": "Shell command that launches the service, e.g. npm run dev -- --port $PORT. Needed for start when start.sh is still a placeholder"},
                 "cwd": {"type": "string"},
                 "default_state": {"type": "string", "enum": ["on", "off"]},
                 "start": {"type": "integer", "description": "Optional explicit start port when allocating"},
@@ -353,7 +364,7 @@ TOOL_DEFS = [
     },
     {
         "name": "settings_get",
-        "description": "Read registry settings (auto_apply_preset, auto_apply_on_launch, auto_exit_on_shutdown, stop_also_release, require_compat, mcp_tools, mcp_tools_profile).",
+        "description": "Read registry settings (auto_apply_preset, auto_apply_on_launch, auto_exit_on_shutdown, stop_also_release, default_tailnet, require_compat, mcp_tools, mcp_tools_profile).",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
@@ -371,6 +382,14 @@ TOOL_DEFS = [
                         "lean = portskill, status, settings_get, plus escape hatches "
                         "allocate/stop/release; activate and other CRUD and handoff_* stay off until toggled. "
                         "Opt-in: existing installs stay full until this is applied."
+                    ),
+                },
+                "default_tailnet": {
+                    "type": "string",
+                    "enum": ["serve", "none"],
+                    "description": (
+                        "Default chain: serve makes portskill start/restart register, Tailscale Serve and run "
+                        "when tailnet is omitted. none (default) skips Tailscale. Funnel is never a default."
                     ),
                 },
                 "stop_also_release": {
@@ -913,6 +932,8 @@ def tool_argv(name: str, arguments: dict) -> list[str]:
             argv += ["--close-tab", str(args["close_tab"])]
         if args.get("mcp_tools_profile") is not None:
             argv += ["--mcp-tools-profile", str(args["mcp_tools_profile"])]
+        if args.get("default_tailnet"):
+            argv += ["--default-tailnet", str(args["default_tailnet"])]
         if "stop_also_release" in args and args.get("stop_also_release") is not None:
             argv += ["--stop-also-release", "on" if args.get("stop_also_release") else "off"]
         return argv
@@ -1210,6 +1231,9 @@ def mcp_handle(message: dict) -> dict | None:
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
                 "instructions": (
                     "Portskill MCP. portskill is one MCP tool for your agent to handle all port management functions. "
+                    "When the user asks to register, host, serve or run something on Portskill, call "
+                    "portskill mode=start (with command, and tailnet=serve if they want a Tailscale link); "
+                    "do not stop after allocate. "
                     "Happy path: portskill, start, stop, release, and status. "
                     "allocate remains available. activate is an internal primitive the orchestrator may call; "
                     "it is off in lean and is not a happy-path peer (settings set --mcp-tool activate=on). "
@@ -1222,8 +1246,8 @@ def mcp_handle(message: dict) -> dict | None:
                     "enable it in the UI or CLI before using its flat tool names "
                     "handoff_status/handoff_skill/handoff_template/handoff_list/handoff_resolve/"
                     "handoff_new_path/handoff_resume/handoff_supersede/handoff_install_help "
-                    "(not nested session-handoff/*) and wrap the vendored kit ledger "
-                    "(vendor/session-handoff-kit). User commands (x-portskill-kind:user-command) chain "
+                    "(not nested session-handoff/*) and wrap the separate Session Handoff kit ledger. "
+                    "User commands (x-portskill-kind:user-command) chain "
                     "enabled system tools (series/parallel; no nesting). On needs_input (Tailnet), "
                     "re-call with tailnet=serve|funnel|none. Prefer stop over release when a process "
                     "may still be running. stop honors settings.stop_also_release (default true)."

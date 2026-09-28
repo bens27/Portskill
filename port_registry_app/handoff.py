@@ -1,20 +1,25 @@
-"""Session Handoff product surface — vendored kit + ledger wrappers.
+"""Session Handoff product surface — separate kit + ledger wrappers.
 
-The kit lives at vendor/session-handoff-kit/ (tracked source). Optional override:
-settings.handoff_kit or env PORTSKILL_HANDOFF_KIT. Ledger writes go only through
-the vendored handoff_ledger.py CLI. Stdlib only. Loopback / stdio — no Funnel.
+The kit is its own project (github.com/bens27/session-handoff-kit). Resolution
+order: settings.handoff_kit / env PORTSKILL_HANDOFF_KIT override, then a kit
+fetched by `portskill-cli handoff fetch` into <registry dir>/handoff-kit/<ref>/.
+Ledger writes go only through that kit's handoff_ledger.py CLI. Stdlib only.
+Loopback / stdio — no Funnel.
 """
 from __future__ import annotations
 
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 from typing import Any
 
 PACKAGE_ROOT = pathlib.Path(__file__).resolve().parent.parent
-VENDOR_KIT = PACKAGE_ROOT / "vendor" / "session-handoff-kit"
+KIT_REPO = "bens27/session-handoff-kit"
+KIT_DEFAULT_REF = "v0.8.0"
+KIT_TARBALL_MAX_BYTES = 8 * 1024 * 1024
 
 HANDOFF_TOOL_NAMES = (
     "handoff_status",
@@ -84,11 +89,25 @@ def configured_kit_override(settings: dict | None = None) -> str:
     return ""
 
 
+def fetched_kits_dir() -> pathlib.Path:
+    return _registry_parent() / "handoff-kit"
+
+
+def fetched_kit_current() -> pathlib.Path:
+    return fetched_kits_dir() / "current"
+
+
+def kit_source_name(settings: dict | None = None) -> str:
+    if configured_kit_override(settings):
+        return "override"
+    return "fetched"
+
+
 def kit_root(settings: dict | None = None) -> pathlib.Path:
     override = configured_kit_override(settings)
     if override:
         return pathlib.Path(override).expanduser()
-    return VENDOR_KIT
+    return fetched_kit_current()
 
 
 def kit_present(settings: dict | None = None) -> bool:
@@ -102,9 +121,113 @@ def kit_error(settings: dict | None = None) -> str:
         if not _looks_like_kit(path):
             return f"handoff kit path is not a Session Handoff checkout: {path}"
         return ""
-    if _looks_like_kit(VENDOR_KIT):
+    if _looks_like_kit(fetched_kit_current()):
         return ""
-    return "vendored Session Handoff kit missing (vendor/session-handoff-kit)"
+    return ("Session Handoff kit not installed: run `portskill-cli handoff fetch` "
+            "(or set --handoff-kit to a checkout)")
+
+
+def _download_tarball(ref: str, dest: pathlib.Path) -> None:
+    """GitHub source tarball for `ref` -> dest. Public repo: unauthenticated
+    download. GITHUB_TOKEN / GH_TOKEN, else `gh api`, cover rate limits and a
+    private fork. Raises RuntimeError with a user-facing message."""
+    import shutil
+    import urllib.error
+    import urllib.request
+
+    url = f"https://api.github.com/repos/{KIT_REPO}/tarball/{ref}"
+    token = (os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or "").strip()
+
+    def _http(headers: dict) -> None:
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "wb") as out:
+                shutil.copyfileobj(resp, out, length=1 << 16)
+                if out.tell() > KIT_TARBALL_MAX_BYTES:
+                    raise RuntimeError("kit tarball larger than expected; refusing")
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"GitHub returned {exc.code} for {url}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"download failed: {exc.reason}") from exc
+
+    headers = {"User-Agent": "portskill"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        _http(headers)
+        return
+    except RuntimeError as exc:
+        if token or not str(exc).startswith("GitHub returned"):
+            raise
+    gh = shutil.which("gh")
+    if not gh:
+        raise RuntimeError("GitHub download failed and no GITHUB_TOKEN/GH_TOKEN "
+                           "or `gh` CLI on PATH")
+    try:
+        completed = subprocess.run(
+            [gh, "api", f"repos/{KIT_REPO}/tarball/{ref}"],
+            stdout=open(dest, "wb"), stderr=subprocess.PIPE, check=False, timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"gh api failed: {exc}") from exc
+    if completed.returncode != 0:
+        raise RuntimeError("gh api failed: " + (completed.stderr or b"").decode("utf-8", "replace").strip())
+
+
+def fetch_kit(ref: str | None = None, downloader=None) -> dict:
+    """Install the kit at `ref` under <registry dir>/handoff-kit/<ref>/ and point
+    handoff-kit/current at it. Idempotent per ref; never touches ~/.claude or
+    ~/.codex. `downloader(ref, dest)` is injectable for tests."""
+    import shutil
+    import tarfile
+    import tempfile
+
+    ref = (ref or KIT_DEFAULT_REF).strip()
+    if not re.fullmatch(r"[A-Za-z0-9._/-]{1,80}", ref) or ".." in ref:
+        return {"ok": False, "error": "bad_ref", "message": f"invalid kit ref: {ref!r}"}
+    base = fetched_kits_dir()
+    target = base / ref.replace("/", "_")
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=str(base)) as tmp:
+            tmp_path = pathlib.Path(tmp)
+            tarball = tmp_path / "kit.tar.gz"
+            (downloader or _download_tarball)(ref, tarball)
+            with tarfile.open(tarball, "r:gz") as tar:
+                members = [m for m in tar.getmembers()
+                           if m.isfile() and "/" in m.name and not m.name.endswith("/.DS_Store")]
+                if not members:
+                    return {"ok": False, "error": "empty_tarball", "message": "kit tarball has no files"}
+                tar.extractall(tmp_path / "x", members=members, filter="data")
+            roots = [p for p in (tmp_path / "x").iterdir() if p.is_dir()]
+            if len(roots) != 1 or not _looks_like_kit(roots[0]):
+                return {"ok": False, "error": "not_a_kit",
+                        "message": "downloaded archive is not a Session Handoff kit"}
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.move(str(roots[0]), str(target))
+        current = fetched_kit_current()
+        if current.is_symlink() or current.exists():
+            current.unlink() if current.is_symlink() else shutil.rmtree(current)
+        os.symlink(target.name, current)
+    except RuntimeError as exc:
+        return {"ok": False, "error": "fetch_failed", "message": str(exc)}
+    except (OSError, tarfile.TarError) as exc:
+        return {"ok": False, "error": "fetch_failed", "message": str(exc)}
+    return {"ok": True, "ref": ref, "path": str(target), "current": str(current),
+            "version": kit_version(target),
+            "handoff_notice": f"Session Handoff kit {ref} installed at {target}; "
+                              "hooks are not installed (see install help)."}
+
+
+def kit_version(root: pathlib.Path | None = None, settings: dict | None = None) -> str:
+    root = root or kit_root(settings)
+    try:
+        with open(root / "plugins" / "session-handoff" / ".claude-plugin" / "plugin.json",
+                  encoding="utf-8") as f:
+            return str(json.load(f).get("version") or "")
+    except (OSError, ValueError):
+        return ""
 
 
 def _registry_parent() -> pathlib.Path:
@@ -126,7 +249,7 @@ def configured_skill_override(settings: dict | None = None) -> str:
 
 
 def kit_skill_path(settings: dict | None = None) -> pathlib.Path | None:
-    """Bundled Write-a-Handoff SKILL.md from the vendored kit (or kit override)."""
+    """Write-a-Handoff SKILL.md from the resolved kit."""
     root = kit_root(settings)
     for rel in (SKILL_REL, SKILL_REL_PLUGIN):
         path = root / rel
@@ -147,7 +270,7 @@ def skill_source(settings: dict | None = None) -> str:
     override = configured_skill_override(settings)
     if override:
         return "custom"
-    return "vendored"
+    return "kit"
 
 
 def _atomic_write_text(path: pathlib.Path, text: str) -> None:
@@ -195,7 +318,7 @@ def bundled_skill_text(settings: dict | None = None) -> dict:
         "path": str(path),
         "text": _read_text(path),
         "filename": "SKILL.md",
-        "source": "vendored",
+        "source": "kit",
     }
 
 
@@ -250,7 +373,7 @@ def doctor_handoff(settings: dict | None = None) -> tuple[dict, dict]:
         "configured": configured,
         "enabled": enabled,
         "path": str(kit_root(settings)),
-        "source": "override" if override else "vendored",
+        "source": kit_source_name(settings),
         "override": override or None,
         "error": err or None,
     }
@@ -483,7 +606,7 @@ def install_matrix(settings: dict | None = None) -> list[dict]:
 
 
 def run_ledger(argv: list[str], settings: dict | None = None) -> tuple[int, Any, str, str]:
-    """Invoke vendored handoff_ledger.py. Returns (code, parsed_json_or_None, stdout, stderr)."""
+    """Invoke the kit's handoff_ledger.py. Returns (code, parsed_json_or_None, stdout, stderr)."""
     script = ledger_script(settings)
     if script is None:
         return (
@@ -584,7 +707,7 @@ def status_payload(project_dir: str | None = None, settings: dict | None = None)
     return {
         "ok": present,
         "kit_path": str(root),
-        "kit_source": "override" if configured_kit_override(settings) else "vendored",
+        "kit_source": kit_source_name(settings),
         "installed": bool(skill and skill.is_file()),
         "skill_path": str(skill) if skill else None,
         "skill_source": skill_source(settings),
@@ -599,7 +722,7 @@ def status_payload(project_dir: str | None = None, settings: dict | None = None)
         "project": opened.get("project"),
         "install_matrix": install_matrix(settings),
         "handoff_enabled": enabled,
-        "skill_version": "0.7.0",
+        "skill_version": kit_version(settings=settings) or "unknown",
     }
 
 
@@ -632,7 +755,7 @@ def run_package_sh(settings: dict | None = None) -> dict:
 
 
 def run_codex_install(settings: dict | None = None, codex_home: str | None = None) -> dict:
-    """Run the vendored codex/install.sh. Honors CODEX_HOME; does not edit config.toml."""
+    """Run the kit's codex/install.sh. Honors CODEX_HOME; does not edit config.toml."""
     script = codex_install_script(settings)
     if script is None:
         return {
@@ -778,7 +901,7 @@ HANDOFF_TOOL_DEFS = [
     {
         "name": "handoff_status",
         "description": (
-            "Session Handoff kit status: vendored/override path, skill readable, "
+            "Session Handoff kit status: fetched or override path, skill readable, "
             "open-handoff count, install matrix (Claude Code / Cowork / Codex / Chat / Chrome)."
         ),
         "inputSchema": {
@@ -792,18 +915,18 @@ HANDOFF_TOOL_DEFS = [
         "name": "handoff_skill",
         "description": (
             "Return Write-a-Handoff SKILL.md text from the custom file under "
-            "~/.config/port-registry/ when set, else the vendored kit (or kit override)."
+            "~/.config/port-registry/ when set, else the fetched kit (or a kit override)."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "handoff_template",
-        "description": "Return handoff-template.md from the vendored kit.",
+        "description": "Return handoff-template.md from the resolved kit.",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "handoff_list",
-        "description": "Wrap vendored handoff_ledger.py list --json (open handoffs).",
+        "description": "Wrap the kit handoff_ledger.py list --json (open handoffs).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -814,7 +937,7 @@ HANDOFF_TOOL_DEFS = [
     },
     {
         "name": "handoff_resolve",
-        "description": "Wrap vendored handoff_ledger.py resolve <topic-or-path> --json.",
+        "description": "Wrap the kit handoff_ledger.py resolve <topic-or-path> --json.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -827,7 +950,7 @@ HANDOFF_TOOL_DEFS = [
     },
     {
         "name": "handoff_new_path",
-        "description": "Wrap vendored handoff_ledger.py new-path (deterministic path + created timestamp). Does not write a file.",
+        "description": "Wrap the kit handoff_ledger.py new-path (deterministic path + created timestamp). Does not write a file.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -839,7 +962,7 @@ HANDOFF_TOOL_DEFS = [
     },
     {
         "name": "handoff_resume",
-        "description": "Wrap vendored handoff_ledger.py resume <path> (marks status resumed).",
+        "description": "Wrap the kit handoff_ledger.py resume <path> (marks status resumed).",
         "inputSchema": {
             "type": "object",
             "properties": {"path": {"type": "string"}},
@@ -848,7 +971,7 @@ HANDOFF_TOOL_DEFS = [
     },
     {
         "name": "handoff_supersede",
-        "description": "Wrap vendored handoff_ledger.py supersede <path> [--by <new-path>].",
+        "description": "Wrap the kit handoff_ledger.py supersede <path> [--by <new-path>].",
         "inputSchema": {
             "type": "object",
             "properties": {

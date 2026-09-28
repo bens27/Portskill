@@ -1,5 +1,5 @@
 /**
- * Portable Port Registry view builders + HTML (extracted from Roster packages/web).
+ * Portable Portskill view builders + HTML (extracted from Roster packages/web).
  * Self-contained: no Roster org/console deps. Import types from ./port-registry.ts.
  */
 import type {
@@ -137,7 +137,7 @@ export function portRegistryStatsHtml(view: PortRegistryView | undefined): strin
 
 export function portRegistryHtml(view: PortRegistryView | undefined): string {
   if (!view) {
-    return `<div class="empty">Port registry data unavailable.</div>`;
+    return `<div class="empty">Portskill data unavailable.</div>`;
   }
 
   if (view.projects.length === 0) {
@@ -195,19 +195,19 @@ export function portRangeStateClass(state: PortRegistryRangeState): string {
   }
 }
 
-/** Subset of Roster consoleCss() tokens/classes needed for the Port Registry view. */
+/** Subset of Roster consoleCss() tokens/classes needed for the Portskill view. */
 export function portRegistryConsoleCss(): string {
   return `:root{--paper:#f3f4f1;--panel:#fff;--ink:#15181d;--muted:#5d6572;--line:#dde0da;--cobalt:#2743d6;--green:#188a5e;--amber:#b97303;--red:#bf3b3b;--violet:#6c46c8}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.5 system-ui,sans-serif}.app{display:flex;min-height:100vh}.sidebar{width:212px;background:var(--ink);color:#c9cdd6}.brand{padding:22px 20px;border-bottom:1px solid rgba(255,255,255,.1)}.brand h1{margin:0;color:white;letter-spacing:.14em}.tag,.mono{font-family:ui-monospace,Menlo,monospace}.tag{font-size:11px;color:#7e8694}.nav{display:grid;gap:4px;padding:14px 10px}.nav a{color:#c9cdd6;text-decoration:none;padding:8px 10px;border-radius:7px}.nav a.active{background:var(--cobalt);color:white}.main{flex:1;min-width:0}.topbar{display:flex;justify-content:space-between;padding:14px 28px;border-bottom:1px solid var(--line);background:#fafbf9;position:sticky;top:0}.live{display:flex;gap:7px;align-items:center;color:var(--muted);font-family:ui-monospace,Menlo,monospace;font-size:11px}.live i{width:7px;height:7px;border-radius:50%;background:var(--green)}.content{padding:26px 28px;max-width:1180px;margin:auto}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:20px}.stat,.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px}.stat{padding:13px 16px}.stat span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase}.stat b{font-size:24px}.view-head{margin:0 0 16px}.view-head h2{margin:0;font-size:27px}.eyebrow{margin:0;color:var(--cobalt);font-size:11px;text-transform:uppercase;letter-spacing:.14em}.badge{font-size:11px;border-radius:999px;padding:2px 8px}.b-exec{background:#e2f2eb;color:var(--green)}.b-onb{background:#eee8fa;color:var(--violet)}.b-block{background:#f8eeda;color:var(--amber)}.b-term{background:#f8e6e6;color:var(--red)}.empty{padding:18px;color:var(--muted)}.pr-panel{padding:18px}.pr-project{margin-bottom:18px}.pr-project:last-child{margin-bottom:0}.pr-project-name{margin:0 0 10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-size:11px}.pr-ranges{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}.pr-range{border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:#fafbf9}.pr-range-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.pr-range-meta{margin-top:8px;color:var(--muted);font-size:12px}.pr-range-actions{display:flex;gap:8px;margin-top:10px}.pr-btn{flex:1;border:1px solid var(--line);background:white;border-radius:6px;padding:6px 8px;font-size:12px;cursor:pointer;color:var(--ink)}.pr-btn:hover:not(:disabled){border-color:var(--cobalt);color:var(--cobalt)}.pr-btn:disabled{opacity:.4;cursor:not-allowed}.pr-btn-danger:hover:not(:disabled){border-color:var(--red);color:var(--red)}@media(max-width:760px){.app{display:block}.sidebar{width:auto}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}`;
 }
 
-/** Full standalone HTML page for the Port Registry light UI (sidebar + stats + ranges). */
+/** Full standalone HTML page for the Portskill light UI (sidebar + stats + ranges). */
 export function renderPortRegistryPageHtml(view: PortRegistryView): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Port Registry</title>
+<title>Portskill</title>
 <style>${portRegistryConsoleCss()}</style>
 </head>
 <body>
@@ -215,16 +215,16 @@ export function renderPortRegistryPageHtml(view: PortRegistryView): string {
   <aside class="sidebar">
     <div class="brand"><h1>PORT</h1><div class="tag">registry</div></div>
     <nav class="nav" aria-label="Views">
-      <a class="active" href="/port-registry">Port Registry</a>
+      <a class="active" href="/port-registry">Portskill</a>
     </nav>
   </aside>
   <main class="main">
     <header class="topbar">
-      <div class="crumb">Environment · Dev tooling / <b>Port Registry</b></div>
+      <div class="crumb">Environment · Dev tooling / <b>Portskill</b></div>
       <div class="live"><i></i> local registry</div>
     </header>
     <section class="content">
-      <div class="view-head"><p class="eyebrow">Environment · Dev tooling</p><h2>Port registry</h2></div>
+      <div class="view-head"><p class="eyebrow">Environment · Dev tooling</p><h2>Portskill</h2></div>
       ${portRegistryStatsHtml(view)}
       <div class="panel pr-panel">${portRegistryHtml(view)}</div>
     </section>

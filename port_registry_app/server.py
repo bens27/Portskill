@@ -973,6 +973,7 @@ def build_view(raw: dict) -> dict:
             "autoApplyOnLaunch": bool(settings.get("auto_apply_on_launch")),
             "autoExitOnShutdown": bool(settings.get("auto_exit_on_shutdown")),
             "stopAlsoRelease": bool(settings.get("stop_also_release", True)),
+            "defaultTailnet": settings.get("default_tailnet") or "none",
             "requireCompat": True,
             "openEnvironmentTabs": list(settings.get("open_environment_tabs") or []),
             "focusedEnvironment": settings.get("focused_environment"),
@@ -1584,6 +1585,7 @@ def settings_panel_html(view: dict) -> str:
     checked = "checked" if settings.get("autoApplyOnLaunch") else ""
     exit_checked = "checked" if settings.get("autoExitOnShutdown") else ""
     stop_release_checked = "checked" if settings.get("stopAlsoRelease", True) else ""
+    default_serve_checked = "checked" if settings.get("defaultTailnet") == "serve" else ""
     current = settings.get("autoApplyPreset") or ""
     options = ['<option value="">(none)</option>']
     for p in view.get("presets") or []:
@@ -1618,6 +1620,7 @@ def settings_panel_html(view: dict) -> str:
         f'<label>Preset <select id="pr-auto-apply-preset">{"".join(options)}</select></label>'
         f'<label><input type="checkbox" id="pr-auto-exit-shutdown" {exit_checked}> Auto-deactivate on shutdown</label>'
         f'<label title="When on, Stop also frees the range. When off, Stop keeps it reserved; use Release to free it."><input type="checkbox" id="pr-stop-also-release" {stop_release_checked}> Stop also Release</label>'
+        f'<label title="When on, portskill start without a tailnet also publishes the service with Tailscale Serve. Never Funnel."><input type="checkbox" id="pr-default-tailnet-serve" {default_serve_checked}> Start also Tailscale Serve</label>'
         '<label class="pr-compat-locked" title="Always on">'
         '<input type="checkbox" id="pr-require-compat" checked disabled> '
         "Require compatibility — on</label>"
@@ -2460,7 +2463,7 @@ def handoff_panel_html(view: dict | None = None) -> str:
     checked = "checked" if enabled else ""
     aria = "true" if enabled else "false"
     kit_path = esc(status.get("kit_path") or "")
-    source = esc(status.get("kit_source") or "vendored")
+    source = esc(status.get("kit_source") or "fetched")
     skill_ok = "yes" if status.get("installed") else "no"
     err = status.get("error")
     err_html = (
@@ -2531,11 +2534,11 @@ def handoff_panel_html(view: dict | None = None) -> str:
         f' <span class="tag">{source}</span>'
     )
     if present:
-        kit_status = "Kit present — vendored Session Handoff product (no extra checkout required)."
+        kit_status = "Kit present — fetched release or an explicit checkout."
     else:
-        kit_status = "Point at a Session Handoff kit checkout (or restore vendor/session-handoff-kit)."
+        kit_status = "Kit not installed. Run portskill-cli handoff fetch, or set a kit checkout."
     override = esc(settings.get("handoffKit") or "")
-    skill_src = esc(status.get("skill_source") or "vendored")
+    skill_src = esc(status.get("skill_source") or "kit")
     skill_override = esc(status.get("skill_override") or "")
     skill_current = esc(status.get("skill_path") or "")
     return (
@@ -3405,6 +3408,8 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
       payload.autoApplyPreset=(sel&&sel.value)||null;
       payload.autoExitOnShutdown=!!(exitBox&&exitBox.checked);
       payload.stopAlsoRelease=!(stopRelBox)||!!stopRelBox.checked;
+      var serveBox=document.getElementById('pr-default-tailnet-serve');
+      if(serveBox)payload.defaultTailnet=serveBox.checked?'serve':'none';
       payload.requireCompat=true;
     }}
     if(action==='compat-check'){{
@@ -4348,6 +4353,8 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
                 "--stop-also-release",
                 "on" if body.get("stopAlsoRelease") else "off",
             ]
+        if body.get("defaultTailnet") in ("serve", "none"):
+            argv += ["--default-tailnet", body["defaultTailnet"]]
         # Always force require_compat on
         argv += ["--require-compat", "on"]
         code, payload, stdout = run_cli(argv)
@@ -4513,6 +4520,12 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             return 400, {"ok": False, "message": "expected path"}
         token = path.strip() or "none"
         argv = ["settings", "set", "--handoff-kit", token]
+        code, payload, stdout = run_cli(argv)
+        return _cli_result(code, payload, stdout)
+
+    if action == "handoff-fetch":
+        ref = body.get("ref")
+        argv = ["handoff", "fetch"] + (["--ref", str(ref)] if isinstance(ref, str) and ref.strip() else [])
         code, payload, stdout = run_cli(argv)
         return _cli_result(code, payload, stdout)
 

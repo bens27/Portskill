@@ -247,6 +247,21 @@ class PathCliMcpTests(unittest.TestCase):
 
             iso.run_cli(["path", "--mode", "stop", "--project", str(proj)])
 
+    def test_default_tailnet_serve_chains_without_flag(self) -> None:
+        with IsolatedConfig() as iso:
+            proj = iso.root / "proj"
+            proj.mkdir()
+            setr = iso.run_cli(["settings", "set", "--default-tailnet", "serve"])
+            self.assertEqual(setr.returncode, 0, setr.stderr or setr.stdout)
+            first = iso.run_cli(["path", "--mode", "start", "--project", str(proj), "--command", "sleep 60"])
+            # Serve was requested by the default, so the chain stops for login.
+            self.assertEqual(first.returncode, 3, first.stderr or first.stdout)
+            self.assertEqual(_skip_map(parse_cli_json(first)).get("tailnet"), SKIP_TAILNET_NOT_LOGGED_IN)
+            override = iso.run_cli(["path", "--mode", "start", "--project", str(proj), "--tailnet", "none"])
+            self.assertEqual(override.returncode, 0, override.stderr or override.stdout)
+            self.assertEqual(_skip_map(parse_cli_json(override)).get("tailnet"), SKIP_TAILNET_NOT_REQUESTED)
+            iso.run_cli(["path", "--mode", "stop", "--project", str(proj)])
+
     def test_funnel_listen_skipped_never_applied(self) -> None:
         with IsolatedConfig() as iso:
             proj = iso.root / "proj"
@@ -290,10 +305,10 @@ class PathCliMcpTests(unittest.TestCase):
             self.assertNotIn("portskill_path", rpc_names)
             self.assertIn("allocate", rpc_names)
             portskill_def = next(t for t in listed["result"]["tools"] if t["name"] == "portskill")
-            self.assertEqual(
-                portskill_def.get("description"),
-                "One MCP tool for your agent to handle all port management functions.",
-            )
+            desc = portskill_def.get("description") or ""
+            self.assertTrue(desc.startswith("One MCP tool for your agent to handle all port management functions."))
+            for trigger in ("register", "serve", "host", "Tailscale", "mode=start"):
+                self.assertIn(trigger, desc)
 
             called = mcp_handle({
                 "jsonrpc": "2.0",

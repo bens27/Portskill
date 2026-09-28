@@ -7,9 +7,6 @@ recursive-include examples *.json
 recursive-include macos *.swift *.plist *.sh *.bash *.png
 recursive-include ui *.html *.ts *.md
 recursive-include tests *.py
-recursive-include vendor/session-handoff-kit *.py *.sh *.md *.json *.js *.html *.txt
-prune vendor/session-handoff-kit/.claude
-prune vendor/session-handoff-kit/dist
 prune macos/Portskill.app
 prune macos/PortskillMenu/PortskillMenu.app
 prune macos/PortskillMenu/.build

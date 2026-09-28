@@ -1,7 +1,8 @@
-"""Session Handoff UI section + MCP tools (vendored kit, stdlib)."""
+"""Session Handoff UI section + MCP tools (separate kit, stdlib)."""
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -12,9 +13,29 @@ from unittest.mock import patch
 from tests.helpers import IsolatedConfig
 from tests.test_ui_collapsed import _details_tags, _has_open_attr
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-LEDGER = ROOT / "vendor" / "session-handoff-kit" / "codex" / "hooks" / "handoff_ledger.py"
-SKILL = ROOT / "vendor" / "session-handoff-kit" / "codex" / "skills" / "session-handoff" / "SKILL.md"
+
+def _real_kit() -> pathlib.Path:
+    """Checkout used only for ledger integration. Skip when it is not on this machine."""
+    raw = (os.environ.get("PORTSKILL_TEST_HANDOFF_KIT") or "").strip()
+    path = pathlib.Path(raw).expanduser() if raw else pathlib.Path.home() / "Development" / "handoff-manager"
+    if not (path / "codex" / "hooks" / "handoff_ledger.py").is_file():
+        raise unittest.SkipTest(f"no Session Handoff checkout at {path}")
+    return path
+
+
+def _write_min_kit(root: pathlib.Path) -> pathlib.Path:
+    kit = root / "min-kit"
+    skill_dir = kit / "codex" / "skills" / "session-handoff"
+    skill_dir.mkdir(parents=True)
+    (kit / "codex" / "hooks").mkdir()
+    (kit / "README.md").write_text("# Session Handoff Kit\n", encoding="utf-8")
+    (kit / "codex" / "hooks" / "handoff_ledger.py").write_text("print('ok')\n", encoding="utf-8")
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: session-handoff\n---\ncontext-watch\n0.8.0\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "handoff-template.md").write_text("status: open\n", encoding="utf-8")
+    return kit
 
 HANDOFF_TOOLS = (
     "handoff_status",
@@ -47,7 +68,7 @@ class HandoffMarkupTests(unittest.TestCase):
         self.assertTrue(tags)
         for tag in tags:
             self.assertFalse(_has_open_attr(tag), tag)
-        self.assertIn("Kit present", html)
+        self.assertIn("Kit not installed", html)
         self.assertIn("Enable Session Handoff", html)
         self.assertIn("Experimental (Beta)", html)
         self.assertIn("Install matrix", html)
@@ -169,12 +190,6 @@ class HandoffMcpTests(unittest.TestCase):
         for name in names:
             self.assertFalse(name.startswith("session-handoff/"), name)
 
-    def test_vendored_md_pins_kit_sha(self) -> None:
-        text = (ROOT / "vendor" / "session-handoff-kit" / "VENDORED.md").read_text(encoding="utf-8")
-        self.assertIn("7587834", text)
-        self.assertNotIn("/Users/", text)
-        self.assertIn("Session Handoff Kit", text)
-
     def test_tools_list_omits_when_toggled_off(self) -> None:
         from port_registry_app.mcp import enabled_tool_defs, mcp_handle
 
@@ -221,20 +236,19 @@ class HandoffMcpTests(unittest.TestCase):
                 "params": {"name": "handoff_template", "arguments": {}},
             })
         st = status["result"]["structuredContent"]
-        self.assertTrue(st.get("ok"))
-        self.assertTrue(st.get("installed"))
-        self.assertIn("vendor/session-handoff-kit", st.get("kit_path") or "")
-        self.assertIsNone(st.get("error"))
+        self.assertFalse(st.get("ok"))
+        self.assertFalse(st.get("installed"))
+        self.assertEqual(st.get("kit_source"), "fetched")
+        self.assertIn("handoff fetch", st.get("error") or "")
         sk = skill["result"]["structuredContent"]
-        self.assertIn("name: session-handoff", sk.get("text") or "")
-        self.assertIn("0.7.0", sk.get("text") or "")
+        self.assertFalse(sk.get("ok"))
         tm = template["result"]["structuredContent"]
-        self.assertIn("status:", tm.get("text") or "")
+        self.assertFalse(tm.get("ok"))
 
     def test_list_via_vendored_ledger_on_temp_dir(self) -> None:
         from port_registry_app.mcp import mcp_handle
 
-        self.assertTrue(LEDGER.is_file(), f"missing vendored ledger: {LEDGER}")
+        ledger = _real_kit() / "codex" / "hooks" / "handoff_ledger.py"
         with tempfile.TemporaryDirectory(prefix="handoff-ledger-") as tmp:
             root = pathlib.Path(tmp)
             handoffs = root / ".handoffs"
@@ -251,7 +265,7 @@ class HandoffMcpTests(unittest.TestCase):
                 encoding="utf-8",
             )
             proc = subprocess.run(
-                [sys.executable, str(LEDGER), "list", str(root), "--json"],
+                [sys.executable, str(ledger), "list", str(root), "--json"],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -262,7 +276,9 @@ class HandoffMcpTests(unittest.TestCase):
             self.assertEqual(listed[0]["topic"], "portskill-demo")
 
             with IsolatedConfig() as iso:
-                iso.write_registry({"settings": {"handoff_enabled": True}})
+                iso.write_registry({
+                    "settings": {"handoff_enabled": True, "handoff_kit": str(ledger.parents[2])},
+                })
                 resp = mcp_handle({
                     "jsonrpc": "2.0",
                     "id": 7,
@@ -280,7 +296,7 @@ class HandoffMcpTests(unittest.TestCase):
     def test_ledger_resolve_new_path_resume_supersede(self) -> None:
         from port_registry_app.mcp import mcp_handle
 
-        self.assertTrue(LEDGER.is_file(), f"missing vendored ledger: {LEDGER}")
+        kit = _real_kit()
         with tempfile.TemporaryDirectory(prefix="handoff-ledger-ops-") as tmp:
             root = pathlib.Path(tmp)
             handoffs = root / ".handoffs"
@@ -308,7 +324,7 @@ class HandoffMcpTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with IsolatedConfig() as iso:
-                iso.write_registry({"settings": {"handoff_enabled": True}})
+                iso.write_registry({"settings": {"handoff_enabled": True, "handoff_kit": str(kit)}})
                 resolved = mcp_handle({
                     "jsonrpc": "2.0",
                     "id": 20,
@@ -377,7 +393,7 @@ class HandoffMcpTests(unittest.TestCase):
         from port_registry_app.handoff import run_codex_install
 
         with tempfile.TemporaryDirectory(prefix="handoff-codex-") as tmp:
-            result = run_codex_install(codex_home=tmp)
+            result = run_codex_install(settings={"handoff_kit": str(_real_kit())}, codex_home=tmp)
             home = pathlib.Path(tmp)
             self.assertTrue(result.get("ok"), result)
             self.assertTrue((home / "hooks" / "handoff_ledger.py").is_file())
@@ -453,20 +469,22 @@ class HandoffCustomSkillTests(unittest.TestCase):
         from port_registry_app.server import dispatch_ui_action
 
         with IsolatedConfig() as iso:
-            iso.write_registry({"settings": {"handoff_enabled": True}})
+            kit = _write_min_kit(iso.root)
+            iso.write_registry({"settings": {"handoff_enabled": True, "handoff_kit": str(kit)}})
             code, body = dispatch_ui_action({"action": "handoff-skill-download"})
         self.assertEqual(code, 0, body)
         self.assertTrue(body.get("ok"), body)
         self.assertIn("name: session-handoff", body.get("download") or "")
         self.assertEqual(body.get("filename"), "SKILL.md")
-        self.assertEqual(body.get("source"), "vendored")
+        self.assertEqual(body.get("source"), "kit")
 
     def test_clear_restores_bundled_skill(self) -> None:
         from port_registry_app.mcp import mcp_handle
         from port_registry_app.server import dispatch_ui_action
 
         with IsolatedConfig() as iso:
-            iso.write_registry({"settings": {"handoff_enabled": True}})
+            kit = _write_min_kit(iso.root)
+            iso.write_registry({"settings": {"handoff_enabled": True, "handoff_kit": str(kit)}})
             dispatch_ui_action({
                 "action": "handoff-skill-upload",
                 "content": "# custom only\n",
@@ -518,17 +536,78 @@ class HandoffCustomSkillTests(unittest.TestCase):
                 httpd.server_close()
 
 
-class HandoffVendorTests(unittest.TestCase):
-    def test_vendored_skill_front_matter(self) -> None:
-        self.assertTrue(SKILL.is_file())
-        text = SKILL.read_text(encoding="utf-8")
-        self.assertIn("name: session-handoff", text)
-        self.assertIn("0.7.0", text)
-        self.assertIn("context-watch", text)
-        readme = ROOT / "vendor" / "session-handoff-kit" / "README.md"
-        self.assertTrue(readme.is_file())
-        self.assertTrue(readme.read_text(encoding="utf-8").startswith("# Session Handoff Kit"))
-
-
 if __name__ == "__main__":
     unittest.main()
+
+
+class HandoffFetchTests(unittest.TestCase):
+    """Install-time fetch of the standalone kit (no network: injected downloader)."""
+
+    def _fake_tarball(self, ref, dest, kit=True, escape=False):
+        import tarfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / f"bens27-session-handoff-kit-{ref}"
+            (root / "codex" / "hooks").mkdir(parents=True)
+            (root / "plugins" / "session-handoff" / ".claude-plugin").mkdir(parents=True)
+            if kit:
+                (root / "README.md").write_text("# kit\n")
+                (root / "codex" / "hooks" / "handoff_ledger.py").write_text("print('ok')\n")
+                (root / "plugins" / "session-handoff" / ".claude-plugin" / "plugin.json").write_text(
+                    json.dumps({"version": "0.8.0"}))
+            (root / "evil.txt").write_text("x")
+            with tarfile.open(dest, "w:gz") as tar:
+                tar.add(root, arcname=root.name)
+                if escape:
+                    info = tarfile.TarInfo(name=root.name + "/../../escape.txt")
+                    info.size = 1
+                    import io
+                    tar.addfile(info, io.BytesIO(b"x"))
+
+    def test_fetch_installs_and_resolves_current(self) -> None:
+        from port_registry_app import handoff
+
+        with IsolatedConfig():
+            result = handoff.fetch_kit("v9.9.9", downloader=self._fake_tarball)
+            self.assertTrue(result.get("ok"), result)
+            self.assertEqual(result.get("version"), "0.8.0")
+            current = handoff.fetched_kit_current()
+            self.assertTrue(current.is_symlink())
+            self.assertTrue((current / "codex" / "hooks" / "handoff_ledger.py").is_file())
+            self.assertEqual(handoff.kit_root({}), current)
+            self.assertEqual(handoff.kit_error({}), "")
+            self.assertEqual(handoff.kit_version(current), "0.8.0")
+            again = handoff.fetch_kit("v9.9.9", downloader=self._fake_tarball)
+            self.assertTrue(again.get("ok"), again)
+
+    def test_fetch_rejects_non_kit_and_bad_ref(self) -> None:
+        from port_registry_app import handoff
+
+        with IsolatedConfig():
+            bad = handoff.fetch_kit("v0.0.1", downloader=lambda r, d: self._fake_tarball(r, d, kit=False))
+            self.assertFalse(bad.get("ok"))
+            self.assertEqual(bad.get("error"), "not_a_kit")
+            self.assertFalse(handoff.fetched_kit_current().exists())
+            self.assertEqual(handoff.fetch_kit("../x").get("error"), "bad_ref")
+            self.assertIn("handoff fetch", handoff.kit_error({}))
+
+    def test_fetch_refuses_path_traversal(self) -> None:
+        from port_registry_app import handoff
+
+        with IsolatedConfig():
+            result = handoff.fetch_kit("v1.0.0", downloader=lambda r, d: self._fake_tarball(r, d, escape=True))
+            self.assertEqual(result.get("error"), "fetch_failed")
+            self.assertIn("outside", result.get("message", ""))
+            self.assertFalse(handoff.fetched_kit_current().exists())
+            self.assertFalse((handoff.fetched_kits_dir().parent / "escape.txt").exists())
+
+    def test_fetch_download_failure_is_reported(self) -> None:
+        from port_registry_app import handoff
+
+        def boom(ref, dest):
+            raise RuntimeError("GitHub returned 404")
+
+        with IsolatedConfig():
+            result = handoff.fetch_kit("v0.8.0", downloader=boom)
+            self.assertEqual(result.get("error"), "fetch_failed")
+            self.assertIn("404", result.get("message", ""))

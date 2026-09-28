@@ -335,10 +335,11 @@ def default_settings():
         "mcp_tools": {},  # tool_name -> bool; missing key = enabled
         "mcp_tools_profile": "full",  # named preset: full|lean; apply writes mcp_tools
         "stop_also_release": True,  # stop also frees the range; false keeps reserved
+        "default_tailnet": "none",  # portskill start/restart without tailnet: none|serve (never funnel)
         "mcp_user_commands": {},  # name -> {name, description, steps[{tool,arguments,mode}]}
         "serve_portskill_on_tailscale": False,  # new installs OFF; existing true is preserved by normalize
         "handoff_enabled": False,  # Session Handoff section opt-in
-        "handoff_kit": None,  # optional override; default is vendored kit
+        "handoff_kit": None,  # optional override; default is the fetched kit
         "handoff_skill": None,  # optional custom Write-a-Handoff SKILL.md path
     }
 
@@ -435,6 +436,8 @@ def normalize_settings(settings):
         )
     else:
         normalized["stop_also_release"] = bool(stop_rel)
+    dt = settings.get("default_tailnet", "none")
+    normalized["default_tailnet"] = "serve" if isinstance(dt, str) and dt.strip().lower() == "serve" else "none"
     # Optional preference: Tailscale Serve the Portskill UI/MCP listen port (not Funnel).
     # Missing key follows the new-install default (false). An explicit true stays true.
     serve_ps = settings.get("serve_portskill_on_tailscale", False)
@@ -4007,6 +4010,12 @@ def cmd_settings_set(args):
                 fail("invalid_args", "--stop-also-release must be on|off")
             settings["stop_also_release"] = token == "on"
             changed = True
+        if getattr(args, "default_tailnet", None) is not None:
+            token = str(args.default_tailnet).strip().lower()
+            if token not in ("serve", "none"):
+                fail("invalid_args", "--default-tailnet must be serve|none")
+            settings["default_tailnet"] = token
+            changed = True
         if getattr(args, "overlap_policy", None) is not None:
             token = str(args.overlap_policy).strip().lower()
             if token not in ("allow", "deny"):
@@ -5556,6 +5565,15 @@ def cmd_doctor(args):
         raise SystemExit(DOCTOR_FAIL_CLOSED_EXIT)
 
 
+def cmd_handoff_fetch(args):
+    from port_registry_app.handoff import fetch_kit
+
+    result = fetch_kit(getattr(args, "ref", None))
+    if not result.get("ok"):
+        fail(result.get("error") or "fetch_failed", result.get("message"))
+    emit(result)
+
+
 def cmd_history_list(args):
     env = getattr(args, "environment", None)
 
@@ -6023,6 +6041,14 @@ def parser():
     doctor.add_argument("--project", default=".")
     doctor.set_defaults(func=cmd_doctor)
 
+    handoff = subparsers.add_parser("handoff", help="Experimental Session Handoff kit management")
+    handoff_sub = handoff.add_subparsers(dest="handoff_command", required=True)
+    handoff_fetch = handoff_sub.add_parser(
+        "fetch", help="Download the Session Handoff kit release into the Portskill config dir")
+    handoff_fetch.add_argument("--ref", default=None,
+                               help="Kit git ref (tag/branch/sha); default is the pinned release")
+    handoff_fetch.set_defaults(func=cmd_handoff_fetch)
+
     http_auth = subparsers.add_parser(
         "http-auth",
         help="Optional helper: bearer token + opt-in passkey gate (default off)",
@@ -6246,6 +6272,12 @@ def parser():
         help="When on, Portskill UI attempts deactivate once on SIGINT/SIGTERM",
     )
     settings_set.add_argument(
+        "--default-tailnet",
+        choices=["serve", "none"],
+        default=None,
+        help="Tailnet used by path/portskill start|restart when --tailnet is omitted (default none).",
+    )
+    settings_set.add_argument(
         "--stop-also-release",
         choices=["on", "off"],
         default=None,
@@ -6341,7 +6373,7 @@ def parser():
     settings_set.add_argument(
         "--handoff-kit",
         default=None,
-        help="Optional Session Handoff kit path override (or none to use vendored kit)",
+        help="Optional Session Handoff kit path override (or none to use the fetched kit)",
     )
     settings_set.add_argument(
         "--handoff-skill",

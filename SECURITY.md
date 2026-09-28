@@ -33,11 +33,10 @@ Do **not** Funnel or publicly expose the Portskill listen port while testing a r
 
 Session Handoff is disabled by default. Opt-in controls MCP discovery/calls and dashboard ledger access. Installing agent hooks is a separate explicit action; disabling Portskill integration does not remove already installed hooks or browser extensions.
 
-- The kit at `vendor/session-handoff-kit/` is local stdlib (Python / bash). Portskill does not add a network client for it.
-- Ledger writes go only through the vendored `handoff_ledger.py`. Files land in the project's `./.handoffs/` when that directory exists, otherwise `~/.claude/handoffs/<project-basename>/`.
+- The Session Handoff kit is a separate project. `portskill-cli handoff fetch` is the one network call: it downloads a pinned public release into the Portskill config directory. Ledger writes go only through that kit's `handoff_ledger.py`. Files land in the project's `./.handoffs/` when that directory exists, otherwise `~/.claude/handoffs/<project-basename>/`.
 - Codex `install.sh` writes `$CODEX_HOME` (default `~/.codex`): hook scripts, a skill copy, and a `hooks.json` merge. It does **not** enable the hooks feature flag or approve hook trust. Portskill does not edit `config.toml`.
 - The Chrome extension is loaded in the user's browser (typically against `claude.ai`). Portskill only points at `chrome-extension/`; it does not inject into other sites.
-- Handoff MCP tools use **flat** names (`handoff_status`, `handoff_list`, …) on `tools/list` — not nested `session-handoff/*`. The kit’s nested SKILL folders stay as vendored layout.
+- Handoff MCP tools use **flat** names (`handoff_status`, `handoff_list`, …) on `tools/list` — not nested `session-handoff/*`. Nested skill folders stay inside the kit checkout.
 - Those tools share the **same HTTP listener** as the HTML UI and `POST /mcp`. Agents auto-invoke registry lifecycle tools; humans use the HTML UI for maintenance and defaults. Widening `--host` is still a documented footgun, not an open LAN listener.
 - Remotes remain HOLD. This kit does not talk to remote Portskill instances.
 

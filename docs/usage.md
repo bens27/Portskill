@@ -50,6 +50,7 @@ Doctor is **read-only and idempotent** — running it twice does not create, rew
 - **One workspace** — all services in a single implicit workspace. Export/Import Workspace stay in ⚙ Actions. Named presets remain CLI/MCP.
 - **Defaults** — per-range Default On/Off; toolbar **Start Default Services** via `apply-defaults`; deactivate keeps reserved unless `--also-release`.
 - **Stop also Release** — Settings toggle (`settings.stop_also_release`, default on). When off, Stop keeps the range reserved and Release is the explicit free.
+- **Default Tailnet** — `settings.default_tailnet` (`none` default, or `serve`). With `serve`, `portskill` start/restart without `--tailnet` registers, Tailscale Serves and runs in one call. Funnel is never a default.
 - **⚙ Actions** — workspace bulk actions (start/stop default/all, export/import workspace).
 - **require_compat** is always on (Settings checkbox locked).
 - **Iterate Mode** (optional) — floating control for in-page chrome/token A/B; persist writes `port_registry_app/static/iterate-tokens.css`.
@@ -94,7 +95,7 @@ Agents auto-invoke registry lifecycle tools on the same listener as the HTML UI.
 
 Named `mcp_tools` profiles (`settings.mcp_tools_profile`): default **`full`** (all core tools enabled; Session Handoff requires separate opt-in). Opt-in **`lean`** enables `portskill`, `status`, `settings_get`, plus escape hatches `allocate` / `stop` / `release`. `activate` stays off until you toggle it. Switch with `./scripts/cli.sh settings set --mcp-tools-profile lean|full` or MCP `settings_set` `{ "mcp_tools_profile": "lean"|"full" }`. The enable map remains `settings.mcp_tools` (missing key = enabled).
 
-Session Handoff is **Experimental (Beta)** and **disabled by default**. After enabling `settings.handoff_enabled`, available tools use flat names `handoff_status`, `handoff_skill`, `handoff_template`, `handoff_list`, `handoff_resolve`, `handoff_new_path`, `handoff_resume`, `handoff_supersede`, `handoff_install_help` — not nested `session-handoff/*`. Ledger writes go only through `vendor/session-handoff-kit/codex/hooks/handoff_ledger.py`.
+Session Handoff is **Experimental (Beta)** and **disabled by default**. After enabling `settings.handoff_enabled`, available tools use flat names `handoff_status`, `handoff_skill`, `handoff_template`, `handoff_list`, `handoff_resolve`, `handoff_new_path`, `handoff_resume`, `handoff_supersede`, `handoff_install_help` — not nested `session-handoff/*`. Ledger writes go only through the resolved kit's `codex/hooks/handoff_ledger.py` (`portskill-cli handoff fetch`, or `--handoff-kit`).
 
 ## CLI
 
@@ -120,6 +121,7 @@ Wrappers set `PYTHONPATH` (`./scripts/cli.sh`, `./scripts/doctor.sh`). After `pi
 ./scripts/cli.sh settings set --mcp-tools-profile lean
 ./scripts/cli.sh settings set --mcp-tools-profile full
 ./scripts/cli.sh settings set --stop-also-release off
+./scripts/cli.sh settings set --default-tailnet serve   # start = register + Tailscale Serve + run
 ./scripts/cli.sh settings set --stop-also-release on
 ./scripts/cli.sh http-auth show
 ./scripts/cli.sh http-auth regenerate

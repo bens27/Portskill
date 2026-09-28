@@ -206,8 +206,10 @@ def main() -> int:
                 if "token" in http_auth:
                     fail("doctor http_auth leaked token field")
                 hk = payload.get("handoff_kit")
-                if not isinstance(hk, dict) or not hk.get("present"):
-                    fail(f"doctor handoff_kit not present: {hk!r}")
+                if not isinstance(hk, dict) or "present" not in hk:
+                    fail(f"doctor handoff_kit missing: {hk!r}")
+                if hk.get("present"):
+                    fail(f"doctor expected no bundled kit: {hk!r}")
             ok(f"cli {cmd} status={payload.get('status')!r}")
 
     # Live server probing is explicit so routine tests do not depend on user state.

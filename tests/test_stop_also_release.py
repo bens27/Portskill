@@ -173,7 +173,7 @@ class StopAlsoReleaseTests(unittest.TestCase):
             self.assertEqual(_range_state(forced["result"]["structuredContent"]), "released")
 
     def test_settings_panel_has_checkbox_and_pitch(self) -> None:
-        from port_registry_app.mcp import PORTSKILL_TOOL_DESCRIPTION
+        from port_registry_app.mcp import PORTSKILL_TOOL_PITCH
         from port_registry_app.server import build_view, render_page
 
         with IsolatedConfig() as iso:
@@ -191,7 +191,8 @@ class StopAlsoReleaseTests(unittest.TestCase):
         self.assertIn('id="pr-stop-also-release"', html)
         self.assertIn("Stop also Release", html)
         self.assertIn('id="pr-mcp-portskill-pitch"', html)
-        self.assertIn(PORTSKILL_TOOL_DESCRIPTION, html)
+        self.assertIn(PORTSKILL_TOOL_PITCH, html)
+        self.assertIn('id="pr-default-tailnet-serve"', html)
         self.assertIn("one MCP tool for your agent to handle all port management functions", html)
 
 

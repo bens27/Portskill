@@ -117,12 +117,15 @@ Open **Experimental (Beta)** in the dashboard and turn on **Enable Session Hando
 
 When disabled, Handoff tools are absent from MCP discovery, direct and chained MCP calls are rejected, and the dashboard does not read the handoff ledger. Enabling makes `handoff_status`, `handoff_skill`, `handoff_template`, `handoff_list`, `handoff_resolve`, `handoff_new_path`, `handoff_resume`, `handoff_supersede`, and `handoff_install_help` eligible for use. Individual tool switches still apply; the `lean` profile keeps them hidden until you enable them.
 
-Enabling in Portskill does **not** install agent hooks. Use the section's install help and the [kit README](vendor/session-handoff-kit/README.md) to choose a surface. Disabling in Portskill does **not** remove hooks or extensions you previously installed; manage those in the agent or browser where you installed them. Existing explicit `handoff_enabled: true` settings remain enabled.
+Enabling in Portskill does **not** install agent hooks. Use the section's install help and the [kit README](https://github.com/bens27/session-handoff-kit/blob/v0.8.0/README.md) to choose a surface. Disabling in Portskill does **not** remove hooks or extensions you previously installed; manage those in the agent or browser where you installed them. Existing explicit `handoff_enabled: true` settings remain enabled.
 
-Source checkouts include `vendor/session-handoff-kit/`. For a wheel or Mac app, point at that directory in a separate source checkout before enabling:
+The kit is its own project, [bens27/session-handoff-kit](https://github.com/bens27/session-handoff-kit). Portskill does not ship a copy. Fetch the pinned release into the Portskill config directory (`~/.config/port-registry/handoff-kit/<ref>/`), or point at a checkout:
 
 ```bash
-portskill-cli settings set --handoff-kit /absolute/path/to/Portskill/vendor/session-handoff-kit
+portskill-cli handoff fetch            # pinned release; --ref <tag|sha> for another
+portskill-cli settings set --handoff-enabled on
+# or, with a checkout of the kit:
+portskill-cli settings set --handoff-kit /absolute/path/to/session-handoff-kit
 portskill-cli settings set --handoff-enabled on
 ```
 

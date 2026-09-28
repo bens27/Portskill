@@ -71,7 +71,7 @@ describe("port registry console rendering", () => {
 
     expect(html).toContain('href="#ports"');
     expect(html).toContain('class="active" href="#ports"');
-    expect(html).toContain("Port Registry");
+    expect(html).toContain("Portskill");
     expect(html).toContain("web-app");
     expect(html).toContain("overlay");
     expect(html).toContain("20000–20001");
@@ -91,7 +91,7 @@ describe("port registry console rendering", () => {
 
   it("shows an empty state when no registry data is provided", () => {
     const html = renderRosterConsoleHtml(rosterViewStub(), { activeView: "ports" });
-    expect(html).toContain("Port registry data unavailable.");
+    expect(html).toContain("Portskill data unavailable.");
   });
 });
 

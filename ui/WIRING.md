@@ -1,6 +1,6 @@
-# Port Registry UI wiring
+# Portskill UI wiring
 
-This package ships three ways to see/use the Port Registry UI. Node is **not** required for (1) or (2).
+This package ships three ways to see/use the Portskill UI. Node is **not** required for (1) or (2).
 
 ## 1. Static preview (sample data)
 
@@ -15,7 +15,7 @@ This uses baked-in sample projects/ranges and shows Start / Stop / Release butto
 
 ## 2. Live light UI + MCP (stdlib Python)
 
-Preferred entrypoint (Port Registry **app**):
+Preferred entrypoint (Portskill **app**):
 
 ```bash
 PYTHONPATH=. python3 -m port_registry_app

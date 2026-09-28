@@ -27,6 +27,7 @@ internal primitive, disabled in lean. Settings are stored in `mcp_tools` and
 | Set a range's default | `set-default --range-id ID --state on|off --project PATH` |
 | Start default services | `apply-defaults --project PATH` |
 | Keep reservations on stop | `settings set --stop-also-release off` |
+| Make start also Tailscale Serve by default | `settings set --default-tailnet serve` |
 | Export an environment | `environment export --name NAME --out PATH --project PATH` |
 | Import an environment | `environment import --file PATH` |
 | Save live ranges as a preset | `preset save --name NAME --project PATH` |
@@ -70,8 +71,8 @@ Session Handoff is disabled by default. Enable when requested with
 the ledger and direct/chained `handoff_*` calls are rejected. Per-tool switches
 and lean-profile restrictions still apply after enabling.
 
-A wheel or Mac app needs a source kit configured with
-`settings set --handoff-kit /absolute/path/to/session-handoff-kit`;
+Install the separate kit with `handoff fetch`, or point at a checkout with
+`settings set --handoff-kit /absolute/path/to/session-handoff-kit`.
 `PORTSKILL_HANDOFF_KIT` overrides that path. An enabled or explicitly configured
 missing kit fails doctor. Toggling Handoff does not install or uninstall external
 agent hooks. Use the kit's matching surface skill for the actual handoff workflow.

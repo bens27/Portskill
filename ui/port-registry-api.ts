@@ -1,5 +1,5 @@
 /**
- * Portable Port Registry HTTP helpers (extracted from Roster packages/api).
+ * Portable Portskill HTTP helpers (extracted from Roster packages/api).
  * Local types from ./port-registry.ts — no @roster imports.
  */
 import type {

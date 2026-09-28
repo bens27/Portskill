@@ -5,7 +5,20 @@ application's UI, MCP server, and CLI.
 
 ## Unreleased
 
-No additional changes queued.
+### Added
+
+- `portskill-cli handoff fetch` (and the `handoff-fetch` dashboard action)
+  downloads a pinned release of the standalone Session Handoff kit into the
+  Portskill config directory, so wheel and Mac installs no longer need a
+  source checkout. Kit resolution: `--handoff-kit` override, then the fetched kit.
+
+### Changed
+
+- Session Handoff is no longer vendored. The kit lives in
+  `bens27/session-handoff-kit` (v0.8.0): hashed workspace identity, validated
+  resume references, recoverable claims, richer checkpoint contract, compaction
+  re-arm, atomic ledger writes, thresholds capped to the window, and
+  result-preserving hook output.
 
 ## [0.1.1] — release prepared
 

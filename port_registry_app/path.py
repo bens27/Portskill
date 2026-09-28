@@ -435,6 +435,7 @@ def run_path(
         resolve_history_env_name,
         resolve_stop_also_release,
         ensure_baseline,
+        normalize_settings,
     )
 
     mode = (mode or "").strip().lower()
@@ -457,7 +458,11 @@ def run_path(
     needs_input = False
 
     def mutate(registry):
-        nonlocal needs_input
+        nonlocal needs_input, requested
+        # Explicit tailnet wins; otherwise start/restart follow settings.default_tailnet.
+        if requested is None and mode in ("start", "restart"):
+            if normalize_settings(registry.get("settings")).get("default_tailnet") == "serve":
+                requested = "serve"
         hist_key = resolve_history_env_name(registry, environment)
         ensure_baseline(registry, hist_key)
         changed: list[str] = []
