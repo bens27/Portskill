@@ -18,6 +18,11 @@ REPO = os.getcwd()
 PLUGIN = os.path.join(REPO, "skills/session-handoff/hooks/context_watch.py")
 PY = sys.executable
 
+# All child processes, including fake runners, inherit an isolated telemetry policy.
+os.environ['CONTEXT_WATCH_RESUME_LOG'] = '0'
+os.environ['CONTEXT_WATCH_LOG'] = '0'
+os.environ['CONTEXT_WATCH_ORIGIN'] = 'test'
+
 failures = []
 
 STARTUP_CLAUDE = json.dumps({"message": {"model": "claude-opus-4", "usage": {"input_tokens": 20000}}}) + "\n"
@@ -44,6 +49,26 @@ def run_hook(event, env_extra, script=PLUGIN):
     p = subprocess.run([PY, script], input=json.dumps(event), env=env,
                        capture_output=True, text=True, timeout=30)
     return p
+
+
+def checkpoint(project, sid, environment, resumed=False):
+    trace = os.path.join(project, 'fixture-transcript.jsonl')
+    with open(trace, 'w') as f:
+        for tokens in (1000, 140000):
+            f.write(json.dumps({'type':'assistant', 'message':{'model':'test', 'usage':{'input_tokens':tokens}}}) + '\n')
+    run_hook({'hook_event_name':'PostToolUse','cwd':project,'session_id':sid,'transcript_path':trace},
+             dict(environment, HANDOFF_AT='130000'))
+    doc = {'topic':'published-' + sid.lower(), 'description':'fixture',
+           'body':'## Objective\nContinue.\n## Current state\nReady.\n## Next steps\nTest.\n'}
+    ledger = os.path.join(os.path.dirname(PLUGIN), 'handoff_ledger.py')
+    env = dict(os.environ, **environment)
+    p = subprocess.run([PY,ledger,'save',project,'--session',sid,'--request-id','fixture'],
+                       input=json.dumps(doc), env=env, capture_output=True, text=True)
+    assert p.returncode == 0, p.stdout + p.stderr
+    path = json.loads(p.stdout)['path']
+    if resumed:
+        subprocess.run([PY,ledger,'resume',path],env=env,check=True,capture_output=True)
+    return path
 
 
 def main():
@@ -293,6 +318,7 @@ def main():
     time.sleep(0.05)
     with open(os.path.join(proj_q, ".handoffs", "20260927-0900-quiet.md"), "w") as f:
         f.write("---\ntopic: quiet\nstatus: open\n---\n# Session Handoff\n")
+    checkpoint(proj_q, evt_q["session_id"], envx)
     p_q = run_hook(dict(evt_q, transcript_path=grown), envx)  # 172k: would be a SECOND NOTICE
     check("second-notice-quiet-after-handoff",
           "[context-watch]" in first_q.stdout and p_q.stdout.strip() == "",
@@ -390,13 +416,13 @@ def main():
         ev = {"hook_event_name": "SessionStart", "source": src, "cwd": proj,
               "session_id": "verify-ss"}
         p5 = run_hook(ev, {"TMPDIR": latchdir})
-        announced = "demo-topic" in p5.stdout
+        announced = "open handoff(s) available" in p5.stdout
         check("announcer-source-%s" % src, p5.returncode == 0 and announced == expect_announce,
               "rc=%d stdout=%r" % (p5.returncode, p5.stdout[:200]))
         if src == "compact":
             check("compaction-note", "evidence, not the live state" in p5.stdout,
                   "stdout=%r" % p5.stdout[:300])
-    p_single_ended = run_hook({"hook_event_name": "SessionStart", "source": "startup",
+    p_single_ended = run_hook({"hook_event_name": "UserPromptSubmit", "prompt": "retrieve",
                                "cwd": proj, "session_id": "verify-ss-ended"},
                               {"TMPDIR": latchdir})
     check("announcer-ended-single",
@@ -410,7 +436,7 @@ def main():
         f.write("---\ntopic: first\ncreated: 2026-08-10T08:30\nstatus: open\n---\n# Session Handoff — first\n")
     with open(os.path.join(proj_multi, ".handoffs", "second.md"), "w") as f:
         f.write("---\ntopic: second\ncreated: 2026-08-11T14:45\nstatus: open\n---\n# Session Handoff — second\n")
-    p_multi_ended = run_hook({"hook_event_name": "SessionStart", "source": "startup",
+    p_multi_ended = run_hook({"hook_event_name": "UserPromptSubmit", "prompt": "retrieve",
                               "cwd": proj_multi, "session_id": "verify-multi-ended"},
                              {"TMPDIR": latchdir})
     check("announcer-ended-multi",
@@ -433,10 +459,8 @@ def main():
     p_fallback = run_hook({"hook_event_name": "SessionStart", "source": "startup",
                            "cwd": fallback_proj, "session_id": "verify-fallback"},
                           {"TMPDIR": latchdir}, script=fallback_hook)
-    check("announcer-fallback-age-from-mtime",
-          p_fallback.returncode == 0 and "default" in p_fallback.stdout
-          and "13d old" in p_fallback.stdout and "0d old" not in p_fallback.stdout
-          and expected_ended in p_fallback.stdout,
+    check("announcer-missing-installation-reports-unavailable",
+          p_fallback.returncode == 0 and "service unavailable" in p_fallback.stdout,
           "rc=%d expected_ended=%s stdout=%r" % (p_fallback.returncode, expected_ended,
                                                 p_fallback.stdout[:700]))
 
@@ -454,7 +478,8 @@ def main():
           "rc=%d stdout=%r" % (p_desc_ar.returncode, p_desc_ar.stdout[:500]))
     p_desc = run_hook(ev_desc, {"TMPDIR": latchdir})
     check("announcer-description-no-autoresume",
-          p_desc.returncode == 0 and "descdemo" in p_desc.stdout
+          p_desc.returncode == 0 and "1 open handoff(s) available" in p_desc.stdout
+          and "unmistakable demo description" not in p_desc.stdout
           and "without asking" not in p_desc.stdout
           and "First load exactly these skills" not in p_desc.stdout,
           "rc=%d stdout=%r" % (p_desc.returncode, p_desc.stdout[:500]))
@@ -466,13 +491,13 @@ def main():
         f.write("---\ntopic: skillsdemo\nstatus: open\nskills: tdd, dataviz\n---\n# Session Handoff — skillsdemo\n")
     ev_skills = {"hook_event_name": "SessionStart", "source": "startup", "cwd": proj_skills,
                  "session_id": "verify-skills"}
-    p_skills = run_hook(ev_skills, {"TMPDIR": latchdir})
-    check("announcer-claim-owner", "claim <path> --owner verify-skills" in p_skills.stdout
-          and "resume <path> --owner verify-skills" in p_skills.stdout,
+    p_skills = run_hook(dict(ev_skills, hook_event_name="UserPromptSubmit", prompt="retrieve"), {"TMPDIR": latchdir})
+    check("announcer-claim-owner", "prepare" in p_skills.stdout
+          and "--session verify-skills" in p_skills.stdout,
           "stdout=%r" % p_skills.stdout[:900])
-    check("announcer-skills-single",
-          p_skills.returncode == 0 and "First load exactly these skills" in p_skills.stdout
-          and "tdd, dataviz" in p_skills.stdout,
+    check("announcer-defers-execution-skills",
+          p_skills.returncode == 0 and "First load exactly these skills" not in p_skills.stdout
+          and "tdd, dataviz" not in p_skills.stdout,
           "rc=%d stdout=%r" % (p_skills.returncode, p_skills.stdout[:500]))
 
     # 11. Codex: PostToolUse notice is JSON additionalContext with exit 0 (the
@@ -537,7 +562,7 @@ def main():
         cx_note = json.loads(p_cx_ss.stdout)["hookSpecificOutput"]["additionalContext"]
     except Exception:
         cx_note = ""
-    check("codex-sessionstart-json-label", cx_note.startswith("context-watch:"),
+    check("codex-sessionstart-json-label", cx_note.startswith("handoff-status:"),
           "stdout=%r" % p_cx_ss.stdout[:300])
 
     # 12. Announcer: cap at 5 listed, count the rest, mention hidden stale ones.
@@ -550,7 +575,7 @@ def main():
     with open(stale, "w") as f:
         f.write("---\ntopic: ancient\nstatus: open\n---\n# Session Handoff\n")
     os.utime(stale, (time.time() - 90 * 86400.0,) * 2)
-    p_many = run_hook({"hook_event_name": "SessionStart", "source": "startup", "cwd": proj_many,
+    p_many = run_hook({"hook_event_name": "UserPromptSubmit", "prompt": "retrieve", "cwd": proj_many,
                        "session_id": "verify-many"}, {"TMPDIR": latchdir})
     check("announcer-caps-listing", "8 open handoffs" in p_many.stdout and "5) t3" in p_many.stdout
           and "6)" not in p_many.stdout and "and 3 more" in p_many.stdout,
@@ -585,7 +610,7 @@ def main():
         f.write("150000/130000/140000\n")
     p_n = run_hook(nudge_evt, env_n)
     check("stop-nudge-blocks-once", '"decision": "block"' in p_n.stdout
-          and "new-path" in p_n.stdout, "stdout=%r" % p_n.stdout[:300])
+          and "save --session" in p_n.stdout, "stdout=%r" % p_n.stdout[:300])
     p_n = run_hook(nudge_evt, env_n)
     check("stop-nudge-not-twice", p_n.stdout.strip() == "", "stdout=%r" % p_n.stdout[:200])
     sid_n2 = "verify-" + uuid.uuid4().hex[:8]
@@ -594,6 +619,7 @@ def main():
     time.sleep(0.05)
     with open(os.path.join(proj_n, ".handoffs", "20260927-0900-nudged.md"), "w") as f:
         f.write("---\ntopic: nudged\nstatus: open\n---\n# Session Handoff\n")
+    checkpoint(proj_n, sid_n2, env_n)
     p_n = run_hook(dict(nudge_evt, session_id=sid_n2), env_n)
     check("stop-nudge-silent-after-handoff", p_n.stdout.strip() == "", "stdout=%r" % p_n.stdout[:200])
     sid_n5 = "verify-" + uuid.uuid4().hex[:8]
@@ -604,6 +630,7 @@ def main():
     time.sleep(0.05)
     with open(os.path.join(proj_n5, ".handoffs", "20260927-0900-finished-here.md"), "w") as f:
         f.write("---\ntopic: finished-here\nstatus: resumed\n---\n# Session Handoff\n")
+    checkpoint(proj_n5, sid_n5, env_n, resumed=True)
     p_n = run_hook(dict(nudge_evt, session_id=sid_n5, cwd=proj_n5), env_n)
     check("stop-nudge-silent-after-handoff-resumed", p_n.stdout.strip() == "", "stdout=%r" % p_n.stdout[:200])
     sid_n3 = "verify-" + uuid.uuid4().hex[:8]
@@ -677,6 +704,7 @@ def main():
     run_hook(stop_evt, env_stop)  # fired but no handoff yet
     with open(os.path.join(proj_stop, ".handoffs", "20260927-0900-stopdemo.md"), "w") as f:
         f.write("---\ntopic: stopdemo\nstatus: open\n---\n# Session Handoff\n")
+    checkpoint(proj_stop, sid_stop, env_stop)
     run_hook(stop_evt, env_stop)
     run_hook(stop_evt, env_stop)  # second Stop must not type again
     counter = os.path.join(latchdir, [n for n in os.listdir(latchdir)
@@ -698,6 +726,7 @@ def main():
     for i in range(3):
         sid_loop = "verify-" + uuid.uuid4().hex[:8]
         open(os.path.join(latchdir, "context-watch-%s.fired" % sid_loop), "w").close()
+        checkpoint(proj_stop, sid_loop, env_stop)
         p_loop = run_hook(dict(stop_evt, session_id=sid_loop), dict(env_stop, HANDOFF_AUTO_MAX="2"))
     check("auto-stop-loop-guard", "stopped after 2 automatic clears" in p_loop.stdout
           and open(counter).read().strip() == "2", "stdout=%r" % p_loop.stdout[:300])
@@ -709,10 +738,15 @@ def main():
     os.makedirs(os.path.join(proj_run, ".handoffs"))
     fake = os.path.join(bindir, "fake-agent")
     with open(fake, "w") as f:
-        f.write("#!/bin/sh\necho \"$HANDOFF_AUTO $*\" >> calls.txt\n"
-                "n=$(wc -l < calls.txt | tr -d ' ')\n"
-                "if [ \"$n\" -lt 3 ]; then printf -- '---\\ntopic: run%s\\nstatus: open\\n---\\n' $n"
-                " > .handoffs/2026092$n-0900-run$n.md; fi\n")
+        ledger = os.path.join(os.path.dirname(PLUGIN), 'handoff_ledger.py')
+        f.write('#!' + PY + '\n' +
+                'import os,json,subprocess\n' +
+                'with open("calls.txt","a") as log: log.write(os.environ["HANDOFF_AUTO"]+" "+__import__("sys").argv[1]+"\\n")\n' +
+                'n=len(open("calls.txt").readlines())\n' +
+                'if n < 3:\n' +
+                ' doc={"topic":"run"+str(n),"body":"## Objective\\nContinue\\n## Current state\\nReady\\n## Next steps\\nTest\\n"}\n' +
+                ' subprocess.run(' + repr([PY, ledger, 'save', '--session', 'runner', '--request-id']) +
+                '+[str(n)],input=json.dumps(doc),text=True,check=True,capture_output=True)\n')
     os.chmod(fake, 0o755)
     p_run = subprocess.run([PY, PLUGIN, "auto", "--prompt", "build it", "--", fake],
                            cwd=proj_run, capture_output=True, text=True, timeout=60)

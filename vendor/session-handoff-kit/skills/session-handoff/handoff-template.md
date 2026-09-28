@@ -1,56 +1,24 @@
-# Handoff document template (agent surfaces)
+# JSON draft for save
 
-This file defines the **shape** of a handoff document, and nothing else.
-`SKILL.md` §3 delegates here, so the structure of a handoff can be changed by
-editing this one file — the trigger, naming, ledger, resume, and post-resume
-policy in `SKILL.md` are unaffected by anything below.
+Supply `topic`, a one-line `description`, and `body` containing the Markdown
+sections below. Optional fields are `predecessor` (explicit adopted path),
+`skills` (only required execution dependencies), `references` (required files
+or `path#L10-L30` excerpts), `optional_references` (background, not loaded),
+and `verify` (one relevant command). Arrays are accepted for skills/references.
+Only explicit user parking overrides `reason` with `user-parked`.
 
-Swap the body outline freely. Keep the front matter: the hooks parse it.
+```json
+{"topic":"repair-parser","description":"Parser fix ready for checks","body":"## Objective\nRepair parser.\n## Current state\nFix drafted; not verified.\n## Next steps\nRun parser checks.\n"}
+```
 
-## Front matter
+`save` supplies creation time, project, Git position, session/trigger identity,
+`status: open`, and retry identity. It validates the complete document before
+publication. Do not copy unrelated skill history or whole predecessor documents
+into the required package. Carry essential constraints into the current body.
 
-`created:` comes verbatim from `new-path`'s `created` field (SKILL.md §2),
-`status: open` is what marks the handoff untransferred for the session-start
-announcer, and `description` is the one-line summary the announcer shows so
-handoffs can be told apart without opening them (make it specific: what is
-parked and where it stands).
-Use `references:` when this thread depends on another file or an earlier
-handoff: name it there so `resolve` surfaces it automatically to whoever
-resumes, instead of relying on the resuming session to notice it needs that
-file.
-`project:` and `git:` also come verbatim from `new-path` (leave `git:` blank
-when it printed nothing): `project:` keeps same-named projects' handoffs apart
-in the shared fallback directory, and `git:` lets the resuming session see what
-changed in the repository since this handoff was written.
-`verify:` names the one command whose success "Current state" rests on (the
-test suite, a build): `claim` prints it back so the resuming session runs it
-instead of guessing which check matters.
-Only this handoff's `references:` reach `must_also_read`; carry forward any
-earlier handoff's reference that is still needed.
-`reason:` tells the resuming session whether the user parked this work
-(`user-parked`) or an automatic trigger forced the checkpoint
-(`context-pressure`, `compaction`); in the latter case the task is still
-authorized and should be picked up, not treated as abandoned.
-For the title line, `<date>` is the same `created` value from `new-path`
-(a short date form is fine), not a separately computed or recalled date.
-
-## The template
+## Body outline
 
 ```markdown
----
-topic: <topic-slug>
-created: <ISO date-time>
-status: open
-reason: <user-parked | context-pressure | compaction>
-description: <one line: what is parked here and where it stands>
-skills: <optional comma-separated skill names the resuming session must load first>
-references: <optional comma-separated paths another resuming session must also read (feeds resolve's must_also_read list)>
-project: <verbatim from new-path>
-git: <verbatim from new-path: branch@sha, or blank>
-verify: <optional shell command that proves "Current state"; claim prints it for the resuming session>
----
-# Session Handoff — <topic> — <date>
-
 ## Objective
 <the overall goal of this work, one or two sentences>
 
@@ -85,7 +53,7 @@ preventing re-work is half the value of a handoff>
 
 ## Rules
 
-- Target about 1,000 words and never exceed 1,500 words: dense and specific,
+- Use the shortest sufficient core, with no target minimum; never exceed 1,500 words or 24,000 bytes including metadata: dense and specific,
   no narration of the conversation. Prefer facts a fresh session can verify
   (paths, commands, test names). Put the most important facts first in each
   section, and omit a section that has nothing to say (Objective, Current

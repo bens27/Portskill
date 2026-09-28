@@ -1,6 +1,6 @@
 # Vendored Session Handoff Kit
 
-Vendored from Ben's Session Handoff Kit at kit SHA `a57e23a` (0.11.0, 2026-09-27), upstream verbatim. The previous copy (0.10.1 @ `0a201cf`) is in Portskill's git history; the 0.7.0 copy is backed up at `~/Development/_backups/session-handoff-kit-0.7.0-20260927/`.
+Vendored from Ben's Session Handoff Kit at kit SHA `ce13cbe` (v0.13.0, 2026-09-28), upstream verbatim. The previous copy (0.11.0 @ `a57e23a`) is in Portskill's git history; the 0.7.0 copy is backed up at `~/Development/_backups/session-handoff-kit-0.7.0-20260927/`.
 The kit includes hooks, a ledger, plugins, agent skills, and a Chrome extension.
 Its README and SPEC describe kit behavior; `scripts/package.sh` builds distribution artifacts.
 
