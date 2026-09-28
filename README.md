@@ -117,7 +117,7 @@ Open **Experimental (Beta)** in the dashboard and turn on **Enable Session Hando
 
 When disabled, Handoff tools are absent from MCP discovery, direct and chained MCP calls are rejected, and the dashboard does not read the handoff ledger. Enabling makes `handoff_status`, `handoff_skill`, `handoff_template`, `handoff_list`, `handoff_resolve`, `handoff_new_path`, `handoff_resume`, `handoff_supersede`, and `handoff_install_help` eligible for use. Individual tool switches still apply; the `lean` profile keeps them hidden until you enable them.
 
-Enabling in Portskill does **not** install agent hooks. Use the section's install help and the [kit README](https://github.com/bens27/session-handoff-kit/blob/v0.8.0/README.md) to choose a surface. Disabling in Portskill does **not** remove hooks or extensions you previously installed; manage those in the agent or browser where you installed them. Existing explicit `handoff_enabled: true` settings remain enabled.
+Enabling in Portskill does **not** install agent hooks. Use the section's install help and the [kit README](https://github.com/bens27/session-handoff-kit/blob/v0.14.0/README.md) to choose a surface. Disabling in Portskill does **not** remove hooks or extensions you previously installed; manage those in the agent or browser where you installed them. Existing explicit `handoff_enabled: true` settings remain enabled.
 
 The kit is its own project, [bens27/session-handoff-kit](https://github.com/bens27/session-handoff-kit). Portskill does not ship a copy. Fetch the pinned release into the Portskill config directory (`~/.config/portskill/handoff-kit/<ref>/`), or point at a checkout:
 

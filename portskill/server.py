@@ -3371,7 +3371,7 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
       return;
     }}
     if(action==='handoff-codex-install'){{
-      if(!confirm('Run codex/install.sh into $CODEX_HOME (default ~/.codex)? Copies hooks + skill and merges hooks.json. Does not enable hooks in config.toml or approve hook trust.'))return;
+      if(!confirm('Install Session Handoff for Codex into $CODEX_HOME (default ~/.codex)? Copies the skill folder (if absent) and merges hooks.json. Does not enable hooks in config.toml or approve hook trust.'))return;
     }}
     if(action==='handoff-package'){{
       if(!confirm('Run scripts/package.sh? Writes Cowork plugin and chat/Desktop skill artifacts under the kit dist/.'))return;

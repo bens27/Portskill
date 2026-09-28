@@ -143,9 +143,9 @@ class DoctorContractTests(unittest.TestCase):
     def test_enabled_reports_configured(self) -> None:
         with IsolatedConfig() as iso:
             kit = iso.root / "kit"
-            (kit / "codex" / "hooks").mkdir(parents=True)
+            (kit / "skills" / "session-handoff" / "hooks").mkdir(parents=True)
             (kit / "README.md").write_text("# kit\n", encoding="utf-8")
-            (kit / "codex" / "hooks" / "handoff_ledger.py").write_text("print('ok')\n", encoding="utf-8")
+            (kit / "skills" / "session-handoff" / "hooks" / "handoff_ledger.py").write_text("print('ok')\n", encoding="utf-8")
             iso.write_registry({"settings": {"handoff_enabled": True, "handoff_kit": str(kit)}})
             code, payload = _doctor(iso)
         self.assertEqual(code, 0)

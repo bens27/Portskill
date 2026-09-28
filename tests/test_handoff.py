@@ -17,19 +17,19 @@ from tests.test_ui_collapsed import _details_tags, _has_open_attr
 def _real_kit() -> pathlib.Path:
     """Checkout used only for ledger integration. Skip when it is not on this machine."""
     raw = (os.environ.get("PORTSKILL_TEST_HANDOFF_KIT") or "").strip()
-    path = pathlib.Path(raw).expanduser() if raw else pathlib.Path.home() / "Development" / "handoff-manager"
-    if not (path / "codex" / "hooks" / "handoff_ledger.py").is_file():
+    path = pathlib.Path(raw).expanduser() if raw else pathlib.Path.home() / "Development" / "session-handoff-kit"
+    if not (path / "skills" / "session-handoff" / "hooks" / "handoff_ledger.py").is_file():
         raise unittest.SkipTest(f"no Session Handoff checkout at {path}")
     return path
 
 
 def _write_min_kit(root: pathlib.Path) -> pathlib.Path:
     kit = root / "min-kit"
-    skill_dir = kit / "codex" / "skills" / "session-handoff"
+    skill_dir = kit / "skills" / "session-handoff"
     skill_dir.mkdir(parents=True)
-    (kit / "codex" / "hooks").mkdir()
+    (skill_dir / "hooks").mkdir()
     (kit / "README.md").write_text("# Session Handoff Kit\n", encoding="utf-8")
-    (kit / "codex" / "hooks" / "handoff_ledger.py").write_text("print('ok')\n", encoding="utf-8")
+    (kit / "skills" / "session-handoff" / "hooks" / "handoff_ledger.py").write_text("print('ok')\n", encoding="utf-8")
     (skill_dir / "SKILL.md").write_text(
         "---\nname: session-handoff\n---\ncontext-watch\n0.8.0\n",
         encoding="utf-8",
@@ -85,7 +85,7 @@ class HandoffMarkupTests(unittest.TestCase):
         self.assertIn("package.sh", html)
         self.assertIn("Copy add commands", html)
         self.assertIn("Package plugin", html)
-        self.assertIn("Run install.sh", html)
+        self.assertIn("Install for Codex", html)
         self.assertIn("Package skill", html)
         self.assertIn("Copy extension path", html)
         self.assertIn("Portskill cannot run /plugin", html)
@@ -248,7 +248,7 @@ class HandoffMcpTests(unittest.TestCase):
     def test_list_via_vendored_ledger_on_temp_dir(self) -> None:
         from portskill.mcp import mcp_handle
 
-        ledger = _real_kit() / "codex" / "hooks" / "handoff_ledger.py"
+        ledger = _real_kit() / "skills" / "session-handoff" / "hooks" / "handoff_ledger.py"
         with tempfile.TemporaryDirectory(prefix="handoff-ledger-") as tmp:
             root = pathlib.Path(tmp)
             handoffs = root / ".handoffs"
@@ -277,7 +277,7 @@ class HandoffMcpTests(unittest.TestCase):
 
             with IsolatedConfig() as iso:
                 iso.write_registry({
-                    "settings": {"handoff_enabled": True, "handoff_kit": str(ledger.parents[2])},
+                    "settings": {"handoff_enabled": True, "handoff_kit": str(ledger.parents[3])},
                 })
                 resp = mcp_handle({
                     "jsonrpc": "2.0",
@@ -396,10 +396,11 @@ class HandoffMcpTests(unittest.TestCase):
             result = run_codex_install(settings={"handoff_kit": str(_real_kit())}, codex_home=tmp)
             home = pathlib.Path(tmp)
             self.assertTrue(result.get("ok"), result)
-            self.assertTrue((home / "hooks" / "handoff_ledger.py").is_file())
-            self.assertTrue((home / "hooks" / "context_watch.py").is_file())
-            self.assertTrue((home / "skills" / "session-handoff" / "SKILL.md").is_file())
-            self.assertTrue((home / "hooks.json").is_file())
+            skill = home / "skills" / "session-handoff"
+            self.assertTrue((skill / "SKILL.md").is_file())
+            self.assertTrue((skill / "hooks" / "handoff_ledger.py").is_file())
+            self.assertIn(str(skill / "hooks" / "context_watch.py"),
+                          (home / "hooks.json").read_text(encoding="utf-8"))
             self.assertIn("config.toml", result.get("honesty") or "")
 
     def test_list_fails_closed_when_kit_override_invalid(self) -> None:
@@ -548,11 +549,11 @@ class HandoffFetchTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp) / f"bens27-session-handoff-kit-{ref}"
-            (root / "codex" / "hooks").mkdir(parents=True)
+            (root / "skills" / "session-handoff" / "hooks").mkdir(parents=True)
             (root / "plugins" / "session-handoff" / ".claude-plugin").mkdir(parents=True)
             if kit:
                 (root / "README.md").write_text("# kit\n")
-                (root / "codex" / "hooks" / "handoff_ledger.py").write_text("print('ok')\n")
+                (root / "skills" / "session-handoff" / "hooks" / "handoff_ledger.py").write_text("print('ok')\n")
                 (root / "plugins" / "session-handoff" / ".claude-plugin" / "plugin.json").write_text(
                     json.dumps({"version": "0.8.0"}))
             (root / "evil.txt").write_text("x")
@@ -573,7 +574,7 @@ class HandoffFetchTests(unittest.TestCase):
             self.assertEqual(result.get("version"), "0.8.0")
             current = handoff.fetched_kit_current()
             self.assertTrue(current.is_symlink())
-            self.assertTrue((current / "codex" / "hooks" / "handoff_ledger.py").is_file())
+            self.assertTrue((current / "skills" / "session-handoff" / "hooks" / "handoff_ledger.py").is_file())
             self.assertEqual(handoff.kit_root({}), current)
             self.assertEqual(handoff.kit_error({}), "")
             self.assertEqual(handoff.kit_version(current), "0.8.0")
