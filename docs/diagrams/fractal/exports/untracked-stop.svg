@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="sequence-title sequence-description" data-theme="grove" data-theme-appearance="light">
+  <title id="sequence-title">An untracked listener prevents success</title><desc id="sequence-description">An allocated local range remains reachable. There is no tracked PID or runnable stop hook. Stop fails and preserves allocation; no listener is killed.</desc><metadata>{&quot;journeyId&quot;:&quot;untracked-stop&quot;,&quot;provenance&quot;:&quot;Authored scenario from cli.py park_item_for_exit / reachable_range_ports and tests/test_stop_verification.py; not a measured trace.&quot;,&quot;hiddenLanes&quot;:[],&quot;rows&quot;:[{&quot;id&quot;:&quot;submit&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;submit&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;caller&quot;,&quot;api&quot;]},{&quot;id&quot;:&quot;dispatch&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;dispatch&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;api&quot;,&quot;stop&quot;]},{&quot;id&quot;:&quot;read&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;read&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;stop&quot;,&quot;files&quot;]},{&quot;id&quot;:&quot;verify&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;verify&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;stop&quot;,&quot;probe&quot;]},{&quot;id&quot;:&quot;connect&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;connect&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;probe&quot;,&quot;other&quot;]},{&quot;id&quot;:&quot;reachable&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;reachable&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;other&quot;,&quot;probe&quot;]},{&quot;id&quot;:&quot;failed&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;failed&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;probe&quot;,&quot;stop&quot;]},{&quot;id&quot;:&quot;error&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;error&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;stop&quot;,&quot;api&quot;]},{&quot;id&quot;:&quot;show&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;show&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;api&quot;,&quot;caller&quot;]}]}</metadata>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#84948b"/></marker>
+    <marker id="arrow-open" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10" fill="none" stroke="#84948b" stroke-width="1.5"/></marker>
+  </defs>
+  <rect width="1920" height="1080" fill="#fafbf8"/>
+  <g font-family="Arial, Helvetica, sans-serif" data-export-layer="title">
+    <text x="70" y="43" font-size="11" letter-spacing="2.5" fill="#607c69">FRACTAL / SEQUENCE JOURNEY</text>
+    <text x="70" y="88" text-anchor="start" font-size="34" fill="#243b34"><tspan x="70" dy="0">An untracked listener prevents success</tspan></text>
+    <text x="70" y="126" text-anchor="start" font-size="15" fill="#6e7d72"><tspan x="70" dy="0">An allocated local range remains reachable. There is no tracked PID or runnable stop hook. Stop fails and preserves allocation; no listener is killed.</tspan></text>
+  </g>
+  <g font-family="Arial, Helvetica, sans-serif" transform="translate(70 219.27966101694915) scale(0.9427966101694916)"><g data-column="caller" data-members="caller" data-elements="browser">
+    <rect x="102" y="32" width="244" height="44" rx="12" fill="#ffffff" stroke="#647D72" stroke-width="2"/>
+    <text x="224" y="59" text-anchor="middle" font-size="15" fill="#243b34"><tspan x="224" dy="0">Dashboard</tspan></text>
+    <path d="M224 76V674" stroke="#dce2db" stroke-width="1.2" stroke-dasharray="5 7"/>
+  </g><g data-column="api" data-members="api" data-elements="http">
+    <rect x="390" y="32" width="244" height="44" rx="12" fill="#ffffff" stroke="#647D72" stroke-width="2"/>
+    <text x="512" y="59" text-anchor="middle" font-size="15" fill="#243b34"><tspan x="512" dy="0">HTTP API</tspan></text>
+    <path d="M512 76V674" stroke="#dce2db" stroke-width="1.2" stroke-dasharray="5 7"/>
+  </g><g data-column="stop" data-members="stop" data-elements="lifecycle">
+    <rect x="678" y="32" width="244" height="44" rx="12" fill="#ffffff" stroke="#647D72" stroke-width="2"/>
+    <text x="800" y="59" text-anchor="middle" font-size="15" fill="#243b34"><tspan x="800" dy="0">Stop operation</tspan></text>
+    <path d="M800 76V674" stroke="#dce2db" stroke-width="1.2" stroke-dasharray="5 7"/>
+  </g><g data-column="files" data-members="files" data-elements="registry">
+    <rect x="966" y="32" width="244" height="44" rx="12" fill="#ffffff" stroke="#647D72" stroke-width="2"/>
+    <text x="1088" y="59" text-anchor="middle" font-size="15" fill="#243b34"><tspan x="1088" dy="0">Registry</tspan></text>
+    <path d="M1088 76V674" stroke="#dce2db" stroke-width="1.2" stroke-dasharray="5 7"/>
+  </g><g data-column="probe" data-members="probe" data-elements="observation">
+    <rect x="1254" y="32" width="244" height="44" rx="12" fill="#ffffff" stroke="#647D72" stroke-width="2"/>
+    <text x="1376" y="59" text-anchor="middle" font-size="15" fill="#243b34"><tspan x="1376" dy="0">Verification</tspan></text>
+    <path d="M1376 76V674" stroke="#dce2db" stroke-width="1.2" stroke-dasharray="5 7"/>
+  </g><g data-column="other" data-members="other" data-elements="untracked">
+    <rect x="1542" y="32" width="244" height="44" rx="12" fill="#ffffff" stroke="#647D72" stroke-width="2"/>
+    <text x="1664" y="59" text-anchor="middle" font-size="15" fill="#243b34"><tspan x="1664" dy="0">Other listener</tspan></text>
+    <path d="M1664 76V674" stroke="#dce2db" stroke-width="1.2" stroke-dasharray="5 7"/>
+  </g><g data-row-id="submit" data-message-ids="submit" data-participant-ids="caller,api" data-row-type="message" data-kind="call">
+      <rect x="188" y="118" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="368" y="141" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="368" dy="0">Stop this range</tspan></text>
+      
+      <path d="M224 157H504" fill="none" stroke="#84948b" stroke-width="2" marker-end="url(#arrow)"/>
+    </g><g data-row-id="dispatch" data-message-ids="dispatch" data-participant-ids="api,stop" data-row-type="message" data-kind="call">
+      <rect x="476" y="182" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="656" y="205" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="656" dy="0">Invoke CLI stop</tspan></text>
+      
+      <path d="M512 221H792" fill="none" stroke="#84948b" stroke-width="2" marker-end="url(#arrow)"/>
+    </g><g data-row-id="read" data-message-ids="read" data-participant-ids="stop,files" data-row-type="message" data-kind="call">
+      <rect x="764" y="246" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="944" y="269" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="944" dy="0">Lock and read allocated range</tspan></text>
+      
+      <path d="M800 285H1080" fill="none" stroke="#84948b" stroke-width="2" marker-end="url(#arrow)"/>
+    </g><g data-row-id="verify" data-message-ids="verify" data-participant-ids="stop,probe" data-row-type="message" data-kind="call">
+      <rect x="908" y="310" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="1088" y="333" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="1088" dy="0">Wait for range ports to close</tspan></text>
+      
+      <path d="M800 349H1368" fill="none" stroke="#84948b" stroke-width="2" marker-end="url(#arrow)"/>
+    </g><g data-row-id="connect" data-message-ids="connect" data-participant-ids="probe,other" data-row-type="message" data-kind="call">
+      <rect x="1340" y="374" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="1520" y="397" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="1520" dy="0">Probe loopback TCP</tspan></text>
+      
+      <path d="M1376 413H1656" fill="none" stroke="#84948b" stroke-width="2" marker-end="url(#arrow)"/>
+    </g><g data-row-id="reachable" data-message-ids="reachable" data-participant-ids="other,probe" data-row-type="message" data-kind="return">
+      <rect x="1340" y="438" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="1520" y="461" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="1520" dy="0">Port remains reachable</tspan></text>
+      
+      <path d="M1664 477H1384" fill="none" stroke="#84948b" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arrow)"/>
+    </g><g data-row-id="failed" data-message-ids="failed" data-participant-ids="probe,stop" data-row-type="message" data-kind="return">
+      <rect x="908" y="502" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="1088" y="525" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="1088" dy="0">Report occupied ports</tspan></text>
+      
+      <path d="M1376 541H808" fill="none" stroke="#84948b" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arrow)"/>
+    </g><g data-row-id="error" data-message-ids="error" data-participant-ids="stop,api" data-row-type="message" data-kind="return">
+      <rect x="476" y="566" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="656" y="589" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="656" dy="0">Fail; allocation unchanged; lock closes</tspan></text>
+      
+      <path d="M800 605H520" fill="none" stroke="#84948b" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arrow)"/>
+    </g><g data-row-id="show" data-message-ids="show" data-participant-ids="api,caller" data-row-type="message" data-kind="return">
+      <rect x="188" y="630" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="368" y="653" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="368" dy="0">Show stop_verification_failed</tspan></text>
+      
+      <path d="M512 669H232" fill="none" stroke="#84948b" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arrow)"/>
+    </g></g>
+  <g font-family="Arial, Helvetica, sans-serif" data-export-layer="footer">
+    <path d="M70 992H1850" stroke="#dce2db"/>
+    <text x="70" y="1027" font-size="12" font-weight="600" letter-spacing="1" fill="#607c69">CURRENT · 9 INTERACTIONS</text>
+    <text x="620" y="1027" font-size="11" fill="#78867c">SOURCE · Authored scenario from cli.py park_item_for_exit / reachable_range_ports and tests/test_stop_verification.py; not a measured trace.</text>
+  </g>
+  </svg>

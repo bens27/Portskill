@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="sequence-title sequence-description" data-theme="grove" data-theme-appearance="light">
+  <title id="sequence-title">Stop succeeds after verification</title><desc id="sequence-description">An allocated local service has a tracked process and a configured successful stop hook. Tailnet mode is none; also-release is enabled.</desc><metadata>{&quot;journeyId&quot;:&quot;verified-stop&quot;,&quot;provenance&quot;:&quot;Authored scenario from cli.py cmd_stop / park_item_for_exit and tests/test_stop_verification.py; not a measured trace.&quot;,&quot;hiddenLanes&quot;:[],&quot;rows&quot;:[{&quot;id&quot;:&quot;submit&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;submit&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;caller&quot;,&quot;api&quot;]},{&quot;id&quot;:&quot;dispatch&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;dispatch&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;api&quot;,&quot;stop&quot;]},{&quot;id&quot;:&quot;read&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;read&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;stop&quot;,&quot;files&quot;]},{&quot;id&quot;:&quot;cleanup&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;cleanup&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;stop&quot;,&quot;hook&quot;]},{&quot;id&quot;:&quot;cleanup-ok&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;cleanup-ok&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;hook&quot;,&quot;stop&quot;]},{&quot;id&quot;:&quot;terminate&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;terminate&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;stop&quot;,&quot;proc&quot;]},{&quot;id&quot;:&quot;verify&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;verify&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;stop&quot;,&quot;probe&quot;]},{&quot;id&quot;:&quot;verified&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;verified&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;probe&quot;,&quot;stop&quot;]},{&quot;id&quot;:&quot;commit&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;commit&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;stop&quot;,&quot;files&quot;]},{&quot;id&quot;:&quot;success&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;success&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;stop&quot;,&quot;api&quot;]},{&quot;id&quot;:&quot;show&quot;,&quot;type&quot;:&quot;message&quot;,&quot;messageIds&quot;:[&quot;show&quot;],&quot;hiddenMessageIds&quot;:[],&quot;participantIds&quot;:[&quot;api&quot;,&quot;caller&quot;]}]}</metadata>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#84948b"/></marker>
+    <marker id="arrow-open" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10" fill="none" stroke="#84948b" stroke-width="1.5"/></marker>
+  </defs>
+  <rect width="1920" height="1080" fill="#fafbf8"/>
+  <g font-family="Arial, Helvetica, sans-serif" data-export-layer="title">
+    <text x="70" y="43" font-size="11" letter-spacing="2.5" fill="#607c69">FRACTAL / SEQUENCE JOURNEY</text>
+    <text x="70" y="88" text-anchor="start" font-size="34" fill="#243b34"><tspan x="70" dy="0">Stop succeeds after verification</tspan></text>
+    <text x="70" y="126" text-anchor="start" font-size="15" fill="#6e7d72"><tspan x="70" dy="0">An allocated local service has a tracked process and a configured successful stop hook. Tailnet mode is none; also-release is enabled.</tspan></text>
+  </g>
+  <g font-family="Arial, Helvetica, sans-serif" transform="translate(123.30275229357801 190) scale(0.8715596330275229)"><g data-column="caller" data-members="caller" data-elements="browser">
+    <rect x="102.00000000000001" y="32" width="207.42857142857142" height="44" rx="12" fill="#ffffff" stroke="#647D72" stroke-width="2"/>
+    <text x="205.71428571428572" y="59" text-anchor="middle" font-size="15" fill="#243b34"><tspan x="205.71428571428572" dy="0">Dashboard</tspan></text>
+    <path d="M205.71428571428572 76V802" stroke="#dce2db" stroke-width="1.2" stroke-dasharray="5 7"/>
+  </g><g data-column="api" data-members="api" data-elements="http">
+    <rect x="353.42857142857144" y="32" width="207.42857142857142" height="44" rx="12" fill="#ffffff" stroke="#647D72" stroke-width="2"/>
+    <text x="457.14285714285717" y="59" text-anchor="middle" font-size="15" fill="#243b34"><tspan x="457.14285714285717" dy="0">HTTP API</tspan></text>
+    <path d="M457.14285714285717 76V802" stroke="#dce2db" stroke-width="1.2" stroke-dasharray="5 7"/>
+  </g><g data-column="stop" data-members="stop" data-elements="lifecycle">
+    <rect x="604.8571428571429" y="32" width="207.42857142857142" height="44" rx="12" fill="#ffffff" stroke="#647D72" stroke-width="2"/>
+    <text x="708.5714285714286" y="59" text-anchor="middle" font-size="15" fill="#243b34"><tspan x="708.5714285714286" dy="0">Stop operation</tspan></text>
+    <path d="M708.5714285714286 76V802" stroke="#dce2db" stroke-width="1.2" stroke-dasharray="5 7"/>
+  </g><g data-column="files" data-members="files" data-elements="registry">
+    <rect x="856.2857142857142" y="32" width="207.42857142857142" height="44" rx="12" fill="#ffffff" stroke="#647D72" stroke-width="2"/>
+    <text x="959.9999999999999" y="59" text-anchor="middle" font-size="15" fill="#243b34"><tspan x="959.9999999999999" dy="0">Registry</tspan></text>
+    <path d="M959.9999999999999 76V802" stroke="#dce2db" stroke-width="1.2" stroke-dasharray="5 7"/>
+  </g><g data-column="hook" data-members="hook" data-elements="hooks">
+    <rect x="1107.7142857142858" y="32" width="207.42857142857142" height="44" rx="12" fill="#ffffff" stroke="#647D72" stroke-width="2"/>
+    <text x="1211.4285714285716" y="59" text-anchor="middle" font-size="15" fill="#243b34"><tspan x="1211.4285714285716" dy="0">Stop hook</tspan></text>
+    <path d="M1211.4285714285716 76V802" stroke="#dce2db" stroke-width="1.2" stroke-dasharray="5 7"/>
+  </g><g data-column="proc" data-members="proc" data-elements="tracked">
+    <rect x="1359.142857142857" y="32" width="207.42857142857142" height="44" rx="12" fill="#ffffff" stroke="#647D72" stroke-width="2"/>
+    <text x="1462.857142857143" y="59" text-anchor="middle" font-size="15" fill="#243b34"><tspan x="1462.857142857143" dy="0">Tracked service</tspan></text>
+    <path d="M1462.857142857143 76V802" stroke="#dce2db" stroke-width="1.2" stroke-dasharray="5 7"/>
+  </g><g data-column="probe" data-members="probe" data-elements="observation">
+    <rect x="1610.5714285714284" y="32" width="207.42857142857142" height="44" rx="12" fill="#ffffff" stroke="#647D72" stroke-width="2"/>
+    <text x="1714.2857142857142" y="59" text-anchor="middle" font-size="15" fill="#243b34"><tspan x="1714.2857142857142" dy="0">Verification</tspan></text>
+    <path d="M1714.2857142857142 76V802" stroke="#dce2db" stroke-width="1.2" stroke-dasharray="5 7"/>
+  </g><g data-row-id="submit" data-message-ids="submit" data-participant-ids="caller,api" data-row-type="message" data-kind="call">
+      <rect x="151.42857142857144" y="118" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="331.42857142857144" y="141" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="331.42857142857144" dy="0">Stop this range</tspan></text>
+      
+      <path d="M205.71428571428572 157H449.14285714285717" fill="none" stroke="#84948b" stroke-width="2" marker-end="url(#arrow)"/>
+    </g><g data-row-id="dispatch" data-message-ids="dispatch" data-participant-ids="api,stop" data-row-type="message" data-kind="call">
+      <rect x="402.8571428571429" y="182" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="582.8571428571429" y="205" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="582.8571428571429" dy="0">Invoke CLI stop</tspan></text>
+      
+      <path d="M457.14285714285717 221H700.5714285714286" fill="none" stroke="#84948b" stroke-width="2" marker-end="url(#arrow)"/>
+    </g><g data-row-id="read" data-message-ids="read" data-participant-ids="stop,files" data-row-type="message" data-kind="call">
+      <rect x="654.2857142857142" y="246" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="834.2857142857142" y="269" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="834.2857142857142" dy="0">Lock and read allocated range</tspan></text>
+      
+      <path d="M708.5714285714286 285H951.9999999999999" fill="none" stroke="#84948b" stroke-width="2" marker-end="url(#arrow)"/>
+    </g><g data-row-id="cleanup" data-message-ids="cleanup" data-participant-ids="stop,hook" data-row-type="message" data-kind="call">
+      <rect x="780" y="310" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="960" y="333" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="960" dy="0">Run configured stop hook</tspan></text>
+      
+      <path d="M708.5714285714286 349H1203.4285714285716" fill="none" stroke="#84948b" stroke-width="2" marker-end="url(#arrow)"/>
+    </g><g data-row-id="cleanup-ok" data-message-ids="cleanup-ok" data-participant-ids="hook,stop" data-row-type="message" data-kind="return">
+      <rect x="780" y="374" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="960" y="397" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="960" dy="0">Exit code 0</tspan></text>
+      
+      <path d="M1211.4285714285716 413H716.5714285714286" fill="none" stroke="#84948b" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arrow)"/>
+    </g><g data-row-id="terminate" data-message-ids="terminate" data-participant-ids="stop,proc" data-row-type="message" data-kind="call">
+      <rect x="905.7142857142858" y="438" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="1085.7142857142858" y="461" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="1085.7142857142858" dy="0">Terminate tracked processes</tspan></text>
+      
+      <path d="M708.5714285714286 477H1454.857142857143" fill="none" stroke="#84948b" stroke-width="2" marker-end="url(#arrow)"/>
+    </g><g data-row-id="verify" data-message-ids="verify" data-participant-ids="stop,probe" data-row-type="message" data-kind="call">
+      <rect x="1031.4285714285713" y="502" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="1211.4285714285713" y="525" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="1211.4285714285713" dy="0">Check TCP ports and tracked process</tspan></text>
+      
+      <path d="M708.5714285714286 541H1706.2857142857142" fill="none" stroke="#84948b" stroke-width="2" marker-end="url(#arrow)"/>
+    </g><g data-row-id="verified" data-message-ids="verified" data-participant-ids="probe,stop" data-row-type="message" data-kind="return">
+      <rect x="1031.4285714285713" y="566" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="1211.4285714285713" y="589" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="1211.4285714285713" dy="0">All range ports closed; tracked process exited</tspan></text>
+      
+      <path d="M1714.2857142857142 605H716.5714285714286" fill="none" stroke="#84948b" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arrow)"/>
+    </g><g data-row-id="commit" data-message-ids="commit" data-participant-ids="stop,files" data-row-type="message" data-kind="call">
+      <rect x="654.2857142857142" y="630" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="834.2857142857142" y="653" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="834.2857142857142" dy="0">Release range and persist; unlock</tspan></text>
+      
+      <path d="M708.5714285714286 669H951.9999999999999" fill="none" stroke="#84948b" stroke-width="2" marker-end="url(#arrow)"/>
+    </g><g data-row-id="success" data-message-ids="success" data-participant-ids="stop,api" data-row-type="message" data-kind="return">
+      <rect x="402.8571428571429" y="694" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="582.8571428571429" y="717" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="582.8571428571429" dy="0">Return stopped_released</tspan></text>
+      
+      <path d="M708.5714285714286 733H465.14285714285717" fill="none" stroke="#84948b" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arrow)"/>
+    </g><g data-row-id="show" data-message-ids="show" data-participant-ids="api,caller" data-row-type="message" data-kind="return">
+      <rect x="151.42857142857144" y="758" width="360" height="34" rx="7" fill="#fafbf8"/>
+      <text x="331.42857142857144" y="781" text-anchor="middle" font-size="13" fill="#66766d"><tspan x="331.42857142857144" dy="0">Show success</tspan></text>
+      
+      <path d="M457.14285714285717 797H213.71428571428572" fill="none" stroke="#84948b" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arrow)"/>
+    </g></g>
+  <g font-family="Arial, Helvetica, sans-serif" data-export-layer="footer">
+    <path d="M70 992H1850" stroke="#dce2db"/>
+    <text x="70" y="1027" font-size="12" font-weight="600" letter-spacing="1" fill="#607c69">CURRENT · 11 INTERACTIONS</text>
+    <text x="620" y="1027" font-size="11" fill="#78867c">SOURCE · Authored scenario from cli.py cmd_stop / park_item_for_exit and tests/test_stop_verification.py; not a measured trace.</text>
+  </g>
+  </svg>

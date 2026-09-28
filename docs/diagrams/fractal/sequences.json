@@ -1,0 +1,252 @@
+{
+  "version": 1,
+  "journeys": [
+    {
+      "id": "verified-stop",
+      "title": "Stop succeeds after verification",
+      "description": "An allocated local service has a tracked process and a configured successful stop hook. Tailnet mode is none; also-release is enabled.",
+      "provenance": "Authored scenario from cli.py cmd_stop / park_item_for_exit and tests/test_stop_verification.py; not a measured trace.",
+      "status": "current",
+      "participants": [
+        {
+          "id": "caller",
+          "element": "browser",
+          "title": "Dashboard"
+        },
+        {
+          "id": "api",
+          "element": "http",
+          "title": "HTTP API"
+        },
+        {
+          "id": "stop",
+          "element": "lifecycle",
+          "title": "Stop operation"
+        },
+        {
+          "id": "files",
+          "element": "registry",
+          "title": "Registry"
+        },
+        {
+          "id": "hook",
+          "element": "hooks",
+          "title": "Stop hook"
+        },
+        {
+          "id": "proc",
+          "element": "tracked",
+          "title": "Tracked service"
+        },
+        {
+          "id": "probe",
+          "element": "observation",
+          "title": "Verification"
+        }
+      ],
+      "steps": [
+        {
+          "type": "message",
+          "id": "submit",
+          "from": "caller",
+          "to": "api",
+          "title": "Stop this range",
+          "kind": "call"
+        },
+        {
+          "type": "message",
+          "id": "dispatch",
+          "from": "api",
+          "to": "stop",
+          "title": "Invoke CLI stop",
+          "kind": "call"
+        },
+        {
+          "type": "message",
+          "id": "read",
+          "from": "stop",
+          "to": "files",
+          "title": "Lock and read allocated range",
+          "kind": "call"
+        },
+        {
+          "type": "message",
+          "id": "cleanup",
+          "from": "stop",
+          "to": "hook",
+          "title": "Run configured stop hook",
+          "kind": "call"
+        },
+        {
+          "type": "message",
+          "id": "cleanup-ok",
+          "from": "hook",
+          "to": "stop",
+          "title": "Exit code 0",
+          "kind": "return"
+        },
+        {
+          "type": "message",
+          "id": "terminate",
+          "from": "stop",
+          "to": "proc",
+          "title": "Terminate tracked processes",
+          "kind": "call"
+        },
+        {
+          "type": "message",
+          "id": "verify",
+          "from": "stop",
+          "to": "probe",
+          "title": "Check TCP ports and tracked process",
+          "kind": "call"
+        },
+        {
+          "type": "message",
+          "id": "verified",
+          "from": "probe",
+          "to": "stop",
+          "title": "All range ports closed; tracked process exited",
+          "kind": "return"
+        },
+        {
+          "type": "message",
+          "id": "commit",
+          "from": "stop",
+          "to": "files",
+          "title": "Release range and persist; unlock",
+          "kind": "call"
+        },
+        {
+          "type": "message",
+          "id": "success",
+          "from": "stop",
+          "to": "api",
+          "title": "Return stopped_released",
+          "kind": "return"
+        },
+        {
+          "type": "message",
+          "id": "show",
+          "from": "api",
+          "to": "caller",
+          "title": "Show success",
+          "kind": "return"
+        }
+      ]
+    },
+    {
+      "id": "untracked-stop",
+      "title": "An untracked listener prevents success",
+      "description": "An allocated local range remains reachable. There is no tracked PID or runnable stop hook. Stop fails and preserves allocation; no listener is killed.",
+      "provenance": "Authored scenario from cli.py park_item_for_exit / reachable_range_ports and tests/test_stop_verification.py; not a measured trace.",
+      "status": "current",
+      "participants": [
+        {
+          "id": "caller",
+          "element": "browser",
+          "title": "Dashboard"
+        },
+        {
+          "id": "api",
+          "element": "http",
+          "title": "HTTP API"
+        },
+        {
+          "id": "stop",
+          "element": "lifecycle",
+          "title": "Stop operation"
+        },
+        {
+          "id": "files",
+          "element": "registry",
+          "title": "Registry"
+        },
+        {
+          "id": "probe",
+          "element": "observation",
+          "title": "Verification"
+        },
+        {
+          "id": "other",
+          "element": "untracked",
+          "title": "Other listener"
+        }
+      ],
+      "steps": [
+        {
+          "type": "message",
+          "id": "submit",
+          "from": "caller",
+          "to": "api",
+          "title": "Stop this range",
+          "kind": "call"
+        },
+        {
+          "type": "message",
+          "id": "dispatch",
+          "from": "api",
+          "to": "stop",
+          "title": "Invoke CLI stop",
+          "kind": "call"
+        },
+        {
+          "type": "message",
+          "id": "read",
+          "from": "stop",
+          "to": "files",
+          "title": "Lock and read allocated range",
+          "kind": "call"
+        },
+        {
+          "type": "message",
+          "id": "verify",
+          "from": "stop",
+          "to": "probe",
+          "title": "Wait for range ports to close",
+          "kind": "call"
+        },
+        {
+          "type": "message",
+          "id": "connect",
+          "from": "probe",
+          "to": "other",
+          "title": "Probe loopback TCP",
+          "kind": "call"
+        },
+        {
+          "type": "message",
+          "id": "reachable",
+          "from": "other",
+          "to": "probe",
+          "title": "Port remains reachable",
+          "kind": "return"
+        },
+        {
+          "type": "message",
+          "id": "failed",
+          "from": "probe",
+          "to": "stop",
+          "title": "Report occupied ports",
+          "kind": "return"
+        },
+        {
+          "type": "message",
+          "id": "error",
+          "from": "stop",
+          "to": "api",
+          "title": "Fail; allocation unchanged; lock closes",
+          "kind": "return"
+        },
+        {
+          "type": "message",
+          "id": "show",
+          "from": "api",
+          "to": "caller",
+          "title": "Show stop_verification_failed",
+          "kind": "return"
+        }
+      ]
+    }
+  ]
+}

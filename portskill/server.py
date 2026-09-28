@@ -1083,9 +1083,18 @@ def range_html(project: str, rng: dict) -> str:
             f'Also used in: {esc(label)}</span>'
         )
     is_remote = machine_kind == "remote"
-    can_start = state != "active" and rng.get("processAlive") is not True and not is_remote
-    can_stop = (state == "active" or rng.get("processAlive") is True) and not is_remote
-    can_release = state != "released"
+    can_start = (
+        not rng.get("reachable")
+        and state not in ("active", "occupied")
+        and rng.get("processAlive") is not True
+        and not is_remote
+    )
+    can_stop = (
+        state in ("active", "occupied")
+        or rng.get("reachable") is True
+        or rng.get("processAlive") is True
+    ) and not is_remote
+    can_release = rng.get("allocationState") != "released"
     start_dis = "" if can_start else "disabled"
     stop_dis = "" if can_stop else "disabled"
     release_dis = "" if can_release else "disabled"
@@ -2853,8 +2862,8 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
         var local=service.state!=='unknown';
         var start=card.querySelector('[data-pr-action="start"]');
         var stop=card.querySelector('[data-pr-action="stop"]');
-        if(start)start.disabled=!local||service.state==='active'||service.process_alive===true;
-        if(stop)stop.disabled=!local||(service.state!=='active'&&service.process_alive!==true);
+        if(start)start.disabled=!local||service.reachable===true||service.state==='active'||service.state==='occupied'||service.process_alive===true;
+        if(stop)stop.disabled=!local||(service.reachable!==true&&service.state!=='active'&&service.state!=='occupied'&&service.process_alive!==true);
       }});
       document.querySelectorAll('.stat').forEach(function(stat){{
         var label=stat.querySelector('span');
