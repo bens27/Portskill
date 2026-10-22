@@ -34,7 +34,15 @@ from .registry import (
     read_settings,
 )
 from .domain import DomainError
+from .compatibility import compatibility_result
 from .doctor import doctor_result
+from .environments import environment_export_result, environment_import_result
+from .presets import (
+    preset_apply_result,
+    preset_delete_result,
+    preset_list_result,
+    preset_save_result,
+)
 from .settings import settings_get, settings_set
 from .status import status_result
 from .registry_mutations import activate_result, allocate_result, release_result
@@ -561,6 +569,43 @@ def _call_tool(name: str, arguments: dict) -> dict:
         return call_handoff_tool(name, args, settings)
     if name == "status":
         body = status_result(args.get("project"))
+        return {
+            "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
+            "structuredContent": body,
+            "isError": False,
+        }
+    if name == "environment_export":
+        exported = environment_export_result(args)
+        body = exported if args.get("out") else {"status": "ok", "environment": exported}
+        return {
+            "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
+            "structuredContent": body,
+            "isError": False,
+        }
+    if name == "environment_import":
+        body = environment_import_result(args)
+        return {
+            "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
+            "structuredContent": body,
+            "isError": False,
+        }
+    if name == "compat_check":
+        body = compatibility_result(args)
+        if not body.get("compatible"):
+            body["ok"] = False
+        return {
+            "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
+            "structuredContent": body,
+            "isError": not bool(body.get("compatible")),
+        }
+    if name in ("preset_save", "preset_list", "preset_apply", "preset_delete"):
+        operation = {
+            "preset_save": preset_save_result,
+            "preset_list": preset_list_result,
+            "preset_apply": preset_apply_result,
+            "preset_delete": preset_delete_result,
+        }[name]
+        body = operation(args)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,

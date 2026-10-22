@@ -29,6 +29,21 @@ def pool_bounds():
     return pool_bounds_from_environment()
 
 
+def mutate_registry_meta(mutator):
+    """Mutate registry metadata without requiring project-local mirror writes."""
+    start, end = pool_bounds()
+    try:
+        return mutate_registry(
+            mutator,
+            start=start,
+            end=end,
+            normalizer=normalize_registry,
+            after_write=write_local_project_files,
+        )
+    except CorruptRegistryError as exc:
+        raise DomainError("corrupt_registry", str(exc)) from exc
+
+
 def local_registry_path(project):
     return pathlib.Path(project) / ".portskill.json"
 

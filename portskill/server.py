@@ -35,6 +35,8 @@ from .auth import (
 )
 from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
 from .domain import DomainError
+from .compatibility import compatibility_result
+from .environments import environment_export_result, environment_import_result
 from .network import (
     ALLOW_NON_LOOPBACK_FLAG,
     bind_host_warning,
@@ -88,6 +90,7 @@ from .settings import settings_set
 from .registry_mutations import allocate_result
 from .registry_mutations import release_result
 from .process_commands import start_result, stop_result
+from .presets import preset_apply_result, preset_delete_result, preset_save_result
 from .tailscale import probe_tailscale_status
 from .webauthn import (
     authentication_options,
@@ -4074,11 +4077,15 @@ def _domain_cli_result(operation) -> tuple[int, dict]:
     """Run an in-process domain action with the legacy HTTP result envelope."""
     try:
         return _cli_result(0, operation(), "")
-    except DomainError as exc:
-        payload = exc.as_dict()
-        return _cli_result(exc.exit_code, payload, "")
     except Exception as exc:
-        return _cli_result(1, None, str(exc) or exc.__class__.__name__)
+        return _domain_exception_result(exc)
+
+
+def _domain_exception_result(exc: Exception) -> tuple[int, dict]:
+    """Map an in-process domain exception to the legacy HTTP result envelope."""
+    if isinstance(exc, DomainError):
+        return _cli_result(exc.exit_code, exc.as_dict(), "")
+    return _cli_result(1, None, str(exc) or exc.__class__.__name__)
 
 
 def dispatch_ui_action(body: dict) -> tuple[int, dict]:
@@ -4140,31 +4147,26 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         code, payload, stdout = run_cli(argv)
         return _cli_result(code, payload, stdout)
     if action == "compat-check":
-        argv = ["compat", "check"]
         presets = body.get("presets") or body.get("names") or []
         if isinstance(presets, str) and presets.strip():
             presets = [p.strip() for p in presets.split(",") if p.strip()]
-        if isinstance(presets, list):
-            for name in presets:
-                if isinstance(name, str) and name.strip():
-                    argv += ["--preset", name.strip()]
-        if len(argv) == 2:
-            argv.append("--include-default-on")
-        code, payload, stdout = run_cli(argv)
-        # Always return 200 with report so UI can show conflicts without hard fail chrome
-        if isinstance(payload, dict):
+        options = {"presets": presets}
+        if not presets:
+            options["include_default_on"] = True
+        try:
+            payload = compatibility_result(options)
             return 0, {"ok": True, "compatReport": payload, "result": payload}
-        return _cli_result(code, payload, stdout)
+        except Exception as exc:
+            return _domain_exception_result(exc)
     if action == "export-environment":
         name = body.get("name") or "environment"
         if not isinstance(name, str) or not name.strip():
             name = "environment"
-        argv = ["environment", "export", "--name", name.strip()]
-        code, payload, stdout = run_cli(argv)
-        if code != 0:
-            return _cli_result(code, payload, stdout)
-        # stdout is the environment JSON document
-        download = stdout if stdout else (json.dumps(payload, indent=2) if payload else "{}")
+        try:
+            payload = environment_export_result({"name": name.strip()})
+        except Exception as exc:
+            return _domain_exception_result(exc)
+        download = json.dumps(payload, indent=2, sort_keys=True) + "\n"
         filename = f"{name.strip().replace(' ', '-')}.json"
         return 0, {"ok": True, "download": download, "filename": filename, "result": payload}
     if action == "import-environment":
@@ -4186,9 +4188,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         else:
             return 400, {"ok": False, "message": "expected content or path for import"}
         try:
-            argv = ["environment", "import", "--file", file_arg]
-            code, payload, stdout = run_cli(argv)
-            return _cli_result(code, payload, stdout)
+            return _domain_cli_result(lambda: environment_import_result({"file": file_arg}))
         finally:
             if tmp_path:
                 try:
@@ -4199,28 +4199,22 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         name = body.get("name")
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
-        argv = ["preset", "save", "--name", name.strip()]
+        options = {"name": name.strip()}
         desc = body.get("description")
         if isinstance(desc, str) and desc:
-            argv += ["--description", desc]
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+            options["description"] = desc
+        return _domain_cli_result(lambda: preset_save_result(options))
     if action == "preset-apply":
         name = body.get("name")
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
-        argv = ["preset", "apply", "--name", name.strip()]
-        if body.get("alsoStopOff"):
-            argv.append("--also-stop-off")
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+        options = {"name": name.strip(), "also_stop_off": bool(body.get("alsoStopOff"))}
+        return _domain_cli_result(lambda: preset_apply_result(options))
     if action == "preset-delete":
         name = body.get("name")
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
-        argv = ["preset", "delete", "--name", name.strip()]
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+        return _domain_cli_result(lambda: preset_delete_result({"name": name.strip()}))
     if action == "settings-save":
         options = {}
         if "autoApplyOnLaunch" in body:

@@ -10,6 +10,12 @@ from .auth import (
     http_bearer_matches,
     regenerate_http_auth_token,
 )
+from .apply_defaults import apply_defaults_result as domain_apply_defaults_result
+from .compatibility import (
+    compat_report as domain_compat_report,
+    compatibility_result as domain_compatibility_result,
+    enforce_compatibility as domain_enforce_compatibility,
+)
 from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
 from .doctor import DOCTOR_FAIL_CLOSED_EXIT, DOCTOR_HARD_CHECKS
 from .domain import (
@@ -24,6 +30,14 @@ from .network import (
     is_loopback_host,
     listen_allows_non_loopback,
     non_loopback_refuse_message,
+)
+from .environments import (
+    build_environment_payload as domain_build_environment_payload,
+    environment_export_result,
+    environment_import_result,
+    environment_payload_from_preset as domain_environment_payload_from_preset,
+    import_services_into_registry as domain_import_services_into_registry,
+    load_environment_file as domain_load_environment_file,
 )
 from .lifecycle import (
     activate_item,
@@ -56,7 +70,6 @@ from .registry import (
     CorruptRegistryError,
     MCP_USER_COMMAND_MAX_STEPS,
     atomic_write_json,
-    backups_dir,
     default_registry as initial_registry,
     default_settings,
     http_auth_path,
@@ -129,6 +142,7 @@ from .registry_operations import (
     find_range_anywhere,
     locked_registry,
     maybe_push_history,
+    mutate_registry_meta as domain_mutate_registry_meta,
     next_range_id,
     non_released_ranges,
     overlaps,
@@ -138,11 +152,20 @@ from .registry_operations import (
     range_record,
     require_project_directory,
     resolve_history_env_name,
-    resolve_service_claim,
     snapshot_environment,
     warnings_for_port_range,
     write_local_project_file,
     write_local_project_files,
+)
+from .presets import (
+    maybe_auto_apply_on_launch as domain_maybe_auto_apply_on_launch,
+    preset_apply_for_launch,
+    preset_apply_result,
+    preset_check_result,
+    preset_delete_result,
+    preset_list_result,
+    preset_save_result,
+    preset_show_result,
 )
 from .process_commands import (
     iter_project_ranges,
@@ -154,6 +177,10 @@ from .process_commands import (
     stop_result,
 )
 from .service import launch_service, script_is_placeholder, service_launch
+from .sessions import (
+    begin_active_session as domain_begin_active_session,
+    end_active_session as domain_end_active_session,
+)
 from .status import (
     enrich_range as enrich_range_for_status,
     observed_range_status,
@@ -161,7 +188,6 @@ from .status import (
     status_result,
 )
 import copy
-import datetime
 import json
 import os
 import pathlib
@@ -241,79 +267,11 @@ def check_overlap_denied(registry):
 
 
 def begin_active_session(registry, preset, source):
-    """Replace sessions.active and append an open history window (opaque)."""
-    sessions = normalize_sessions(registry.get("sessions"))
-    now = utc_now()
-    previous = sessions.get("active")
-    if previous and previous.get("started_at"):
-        closed = False
-        for entry in reversed(sessions["history"]):
-            if (
-                entry.get("ended_at") is None
-                and entry.get("started_at") == previous.get("started_at")
-                and entry.get("preset") == previous.get("preset")
-            ):
-                entry["ended_at"] = now
-                closed = True
-                break
-        if not closed:
-            sessions["history"].append(
-                {
-                    "preset": previous.get("preset"),
-                    "started_at": previous.get("started_at"),
-                    "ended_at": now,
-                    "opaque": True,
-                }
-            )
-    preset_name = normalize_session_preset(preset)
-    source_name = normalize_session_source(source)
-    sessions["active"] = {
-        "preset": preset_name,
-        "started_at": now,
-        "source": source_name,
-    }
-    sessions["history"].append(
-        {
-            "preset": preset_name,
-            "started_at": now,
-            "ended_at": None,
-            "opaque": True,
-        }
-    )
-    sessions["history"] = sessions["history"][-SESSION_HISTORY_CAP:]
-    registry["sessions"] = sessions
-    return sessions["active"]
+    return domain_begin_active_session(registry, preset, source)
 
 
 def end_active_session(registry):
-    """Close active session and set ended_at on the matching history window."""
-    sessions = normalize_sessions(registry.get("sessions"))
-    now = utc_now()
-    active = sessions.get("active")
-    if active and active.get("started_at"):
-        closed = False
-        for entry in reversed(sessions["history"]):
-            if (
-                entry.get("ended_at") is None
-                and entry.get("started_at") == active.get("started_at")
-                and entry.get("preset") == active.get("preset")
-            ):
-                entry["ended_at"] = now
-                closed = True
-                break
-        if not closed:
-            sessions["history"].append(
-                {
-                    "preset": active.get("preset"),
-                    "started_at": active.get("started_at"),
-                    "ended_at": now,
-                    "opaque": True,
-                }
-            )
-    sessions["active"] = None
-    sessions["history"] = sessions["history"][-SESSION_HISTORY_CAP:]
-    registry["sessions"] = sessions
-    return active
+    return domain_end_active_session(registry)
 
 
 def build_schedule_windows(registry, focus=None):
@@ -632,24 +590,6 @@ def history_list_payload(registry, env_name):
     }
 
 
-def export_workspace_backup(registry, label="workspace"):
-    """Write timestamped workspace backup under ~/.config/portskill/backups/.
-
-    Returns absolute path string. Raises OSError on write failure.
-    """
-    stamp = datetime.datetime.now(datetime.timezone.utc).astimezone().strftime("%Y%m%d-%H%M%S")
-    dest_dir = backups_dir()
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / f"{label}-{stamp}.json"
-    payload = build_environment_payload(
-        registry,
-        name=label,
-        description=f"Auto-backup before import ({stamp})",
-        project_filter=None,
-    )
-    raw = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    dest.write_text(raw, encoding="utf-8")
-    return str(dest.resolve())
 
 
 
@@ -666,139 +606,16 @@ def export_workspace_backup(registry, label="workspace"):
 
 
 
-def _claim_summary(claim):
-    return {
-        "source": claim.get("source"),
-        "project": claim.get("project"),
-        "note": claim.get("note"),
-        "range_id": claim.get("range_id"),
-        "count": claim.get("count"),
-        "start": claim.get("start"),
-        "end": claim.get("end"),
-        "resolved": bool(claim.get("resolved")),
-    }
 
 
 
 
-def collect_claims_from_services(registry, services, source):
-    claims = []
-    for index, service in enumerate(services or []):
-        normalized = normalize_preset_service(service)
-        if normalized is None:
-            continue
-        claim = resolve_service_claim(registry, normalized, source=source)
-        if claim is not None:
-            claim["index"] = index
-            claims.append(claim)
-    return claims
 
 
-def collect_claims_from_presets(registry, preset_names):
-    presets = registry.get("presets") or {}
-    claims = []
-    missing = []
-    for name in preset_names or []:
-        name = (name or "").strip()
-        if not name:
-            continue
-        if name not in presets:
-            missing.append(name)
-            continue
-        entry = normalize_preset_entry(name, presets[name])
-        claims.extend(
-            collect_claims_from_services(
-                registry, entry.get("services") or [], source=f"preset:{name}"
-            )
-        )
-    return claims, missing
 
 
-def collect_claims_default_on(registry, project_filter=None):
-    """Claims for live Default On ranges (what apply-defaults would start)."""
-    filters = [project_path(p) for p in project_filter] if project_filter else None
-    claims = []
-    for project, item in iter_project_ranges(registry, filters):
-        if normalize_default_state(item.get("default_state")) != "on":
-            continue
-        if item.get("state") == "released":
-            continue
-        claims.append({
-            "source": "default_on",
-            "project": project,
-            "note": item.get("note"),
-            "count": int(item["end"]) - int(item["start"]) + 1,
-            "range_id": item.get("id"),
-            "start": int(item["start"]),
-            "end": int(item["end"]),
-            "resolved": True,
-            "index": len(claims),
-        })
-    return claims
 
 
-def find_port_conflicts(claims):
-    """Return conflicts for claims that cannot safely share a machine."""
-    conflicts = []
-    n = len(claims)
-    for i in range(n):
-        a = claims[i]
-        for j in range(i + 1, n):
-            b = claims[j]
-            if (
-                a.get("resolved")
-                and b.get("resolved")
-                and a.get("range_id")
-                and a.get("range_id") == b.get("range_id")
-            ):
-                continue
-            if a.get("resolved") and b.get("resolved"):
-                if overlaps(a["start"], a["end"], b["start"], b["end"]):
-                    conflicts.append({
-                        "reason": "port_overlap",
-                        "message": (
-                            f"Port ranges overlap: {a.get('start')}-{a.get('end')} "
-                            f"({a.get('source')}) vs {b.get('start')}-{b.get('end')} "
-                            f"({b.get('source')})"
-                        ),
-                        "a": _claim_summary(a),
-                        "b": _claim_summary(b),
-                    })
-                    continue
-            same_identity = (
-                a.get("project") == b.get("project")
-                and (a.get("note") or None) == (b.get("note") or None)
-            )
-            if (
-                same_identity
-                and a.get("range_id")
-                and b.get("range_id")
-                and a["range_id"] != b["range_id"]
-            ):
-                conflicts.append({
-                    "reason": "duplicate_identity_different_ranges",
-                    "message": (
-                        f"Same project/note maps to different ranges: "
-                        f"{a['range_id']} vs {b['range_id']}"
-                    ),
-                    "a": _claim_summary(a),
-                    "b": _claim_summary(b),
-                })
-            elif (
-                same_identity
-                and a.get("count") != b.get("count")
-                and not (a.get("range_id") and a.get("range_id") == b.get("range_id"))
-            ):
-                conflicts.append({
-                    "reason": "count_mismatch",
-                    "message": (
-                        f"Same project/note with different port counts: "
-                        f"{a.get('count')} vs {b.get('count')}"
-                    ),
-                    "a": _claim_summary(a),
-                    "b": _claim_summary(b),
-                })
-    return conflicts
 
 
 def run_compat_check(
@@ -808,32 +625,13 @@ def run_compat_check(
     include_default_on=False,
     project_filter=None,
 ):
-    """Conflict report for selected environments/services (plain port conflicts)."""
-    claims = []
-    missing = []
-    sources = []
-    if preset_names:
-        preset_claims, missing = collect_claims_from_presets(registry, preset_names)
-        claims.extend(preset_claims)
-        sources.extend([f"preset:{n}" for n in preset_names if (n or "").strip()])
-    if services is not None:
-        claims.extend(collect_claims_from_services(registry, services, source="services"))
-        sources.append("services")
-    if include_default_on:
-        claims.extend(collect_claims_default_on(registry, project_filter=project_filter))
-        sources.append("default_on")
-    conflicts = find_port_conflicts(claims)
-    ok = len(conflicts) == 0 and not missing
-    return {
-        "status": "ok" if ok else "conflict",
-        "compatible": ok,
-        "sources": sources,
-        "missing_presets": missing,
-        "claims": [_claim_summary(c) for c in claims],
-        "claim_count": len(claims),
-        "conflicts": conflicts,
-        "conflict_count": len(conflicts),
-    }
+    return domain_compat_report(
+        registry,
+        preset_names=preset_names,
+        services=services,
+        include_default_on=include_default_on,
+        project_filter=project_filter,
+    )
 
 
 
@@ -847,38 +645,12 @@ def enforce_compat_or_fail(
     include_default_on=False,
     project_filter=None,
 ):
-    """If require_compat is on, fail with compat_conflict when ports collide."""
-    settings = normalize_settings(registry.get("settings"))
-    if not settings.get("require_compat"):
-        return None
-    report = run_compat_check(
+    return domain_enforce_compatibility(
         registry,
         preset_names=preset_names,
         services=services,
         include_default_on=include_default_on,
         project_filter=project_filter,
-    )
-    if report.get("compatible"):
-        return report
-    fail(
-        "compat_conflict",
-        "Selected environments are not compatible (port conflict). "
-        "Fix overlapping ranges, or: settings set --require-compat off",
-        conflicts=report.get("conflicts"),
-        conflict_count=report.get("conflict_count"),
-        missing_presets=report.get("missing_presets") or None,
-        hint="Run: compat check --preset NAME …  or settings set --require-compat off",
-        report={
-            k: report[k]
-            for k in (
-                "compatible",
-                "sources",
-                "claim_count",
-                "conflict_count",
-                "conflicts",
-                "missing_presets",
-            )
-        },
     )
 
 
@@ -971,260 +743,46 @@ def cmd_stop(args):
 
 
 def build_environment_payload(registry, name, description="", project_filter=None):
-    services = []
-    for project, item in iter_project_ranges(registry, project_filter):
-        tailnet_mode = (item.get("tailnet") or {}).get("mode") or "none"
-        count = int(item["end"]) - int(item["start"]) + 1
-        services.append({
-            "project": project,
-            "note": item.get("note"),
-            "count": count,
-            "tailnet": tailnet_mode if tailnet_mode in ("serve", "funnel", "none") else "none",
-            "default_state": normalize_default_state(item.get("default_state")),
-            "range_id": item.get("id"),
-        })
-    return {
-        "version": 1,
-        "kind": "portskill-environment",
-        "name": name,
-        "description": description or "",
-        "exported_at": utc_now(),
-        "services": services,
-    }
+    return domain_build_environment_payload(registry, name, description, project_filter)
 
 
 def environment_payload_from_preset(registry, preset_name, export_name=None, description=None):
-    presets = registry.get("presets") or {}
-    if preset_name not in presets:
-        fail("preset_not_found", f"preset not found: {preset_name}")
-    preset = normalize_preset_entry(preset_name, presets[preset_name])
-    name = export_name if export_name else preset["name"]
-    desc = description if description is not None else preset.get("description") or ""
-    return {
-        "version": 1,
-        "kind": "portskill-environment",
-        "name": name,
-        "description": desc,
-        "exported_at": utc_now(),
-        "services": list(preset.get("services") or []),
-        "from_preset": preset_name,
-    }
+    return domain_environment_payload_from_preset(
+        registry, preset_name, export_name=export_name, description=description
+    )
 
 
 def cmd_environment_export(args):
-    project_filter = list(args.project) if args.project else None
-    from_preset = getattr(args, "from_preset", None)
-
-    def read(registry):
-        if from_preset:
-            payload = environment_payload_from_preset(
-                registry,
-                from_preset,
-                export_name=args.name,
-                description=getattr(args, "description", None),
-            )
-        else:
-            payload = build_environment_payload(
-                registry,
-                name=args.name,
-                description=getattr(args, "description", "") or "",
-                project_filter=project_filter,
-            )
-        return payload, []
-
-    payload = locked_registry(read)
-
-    def compat_read(registry):
-        return run_compat_check(registry, services=payload.get("services") or []), False, []
-
-    try:
-        compat = mutate_registry_meta(compat_read)
-    except Exception:  # noqa: BLE001
-        compat = {"compatible": True, "conflicts": []}
-    if not compat.get("compatible"):
-        settings_snap = mutate_registry_meta(
-            lambda r: (normalize_settings(r.get("settings")), False, [])
-        )
-        if settings_snap.get("require_compat"):
-            fail(
-                "compat_conflict",
-                f"Environment {payload.get('name')!r} has internal port conflicts; not exported",
-                conflicts=compat.get("conflicts"),
-                conflict_count=compat.get("conflict_count"),
-            )
-        payload["_compat_warning"] = {
-            "reason": "compat_conflict",
-            "conflicts": compat.get("conflicts"),
-        }
-
-    raw = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    options = {
+        "name": args.name,
+        "description": getattr(args, "description", None),
+        "from_preset": getattr(args, "from_preset", None),
+        "project": list(args.project) if args.project else None,
+        "out": args.out,
+    }
+    payload = environment_export_result(options)
     if args.out:
-        out_path = pathlib.Path(args.out).expanduser()
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(raw, encoding="utf-8")
-        out_payload = {
-            "status": "ok",
-            "path": str(out_path.resolve()),
-            "name": payload["name"],
-            "service_count": len(payload["services"]),
-            "compatible": bool(compat.get("compatible")),
-        }
-        if not compat.get("compatible"):
-            out_payload["warnings"] = [{
-                "reason": "compat_conflict",
-                "message": "Services inside this environment conflict on ports",
-                "conflicts": compat.get("conflicts"),
-            }]
-        emit(out_payload)
+        emit(payload)
     else:
-        # Portable JSON on stdout (not the usual one-line emit) when --out omitted
-        print(raw, end="")
+        print(json.dumps(payload, indent=2, sort_keys=True) + "\n", end="")
+    return
 
 
 def load_environment_file(path):
-    file_path = pathlib.Path(path).expanduser()
-    if not file_path.exists():
-        fail("environment_not_found", f"environment file not found: {file_path}")
-    try:
-        data = json.loads(file_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        fail("invalid_environment", f"environment JSON is corrupt: {exc.msg}")
-    if not isinstance(data, dict):
-        fail("invalid_environment", "environment root must be an object")
-    if data.get("kind") not in (None, "portskill-environment"):
-        fail("invalid_environment", f"unexpected kind: {data.get('kind')}")
-    services = data.get("services")
-    if not isinstance(services, list):
-        fail("invalid_environment", "services must be a list")
-    return data, services
+    return domain_load_environment_file(path)
 
 
 def import_services_into_registry(registry, services):
-    """Create/update ranges for environment services. Returns (results, changed_projects)."""
-    results = []
-    changed = set()
-    for index, service in enumerate(services):
-        if not isinstance(service, dict):
-            results.append({"index": index, "status": "error", "reason": "invalid_service"})
-            continue
-        project_raw = service.get("project")
-        if not project_raw:
-            results.append({"index": index, "status": "error", "reason": "missing_project"})
-            continue
-        try:
-            project = project_path(project_raw)
-        except (OSError, RuntimeError) as exc:
-            results.append({"index": index, "status": "error", "reason": "invalid_project", "message": str(exc)})
-            continue
-        if not pathlib.Path(project).is_dir():
-            results.append({
-                "index": index,
-                "status": "error",
-                "reason": "project_not_found",
-                "project": project,
-            })
-            continue
-        note = service.get("note")
-        default_state = normalize_default_state(service.get("default_state"))
-        tailnet_mode = service.get("tailnet") or "none"
-        if tailnet_mode not in ("serve", "funnel", "none"):
-            tailnet_mode = "none"
-        try:
-            count = int(service.get("count") or 1)
-        except (TypeError, ValueError):
-            count = 1
-        if count <= 0:
-            count = 1
-        range_id = service.get("range_id")
-        item = None
-        action = None
-        if range_id:
-            item = find_project_range(registry, project, range_id)
-            if item is not None and item.get("state") == "released":
-                item = None
-        if item is None:
-            item = find_matching_unreleased(registry, project, note)
-            if item is not None:
-                action = "reused"
-        if item is None:
-            scaffold_lifecycle_scripts(project)
-            available = find_free_range(registry, count)
-            if available is None:
-                results.append({
-                    "index": index,
-                    "status": "error",
-                    "reason": "pool_exhausted",
-                    "project": project,
-                    "note": note,
-                })
-                continue
-            start, end = available
-            project_entry = ensure_project(registry, project)
-            item = range_record(
-                next_range_id(project_entry),
-                start,
-                end,
-                note,
-                tailnet_mode,
-                default_state=default_state,
-            )
-            project_entry["ranges"].append(item)
-            action = "allocated"
-            changed.add(project)
-        else:
-            item["default_state"] = default_state
-            # Keep recorded tailnet if present; otherwise set from import
-            item.setdefault("tailnet", {"mode": None, "port": None, "configured_at": None})
-            if item["tailnet"].get("mode") is None:
-                item["tailnet"]["mode"] = tailnet_mode
-            normalize_range_record(item)
-            action = action or "updated"
-            changed.add(project)
-        results.append({
-            "index": index,
-            "status": "ok",
-            "action": action,
-            "project": project,
-            "note": note,
-            "default_state": item["default_state"],
-            "range": item,
-        })
-    return results, sorted(changed)
+    return domain_import_services_into_registry(registry, services)
 
 
 def cmd_environment_import(args):
-    _data, services = load_environment_file(args.file)
-
-    def mutate(registry):
-        # Safety: auto-export current workspace before applying import
-        try:
-            backup_path = export_workspace_backup(registry, label="workspace")
-        except OSError as exc:
-            fail(
-                "backup_failed",
-                f"Import aborted: could not write workspace backup: {exc}",
-            )
-        hist_key = resolve_history_env_name(registry, getattr(args, "environment", None))
-        ensure_baseline(registry, hist_key)
-        results, changed = import_services_into_registry(registry, services)
-        maybe_push_history(registry, "environment import", hist_key)
-        return {
-            "status": "ok",
-            "imported": len([r for r in results if r.get("status") == "ok"]),
-            "failed": len([r for r in results if r.get("status") != "ok"]),
-            "results": results,
-            "backup_path": backup_path,
-            "message": f"Import ok; previous workspace backed up to {backup_path}",
-        }, changed
-
-    payload = locked_registry(mutate)
-    if args.apply_defaults:
-        apply_payload = run_apply_defaults(
-            project_filter=None,
-            also_stop_off=False,
-        )
-        payload["apply_defaults"] = apply_payload
-    emit(payload)
+    emit(environment_import_result({
+        "file": args.file,
+        "environment": getattr(args, "environment", None),
+        "apply_defaults": bool(args.apply_defaults),
+    }))
+    return
 
 
 def cmd_set_default(args):
@@ -1288,25 +846,9 @@ def cmd_set_defaults_from_current(args):
 
 
 def stop_item_for_apply(item, project):
-    """Stop a live Off range during apply-defaults --also-stop-off."""
-    if item.get("state") == "released":
-        return True, {"action": "already_released", "range": item}
-    life = lifecycle(item)
-    has_live_pid = pid_alive(life.get("pid"))
-    live_group_pids = process_group_pids(life.get("pgid")) if life.get("pgid") else []
-    has_live_group = any(pid_alive(pid) for pid in live_group_pids)
-    if has_live_pid or has_live_group:
-        run_stop_script_if_ready(item, project)
-        terminate_lifecycle_processes(item)
-    else:
-        life["pid"] = None
-        life["pgid"] = None
-        life["stopped_at"] = utc_now()
-    try:
-        release_item(item)
-    except DomainError:
-        return False, {"reason": "release_failed", "range_id": item.get("id")}
-    return True, {"action": "stopped", "range": item}
+    from .apply_defaults import stop_item_for_apply as domain_stop_item_for_apply
+
+    return domain_stop_item_for_apply(item, project)
 
 
 def run_apply_defaults(
@@ -1318,73 +860,14 @@ def run_apply_defaults(
     record_session=True,
     enforce_overlap=True,
 ):
-    filters = [project_path(p) for p in project_filter] if project_filter else None
-
-    def mutate(registry):
-        if enforce_overlap:
-            # Port compatibility (not single-session).
-            enforce_compat_or_fail(
-                registry,
-                include_default_on=True,
-                project_filter=project_filter,
-            )
-        started = []
-        skipped = []
-        stopped = []
-        errors = []
-        changed = set()
-        for project, item in list(iter_project_ranges(registry, filters)):
-            default_state = normalize_default_state(item.get("default_state"))
-            live = range_has_live_process(item)
-            if default_state == "on":
-                if live and item.get("state") == "active":
-                    skipped.append({
-                        "project": project,
-                        "range_id": item.get("id"),
-                        "reason": "already_active",
-                    })
-                    continue
-                ok, detail = start_item_for_apply(item, project, registry=registry)
-                detail = dict(detail)
-                detail["project"] = project
-                if ok:
-                    started.append(detail)
-                    changed.add(project)
-                else:
-                    if detail.get("skipped"):
-                        skipped.append(detail)
-                    else:
-                        errors.append(detail)
-                    # placeholder skip does not mutate; other partial may have
-                    if "range" in detail:
-                        changed.add(project)
-            elif also_stop_off and live:
-                ok, detail = stop_item_for_apply(item, project)
-                detail = dict(detail)
-                detail["project"] = project
-                if ok:
-                    stopped.append(detail)
-                    changed.add(project)
-                else:
-                    errors.append(detail)
-        payload = {
-            "status": "ok",
-            "started": started,
-            "stopped": stopped,
-            "skipped": skipped,
-            "errors": errors,
-            "started_count": len(started),
-            "stopped_count": len(stopped),
-            "skipped_count": len(skipped),
-            "error_count": len(errors),
-        }
-        if record_session:
-            active = begin_active_session(registry, session_preset, session_source)
-            payload["session"] = active
-            changed.add("__sessions__")
-        return payload, sorted(changed)
-
-    return locked_registry(mutate)
+    return domain_apply_defaults_result(
+        project_filter=project_filter,
+        also_stop_off=also_stop_off,
+        session_preset=session_preset,
+        session_source=session_source,
+        record_session=record_session,
+        enforce_overlap=enforce_overlap,
+    )
 
 
 def cmd_apply_defaults(args):
@@ -1520,218 +1003,41 @@ def cmd_deactivate(args):
 cmd_exit_house = cmd_deactivate
 
 
-def services_from_environment_file(path):
-    data, services = load_environment_file(path)
-    return data, services
 
 
 def mutate_registry_meta(mutator):
-    """Like locked_registry but can write meta-only (presets/settings) without local mirrors."""
-    start, end = pool_bounds()
-    try:
-        return mutate_registry(
-            mutator,
-            start=start,
-            end=end,
-            normalizer=normalize_registry,
-            after_write=write_local_project_files,
-        )
-    except CorruptRegistryError as exc:
-        fail("corrupt_registry", str(exc))
+    return domain_mutate_registry_meta(mutator)
 
 
 def cmd_preset_save(args):
-    name = (args.name or "").strip()
-    if not name:
-        fail("invalid_args", "--name is required")
-    description = getattr(args, "description", "") or ""
-    project_filter = list(args.project) if args.project else None
-    from_file = getattr(args, "from_file", None)
-    empty = bool(getattr(args, "empty", False))
-
-    def mutate(registry):
-        if empty and from_file:
-            fail("invalid_args", "use either --empty or --from-file, not both")
-        if empty:
-            services = []
-            use_description = description or "New environment"
-            entry = {
-                "name": name,
-                "description": use_description,
-                "updated_at": utc_now(),
-                "services": services,
-            }
-            registry.setdefault("presets", {})
-            registry["presets"][name] = normalize_preset_entry(name, entry)
-            settings = normalize_settings(registry.get("settings"))
-            tabs = list(settings.get("open_environment_tabs") or [])
-            if name not in tabs:
-                tabs.append(name)
-            settings["open_environment_tabs"] = tabs
-            settings["focused_environment"] = name
-            registry["settings"] = normalize_settings(settings)
-            # New empty env: baseline now (Original); no step yet
-            ensure_baseline(registry, name)
-            return {
-                "status": "ok",
-                "preset": registry["presets"][name],
-                "service_count": 0,
-                "compatible": True,
-                "empty": True,
-                "settings": registry["settings"],
-            }, True, []
-        hist_key = resolve_history_env_name(registry, getattr(args, "environment", None) or name)
-        ensure_baseline(registry, hist_key)
-        if from_file:
-            data, services_raw = services_from_environment_file(from_file)
-            services = []
-            for item in services_raw:
-                normalized = normalize_preset_service(item)
-                if normalized is not None:
-                    services.append(normalized)
-            if not description and isinstance(data.get("description"), str):
-                use_description = data.get("description") or ""
-            else:
-                use_description = description
-        else:
-            payload = build_environment_payload(
-                registry,
-                name=name,
-                description=description,
-                project_filter=project_filter,
-            )
-            services = []
-            for item in payload["services"]:
-                normalized = normalize_preset_service(item)
-                if normalized is not None:
-                    services.append(normalized)
-            use_description = description
-        entry = {
-            "name": name,
-            "description": use_description,
-            "updated_at": utc_now(),
-            "services": services,
-        }
-        registry.setdefault("presets", {})
-        registry["presets"][name] = normalize_preset_entry(name, entry)
-        registry["settings"] = normalize_settings(registry.get("settings"))
-        report = run_compat_check(registry, services=services)
-        if not report.get("compatible") and registry["settings"].get("require_compat"):
-            fail(
-                "compat_conflict",
-                f"Preset {name!r} has internal port conflicts; not saved",
-                conflicts=report.get("conflicts"),
-                conflict_count=report.get("conflict_count"),
-                hint="Fix overlapping services, or: settings set --require-compat off",
-            )
-        result = {
-            "status": "ok",
-            "preset": registry["presets"][name],
-            "service_count": len(services),
-            "compatible": bool(report.get("compatible")),
-        }
-        if not report.get("compatible"):
-            result["warnings"] = [{
-                "reason": "compat_conflict",
-                "message": "Services inside this preset conflict on ports",
-                "conflicts": report.get("conflicts"),
-            }]
-        # History for this env (or focused) when services rewritten
-        maybe_push_history(registry, "preset save", hist_key)
-        return result, True, []
-
-    emit(mutate_registry_meta(mutate))
+    emit(preset_save_result({
+        "name": args.name,
+        "description": getattr(args, "description", "") or "",
+        "project": list(args.project) if args.project else None,
+        "from_file": getattr(args, "from_file", None),
+        "empty": bool(getattr(args, "empty", False)),
+        "environment": getattr(args, "environment", None),
+    }))
+    return
 
 
 def cmd_preset_list(args):
-    def read(registry):
-        presets = registry.get("presets") or {}
-        items = []
-        for name in sorted(presets.keys()):
-            entry = normalize_preset_entry(name, presets[name])
-            items.append({
-                "name": entry["name"],
-                "description": entry.get("description") or "",
-                "updated_at": entry.get("updated_at"),
-                "service_count": len(entry.get("services") or []),
-            })
-        return {"status": "ok", "presets": items, "count": len(items)}, False, []
-
-    emit(mutate_registry_meta(read))
+    emit(preset_list_result())
+    return
 
 
 def cmd_preset_show(args):
-    name = (args.name or "").strip()
-    if not name:
-        fail("invalid_args", "--name is required")
-
-    def read(registry):
-        presets = registry.get("presets") or {}
-        if name not in presets:
-            fail("preset_not_found", f"preset not found: {name}")
-        entry = normalize_preset_entry(name, presets[name])
-        return {"status": "ok", "preset": entry}, False, []
-
-    emit(mutate_registry_meta(read))
+    emit(preset_show_result({"name": args.name}))
+    return
 
 
 def cmd_preset_delete(args):
-    name = (args.name or "").strip()
-    if not name:
-        fail("invalid_args", "--name is required")
-
-    def mutate(registry):
-        presets = registry.setdefault("presets", {})
-        if name not in presets:
-            fail("preset_not_found", f"preset not found: {name}")
-        del presets[name]
-        settings = registry.setdefault("settings", default_settings())
-        if settings.get("auto_apply_preset") == name:
-            settings["auto_apply_preset"] = None
-            registry["settings"] = normalize_settings(settings)
-        return {"status": "ok", "deleted": name}, True, []
-
-    emit(mutate_registry_meta(mutate))
+    emit(preset_delete_result({"name": args.name}))
+    return
 
 
 def run_preset_apply(name, also_stop_off=False):
-    name = (name or "").strip()
-    if not name:
-        fail("invalid_args", "preset name is required")
-
-    def mutate(registry):
-        presets = registry.get("presets") or {}
-        if name not in presets:
-            fail("preset_not_found", f"preset not found: {name}")
-        entry = normalize_preset_entry(name, presets[name])
-        services = entry.get("services") or []
-        enforce_compat_or_fail(
-            registry,
-            preset_names=[name],
-            include_default_on=True,
-        )
-        results, changed = import_services_into_registry(registry, services)
-        return {
-            "status": "ok",
-            "preset": name,
-            "imported": len([r for r in results if r.get("status") == "ok"]),
-            "failed": len([r for r in results if r.get("status") != "ok"]),
-            "results": results,
-        }, True, changed
-
-    payload = mutate_registry_meta(mutate)
-    apply_payload = run_apply_defaults(
-        project_filter=None,
-        also_stop_off=also_stop_off,
-        session_preset=name,
-        session_source="preset_apply",
-        record_session=True,
-        enforce_overlap=False,  # already checked above
-    )
-    payload["apply_defaults"] = apply_payload
-    if apply_payload.get("session"):
-        payload["session"] = apply_payload["session"]
-    return payload
+    return preset_apply_result({"name": name, "also_stop_off": also_stop_off})
 
 
 def cmd_preset_apply(args):
@@ -1740,17 +1046,11 @@ def cmd_preset_apply(args):
 
 
 def cmd_preset_check(args):
-    names = list(args.name) if getattr(args, "name", None) else []
-    if not names:
-        fail("invalid_args", "preset check requires at least one --name")
-
-    def read(registry):
-        return run_compat_check(registry, preset_names=names), False, []
-
-    report = mutate_registry_meta(read)
+    report = preset_check_result({"name": list(args.name) if getattr(args, "name", None) else []})
     emit(report)
     if not report.get("compatible"):
         raise SystemExit(2)
+    return
 
 
 def cmd_preset(args):
@@ -1791,129 +1091,11 @@ def cmd_settings(args):
 
 
 def soft_preset_apply(name, also_stop_off=False):
-    """Apply preset without SystemExit on missing preset / import issues. Returns payload dict."""
-    name = (name or "").strip()
-    if not name:
-        return {"status": "error", "reason": "invalid_args", "message": "preset name is required"}
-
-    def mutate(registry):
-        settings = normalize_settings(registry.get("settings"))
-        if settings.get("require_compat"):
-            report = run_compat_check(
-                registry, preset_names=[name], include_default_on=True
-            )
-            if not report.get("compatible"):
-                return {
-                    "status": "error",
-                    "reason": "compat_conflict",
-                    "message": "Selected environments are not compatible (port conflict)",
-                    "conflicts": report.get("conflicts"),
-                    "hint": "Run: compat check --preset NAME … or settings set --require-compat off",
-                    "preset": name,
-                }, False, []
-        presets = registry.get("presets") or {}
-        if name not in presets:
-            return {
-                "status": "error",
-                "reason": "preset_not_found",
-                "message": f"preset not found: {name}",
-            }, False, []
-        entry = normalize_preset_entry(name, presets[name])
-        services = entry.get("services") or []
-        results, changed = import_services_into_registry(registry, services)
-        return {
-            "status": "ok",
-            "preset": name,
-            "imported": len([r for r in results if r.get("status") == "ok"]),
-            "failed": len([r for r in results if r.get("status") != "ok"]),
-            "results": results,
-        }, True, changed
-
-    try:
-        payload = mutate_registry_meta(mutate)
-    except SystemExit as exc:
-        return {
-            "status": "error",
-            "reason": "auto_apply_failed",
-            "preset": name,
-            "exit_code": getattr(exc, "code", 2),
-        }
-    except Exception as exc:  # noqa: BLE001
-        return {
-            "status": "error",
-            "reason": "auto_apply_failed",
-            "preset": name,
-            "message": str(exc),
-        }
-    if payload.get("status") != "ok":
-        return payload
-    try:
-        apply_payload = run_apply_defaults(
-            project_filter=None,
-            also_stop_off=also_stop_off,
-            session_preset=name,
-            session_source="preset_apply",
-            record_session=True,
-            enforce_overlap=False,
-        )
-        payload["apply_defaults"] = apply_payload
-        if apply_payload.get("session"):
-            payload["session"] = apply_payload["session"]
-    except SystemExit as exc:
-        payload["apply_defaults"] = {
-            "status": "error",
-            "reason": "apply_defaults_failed",
-            "exit_code": getattr(exc, "code", 2),
-        }
-        payload["warnings"] = payload.get("warnings") or []
-        payload["warnings"].append("apply_defaults raised SystemExit")
-    except Exception as exc:  # noqa: BLE001
-        payload["apply_defaults"] = {
-            "status": "error",
-            "reason": "apply_defaults_failed",
-            "message": str(exc),
-        }
-        payload["warnings"] = payload.get("warnings") or []
-        payload["warnings"].append(str(exc))
-    # Surface placeholder/start issues as warnings without failing the whole launch
-    apply = payload.get("apply_defaults") or {}
-    warnings = list(payload.get("warnings") or [])
-    for err in apply.get("errors") or []:
-        warnings.append(err)
-    for skip in apply.get("skipped") or []:
-        if skip.get("reason") == "start_script_placeholder" or skip.get("skipped"):
-            warnings.append(skip)
-    if warnings:
-        payload["warnings"] = warnings
-    payload["auto_apply"] = True
-    return payload
+    return preset_apply_for_launch(name, also_stop_off=also_stop_off)
 
 
 def maybe_auto_apply_on_launch():
-    """Apply configured preset once at app launch. Returns payload or None if disabled.
-    Never crashes the server on placeholder start failures — collect warnings.
-    """
-    def read(registry):
-        settings = normalize_settings(registry.get("settings"))
-        return settings, False, []
-
-    try:
-        settings = mutate_registry_meta(read)
-    except SystemExit:
-        # Corrupt registry — re-raise so launch can decide; usually fail() already emitted
-        raise
-    except Exception as exc:  # noqa: BLE001
-        return {"status": "error", "reason": "auto_apply_read_failed", "message": str(exc)}
-    if not settings.get("auto_apply_on_launch"):
-        return None
-    name = settings.get("auto_apply_preset")
-    if not name:
-        return {
-            "status": "skipped",
-            "reason": "no_auto_apply_preset",
-            "settings": settings,
-        }
-    return soft_preset_apply(name, also_stop_off=False)
+    return domain_maybe_auto_apply_on_launch()
 
 
 def cmd_schedule(args):
@@ -1926,26 +1108,15 @@ def cmd_schedule(args):
 
 
 def cmd_environment_check(args):
-    names = list(getattr(args, "name", None) or [])
-    file_path = getattr(args, "file", None)
-    include_default_on = bool(getattr(args, "include_default_on", False))
-
-    def read(registry):
-        services = None
-        if file_path:
-            _data, services = load_environment_file(file_path)
-        report = run_compat_check(
-            registry,
-            preset_names=names or None,
-            services=services,
-            include_default_on=include_default_on or (not names and not file_path),
-        )
-        return report, False, []
-
-    report = mutate_registry_meta(read)
+    report = domain_compatibility_result({
+        "presets": list(getattr(args, "name", None) or []),
+        "file": getattr(args, "file", None),
+        "include_default_on": bool(getattr(args, "include_default_on", False)),
+    })
     emit(report)
     if not report.get("compatible"):
         raise SystemExit(2)
+    return
 
 
 def cmd_environment(args):
@@ -1971,20 +1142,11 @@ def cmd_compat(args):
     file_path = getattr(args, "file", None)
     include_default_on = bool(getattr(args, "include_default_on", False))
 
-    def read(registry):
-        services = None
-        if file_path:
-            _data, services = load_environment_file(file_path)
-        include = include_default_on or (not names and services is None)
-        report = run_compat_check(
-            registry,
-            preset_names=names or None,
-            services=services,
-            include_default_on=include,
-        )
-        return report, False, []
-
-    report = mutate_registry_meta(read)
+    report = domain_compatibility_result({
+        "presets": names,
+        "file": file_path,
+        "include_default_on": include_default_on,
+    })
     emit(report)
     if not report.get("compatible"):
         raise SystemExit(2)
