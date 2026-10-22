@@ -240,74 +240,6 @@ def _facts_from_state(
     )
 
 
-def _allocate_range(registry, project, count, note, start_port, tailnet_mode):
-    from .cli import (
-        ensure_project,
-        fail,
-        find_free_range,
-        next_range_id,
-        non_released_ranges,
-        normalize_settings,
-        overlaps,
-        range_record,
-        scaffold_lifecycle_scripts,
-        warnings_for_port_range,
-    )
-
-    scaffold_lifecycle_scripts(project)
-    count = int(count)
-    if start_port is not None:
-        start = int(start_port)
-        end = start + count - 1
-        pool = registry["pool"]
-        if start < pool["start"] or end > pool["end"]:
-            pool["start"] = min(int(pool["start"]), start)
-            pool["end"] = max(int(pool["end"]), end)
-            registry["pool"] = pool
-        for other in non_released_ranges(registry):
-            if overlaps(start, end, other["start"], other["end"]):
-                fail(
-                    "port_in_use",
-                    f"ports {start}-{end} overlap existing range {other.get('id')} "
-                    f"({other['start']}-{other['end']})",
-                )
-    else:
-        available = find_free_range(registry, count)
-        if available is None:
-            fail("pool_exhausted")
-        start, end = available
-    project_entry = ensure_project(registry, project)
-    item = range_record(
-        next_range_id(project_entry),
-        start,
-        end,
-        note,
-        tailnet_mode or "none",
-    )
-    preset_warnings = warnings_for_port_range(
-        registry, start, end, exclude_range_id=item.get("id")
-    )
-    settings = normalize_settings(registry.get("settings"))
-    if preset_warnings and settings.get("require_compat"):
-        fail(
-            "compat_conflict",
-            "Ports collide with a saved environment/preset",
-            conflicts=[
-                {
-                    "reason": "preset_port_overlap",
-                    "message": w["message"],
-                    "preset": w.get("preset"),
-                    "ports": w.get("ports"),
-                }
-                for w in preset_warnings
-            ],
-            conflict_count=len(preset_warnings),
-            hint="Pick free ports, or: settings set --require-compat off",
-        )
-    project_entry["ranges"].append(item)
-    return item, preset_warnings
-
-
 def _apply_wire(item, project, command, cwd, default_state):
     from .cli import normalize_default_state, normalize_optional_str, scaffold_lifecycle_scripts
 
@@ -325,13 +257,6 @@ def _apply_wire(item, project, command, cwd, default_state):
     return changed
 
 
-def _mark_active(item):
-    from .cli import utc_now
-
-    item["state"] = "active"
-    item["activated_at"] = utc_now()
-
-
 def _launch_start(item, project):
     from .cli import fail
     from .service import launch_service
@@ -345,24 +270,6 @@ def _launch_start(item, project):
         "pid": outcome.pid,
         "pgid": outcome.pgid,
     }
-
-
-def _apply_tailnet(item, mode):
-    from .cli import funnel_of_listen_port, run_tailnet, utc_now
-
-    tailnet = item.setdefault("tailnet", {"mode": None, "port": None, "configured_at": None})
-    port = item["start"]
-    if mode == "funnel" and funnel_of_listen_port(port):
-        return "skipped_funnel_listen"
-    tailnet["mode"] = mode
-    if mode in ("serve", "funnel"):
-        run_tailnet(mode, port, off=False)
-        tailnet["port"] = port
-        tailnet["configured_at"] = utc_now()
-    else:
-        tailnet["port"] = None
-        tailnet["configured_at"] = None
-    return mode
 
 
 def run_path(
@@ -381,9 +288,12 @@ def run_path(
 ) -> dict:
     """Execute path mode. Returns payload; caller emits / maps exit codes."""
     from .cli import (
+        activate_item,
+        allocate_range,
         fail,
         is_remote_range,
         locked_registry,
+        mark_item_active,
         maybe_push_history,
         park_item_for_exit,
         probe_tailscale_status,
@@ -486,8 +396,13 @@ def run_path(
                 continue
 
             if phase == "allocate":
-                item, warnings = _allocate_range(
-                    registry, project, count or 1, note, start, requested or "none"
+                item, warnings = allocate_range(
+                    registry,
+                    project,
+                    count or 1,
+                    note,
+                    requested or "none",
+                    start_port=start,
                 )
                 changed.append(project)
                 detail = {"range_id": item.get("id"), "start": item.get("start"), "end": item.get("end")}
@@ -503,7 +418,7 @@ def run_path(
             elif phase == "activate":
                 if item is None:
                     fail("not_found", "path activate needs an allocated range")
-                _mark_active(item)
+                mark_item_active(item)
                 changed.append(project)
                 ran.append(_phase_entry(phase, detail={"range_id": item.get("id")}))
             elif phase == "start":
@@ -513,13 +428,14 @@ def run_path(
                     fail("range_released", "released ranges cannot be started; allocate a fresh range")
                 launched = _launch_start(item, project)
                 if item.get("state") != "active":
-                    _mark_active(item)
+                    mark_item_active(item)
                 changed.append(project)
                 ran.append(_phase_entry(phase, detail=launched))
             elif phase == "tailnet":
                 if item is None:
                     fail("not_found", "path tailnet needs an allocated range")
-                applied = _apply_tailnet(item, requested or "none")
+                applied = requested or "none"
+                activate_item(item, project, item.get("id"), applied)
                 changed.append(project)
                 ran.append(_phase_entry(phase, detail={"mode": applied, "port": item.get("start")}))
             elif phase == "stop":

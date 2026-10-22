@@ -1,7 +1,9 @@
 """portskill orchestrator: skip-predicate matrix + needs_input resume + MCP toggle."""
 from __future__ import annotations
 
+import os
 import unittest
+from unittest import mock
 
 from portskill.path import (
     PATH_MODES,
@@ -129,6 +131,167 @@ def _ran_phases(payload: dict) -> list[str]:
 
 
 class PathCliMcpTests(unittest.TestCase):
+    def test_mcp_allocate_forwards_targets_while_path_drops_them(self) -> None:
+        from portskill.mcp import mcp_handle, tool_argv
+
+        target_args = {
+            "machine": "missing-remote",
+            "host": "remote.example",
+            "scheme": "https",
+        }
+        allocate_argv = tool_argv("allocate", {"count": 1, **target_args})
+        self.assertEqual(
+            allocate_argv,
+            [
+                "allocate",
+                "--count",
+                "1",
+                "--machine",
+                "missing-remote",
+                "--host",
+                "remote.example",
+                "--scheme",
+                "https",
+            ],
+        )
+        path_argv = tool_argv("portskill", {"mode": "start", **target_args})
+        for unsupported_flag in ("--machine", "--host", "--scheme"):
+            self.assertNotIn(unsupported_flag, path_argv)
+
+        with IsolatedConfig() as iso:
+            proj = iso.root / "proj"
+            proj.mkdir()
+            dispatched = mcp_handle({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "allocate",
+                    "arguments": {
+                        "count": 1,
+                        "project": str(proj),
+                        "tailnet": "none",
+                        **target_args,
+                    },
+                },
+            })
+
+        self.assertNotIn("error", dispatched)
+        result = dispatched["result"]
+        self.assertTrue(result.get("isError"))
+        self.assertEqual(
+            result.get("structuredContent", {}).get("reason"),
+            "machine_not_found",
+        )
+
+    def test_allocate_rejects_invalid_machine_host_and_scheme(self) -> None:
+        cases = [
+            (["--machine", "missing-machine"], "machine_not_found"),
+            (["--host", "bad host"], "invalid_host"),
+            (["--scheme", "ftp"], "invalid_scheme"),
+        ]
+        with IsolatedConfig() as iso:
+            proj = iso.root / "proj"
+            proj.mkdir()
+            for extra, expected_reason in cases:
+                with self.subTest(reason=expected_reason):
+                    allocate = iso.run_cli([
+                        "allocate",
+                        "--count",
+                        "1",
+                        "--project",
+                        str(proj),
+                        "--tailnet",
+                        "none",
+                        *extra,
+                    ])
+                    self.assertEqual(allocate.returncode, 2, allocate.stderr or allocate.stdout)
+                    allocate_error = parse_cli_json(allocate)
+                    self.assertEqual(allocate_error.get("reason"), expected_reason)
+
+    def test_path_and_allocate_share_port_overlap_validation(self) -> None:
+        with IsolatedConfig() as iso:
+            owner = iso.root / "owner"
+            target = iso.root / "target"
+            owner.mkdir()
+            target.mkdir()
+            claimed = iso.run_cli([
+                "allocate",
+                "--count",
+                "1",
+                "--project",
+                str(owner),
+                "--tailnet",
+                "none",
+                "--start",
+                "20123",
+            ])
+            self.assertEqual(claimed.returncode, 0, claimed.stderr or claimed.stdout)
+
+            common = [
+                "--project",
+                str(target),
+                "--tailnet",
+                "none",
+                "--start",
+                "20123",
+            ]
+            allocate = iso.run_cli(["allocate", "--count", "1", *common])
+            path = iso.run_cli(["path", "--mode", "start", *common])
+
+            self.assertEqual(allocate.returncode, 2, allocate.stderr or allocate.stdout)
+            self.assertEqual(path.returncode, 2, path.stderr or path.stdout)
+            allocate_error = parse_cli_json(allocate)
+            path_error = parse_cli_json(path)
+            self.assertEqual(allocate_error.get("reason"), "port_in_use")
+            self.assertEqual(path_error.get("reason"), "port_in_use")
+            self.assertEqual(path_error.get("message"), allocate_error.get("message"))
+
+    def test_tailnet_phase_checks_auth_before_shared_serve(self) -> None:
+        from portskill.cli import range_record
+        from portskill.path import run_path
+
+        with IsolatedConfig() as iso:
+            proj = iso.root / "proj"
+            proj.mkdir()
+            item = range_record("r1", 20123, 20123, None, "none")
+            item["state"] = "active"
+            item["lifecycle"]["pid"] = os.getpid()
+            iso.write_registry({
+                "projects": {str(proj.resolve()): {"ranges": [item]}},
+            })
+            calls: list[tuple[str, str]] = []
+
+            def checked(mode: str) -> dict:
+                calls.append(("auth", mode))
+                return {"logged_in": True}
+
+            def served(mode: str, port: int, *, off: bool) -> None:
+                calls.append(("serve", mode))
+                self.assertEqual(port, 20123)
+                self.assertFalse(off)
+
+            with (
+                mock.patch(
+                    "portskill.cli.probe_tailscale_status",
+                    return_value={"logged_in": True},
+                ),
+                mock.patch(
+                    "portskill.cli.ensure_tailscale_authenticated",
+                    side_effect=checked,
+                ),
+                mock.patch("portskill.cli.run_tailnet", side_effect=served),
+            ):
+                payload = run_path(
+                    mode="start",
+                    project=str(proj),
+                    tailnet="serve",
+                )
+
+            self.assertEqual(payload.get("status"), "ok")
+            self.assertEqual(calls, [("auth", "serve"), ("serve", "serve")])
+            self.assertIn("tailnet", _ran_phases(payload))
+
     def test_start_skip_matrix_then_idempotent(self) -> None:
         with IsolatedConfig() as iso:
             proj = iso.root / "proj"
@@ -319,6 +482,9 @@ class PathCliMcpTests(unittest.TestCase):
             self.assertTrue(desc.startswith("One MCP tool for your agent to handle all port management functions."))
             for trigger in ("register", "serve", "host", "Tailscale", "mode=start"):
                 self.assertIn(trigger, desc)
+            path_properties = portskill_def["inputSchema"]["properties"]
+            for unsupported_target in ("machine", "host", "scheme"):
+                self.assertNotIn(unsupported_target, path_properties)
 
             called = mcp_handle({
                 "jsonrpc": "2.0",

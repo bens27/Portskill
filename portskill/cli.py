@@ -2324,6 +2324,12 @@ def activate_item(item, project, range_id, tailnet_arg):
     else:
         item["tailnet"]["port"] = None
         item["tailnet"]["configured_at"] = None
+    mark_item_active(item, now)
+
+
+def mark_item_active(item, now=None):
+    """Apply the shared reserved-to-active lifecycle transition."""
+    now = now or utc_now()
     item["state"] = "active"
     item["activated_at"] = now
 
@@ -2340,98 +2346,138 @@ def release_item(item):
     tailnet["configured_at"] = None
 
 
+def _normalize_allocation_target(registry, machine_id="local", host=None, scheme=None):
+    if not isinstance(machine_id, str) or not machine_id.strip():
+        machine_id = "local"
+    else:
+        machine_id = machine_id.strip()
+
+    if host is None or (isinstance(host, str) and not host.strip()):
+        host = None
+    elif not isinstance(host, str):
+        fail("invalid_host", "host must be a hostname or IP address")
+    else:
+        host = host.strip()
+        if any(char.isspace() for char in host) or any(char in host for char in "/?#@"):
+            fail(
+                "invalid_host",
+                "host must be a hostname or IP address without scheme, path, query, or fragment",
+            )
+
+    if scheme is None or (isinstance(scheme, str) and not scheme.strip()):
+        scheme = None
+    elif not isinstance(scheme, str) or scheme.strip().lower() not in ("http", "https"):
+        fail("invalid_scheme", "scheme must be http or https")
+    else:
+        scheme = scheme.strip().lower()
+
+    machines = normalize_machines(registry.get("machines"))
+    registry["machines"] = machines
+    if machine_id not in machines:
+        fail(
+            "machine_not_found",
+            f"unknown machine id: {machine_id}",
+            hint="machine add --id ID --host HOST [--label LABEL]",
+        )
+    return machine_id, host, scheme
+
+
+def allocate_range(
+    registry,
+    project,
+    count,
+    note,
+    tailnet_mode,
+    *,
+    start_port=None,
+    machine_id="local",
+    host=None,
+    scheme=None,
+):
+    """Reserve a range in an already-locked registry and return it with warnings."""
+    scaffold_lifecycle_scripts(project)
+    count = int(count)
+    machine_id, host, scheme = _normalize_allocation_target(
+        registry, machine_id, host, scheme
+    )
+    if start_port is not None:
+        start = int(start_port)
+        end = start + count - 1
+        pool = registry["pool"]
+        # Allow outside-pool claims so already-served ports can be registered.
+        if start < pool["start"] or end > pool["end"]:
+            pool["start"] = min(int(pool["start"]), start)
+            pool["end"] = max(int(pool["end"]), end)
+            registry["pool"] = pool
+        for other in non_released_ranges(registry):
+            if overlaps(start, end, other["start"], other["end"]):
+                fail(
+                    "port_in_use",
+                    f"ports {start}-{end} overlap existing range {other.get('id')} "
+                    f"({other['start']}-{other['end']})",
+                )
+    else:
+        available = find_free_range(registry, count)
+        if available is None:
+            fail("pool_exhausted")
+        start, end = available
+
+    project_entry = ensure_project(registry, project)
+    item = range_record(
+        next_range_id(project_entry),
+        start,
+        end,
+        note,
+        tailnet_mode,
+        machine_id=machine_id,
+        host=host,
+        scheme=scheme,
+    )
+    preset_warnings = warnings_for_port_range(
+        registry, start, end, exclude_range_id=item.get("id")
+    )
+    settings = normalize_settings(registry.get("settings"))
+    if preset_warnings and settings.get("require_compat"):
+        fail(
+            "compat_conflict",
+            "Ports collide with a saved environment/preset",
+            conflicts=[
+                {
+                    "reason": "preset_port_overlap",
+                    "message": warning["message"],
+                    "preset": warning.get("preset"),
+                    "ports": warning.get("ports"),
+                }
+                for warning in preset_warnings
+            ],
+            conflict_count=len(preset_warnings),
+            hint="Pick free ports, or: settings set --require-compat off",
+        )
+    project_entry["ranges"].append(item)
+    return item, preset_warnings
+
+
 def cmd_allocate(args):
     project = project_path(args.project)
     require_project_directory(project)
     if args.tailnet is None:
         emit(needs_tailnet(project, args.count))
         raise SystemExit(3)
-    scaffold_lifecycle_scripts(project)
-    manual_start = getattr(args, "start", None)
 
     def mutate(registry):
         hist_key = resolve_history_env_name(registry, getattr(args, "environment", None))
         ensure_baseline(registry, hist_key)
-        if manual_start is not None:
-            start = int(manual_start)
-            end = start + int(args.count) - 1
-            pool = registry["pool"]
-            # Allow outside-pool claims so already-served ports (e.g. Tailscale Serve via CLI) can be registered
-            if start < pool["start"] or end > pool["end"]:
-                # Expand pool to cover the claim so future UI/compat stay consistent
-                pool["start"] = min(int(pool["start"]), start)
-                pool["end"] = max(int(pool["end"]), end)
-                registry["pool"] = pool
-            for other in non_released_ranges(registry):
-                if overlaps(start, end, other["start"], other["end"]):
-                    fail(
-                        "port_in_use",
-                        f"ports {start}-{end} overlap existing range {other.get('id')} "
-                        f"({other['start']}-{other['end']})",
-                    )
-        else:
-            available = find_free_range(registry, args.count)
-            if available is None:
-                fail("pool_exhausted")
-            start, end = available
-        project_entry = ensure_project(registry, project)
-        machine_id = getattr(args, "machine", None) or "local"
-        if not isinstance(machine_id, str) or not machine_id.strip():
-            machine_id = "local"
-        else:
-            machine_id = machine_id.strip()
-        host_override = getattr(args, "host", None)
-        if isinstance(host_override, str) and host_override.strip():
-            host_override = host_override.strip()
-        else:
-            host_override = None
-        scheme = getattr(args, "scheme", None)
-        if isinstance(scheme, str) and scheme.strip():
-            scheme = scheme.strip().lower()
-        else:
-            scheme = None  # range_record picks https for serve/funnel
-        # Validate machine exists (except default local which is always present after normalize)
-        machines = normalize_machines(registry.get("machines"))
-        registry["machines"] = machines
-        if machine_id not in machines:
-            fail(
-                "machine_not_found",
-                f"unknown machine id: {machine_id}",
-                hint="machine add --id ID --host HOST [--label LABEL]",
-            )
-        # Remote machines are registry + links only — do not require local project scripts to exist
-        # on the remote; local project path still scaffolds for bookkeeping.
-        item = range_record(
-            next_range_id(project_entry),
-            start,
-            end,
+        item, preset_warnings = allocate_range(
+            registry,
+            project,
+            args.count,
             args.note,
             args.tailnet,
-            machine_id=machine_id,
-            host=host_override,
-            scheme=scheme,
+            start_port=getattr(args, "start", None),
+            machine_id=getattr(args, "machine", None),
+            host=getattr(args, "host", None),
+            scheme=getattr(args, "scheme", None),
         )
-        preset_warnings = warnings_for_port_range(
-            registry, start, end, exclude_range_id=item.get("id")
-        )
-        settings = normalize_settings(registry.get("settings"))
-        if preset_warnings and settings.get("require_compat"):
-            fail(
-                "compat_conflict",
-                "Ports collide with a saved environment/preset",
-                conflicts=[
-                    {
-                        "reason": "preset_port_overlap",
-                        "message": w["message"],
-                        "preset": w.get("preset"),
-                        "ports": w.get("ports"),
-                    }
-                    for w in preset_warnings
-                ],
-                conflict_count=len(preset_warnings),
-                hint="Pick free ports, or: settings set --require-compat off",
-            )
-        project_entry["ranges"].append(item)
         maybe_push_history(registry, "allocate", hist_key)
         payload = {"status": "ok", "range": item}
         if preset_warnings:
