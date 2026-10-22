@@ -8,6 +8,17 @@ from typing import Any
 
 from .domain import DomainError, pid_alive, pool_bounds_from_environment
 from .registry import CorruptRegistryError, mutate_registry
+from .registry_domain import (
+    default_machines,
+    get_machine,
+    is_remote_range,
+    normalize_machines,
+    normalize_range_machine_fields,
+    normalize_registry,
+    resolve_range_host,
+    resolve_range_url,
+)
+from .tailscale import probe_tailscale_status
 
 
 def project_from_context(project: str | None, *, cwd: pathlib.Path | None = None) -> str | None:
@@ -28,10 +39,6 @@ def project_from_context(project: str | None, *, cwd: pathlib.Path | None = None
 
 def observed_range_status(registry: dict, item: dict) -> dict[str, Any]:
     """Keep saved allocation state separate from a current local TCP observation."""
-    # Import lazily while machine/range helpers are progressively moved out of
-    # the legacy CLI module in later domain slices.
-    from .cli import is_remote_range
-
     saved = item.get("state") or "reserved"
     result: dict[str, Any] = {"allocation_state": saved, "state": saved, "reachable": None}
     if saved == "released":
@@ -59,14 +66,6 @@ def observed_range_status(registry: dict, item: dict) -> dict[str, Any]:
 def enrich_range(registry: dict, item: Any, *, tailscale_self: dict | None = None) -> Any:
     if not isinstance(item, dict):
         return item
-    from .cli import (
-        default_machines,
-        get_machine,
-        normalize_range_machine_fields,
-        resolve_range_host,
-        resolve_range_url,
-    )
-
     out = dict(item)
     normalize_range_machine_fields(out)
     machine_id = out.get("machine_id") or "local"
@@ -87,13 +86,6 @@ def enrich_range(registry: dict, item: Any, *, tailscale_self: dict | None = Non
 
 def status_result(project: str | None = None) -> dict[str, Any]:
     """Return status as an ordinary dict without emitting output or exiting."""
-    from .cli import (
-        normalize_machines,
-        normalize_registry,
-        probe_tailscale_status,
-        write_local_project_files,
-    )
-
     try:
         selected_project = project_from_context(project)
     except (OSError, TypeError, ValueError) as exc:
@@ -142,7 +134,6 @@ def status_result(project: str | None = None) -> dict[str, Any]:
             start=start,
             end=end,
             normalizer=normalize_registry,
-            after_write=write_local_project_files,
         )
     except CorruptRegistryError as exc:
         raise DomainError("corrupt_registry", str(exc)) from exc

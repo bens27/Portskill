@@ -5,8 +5,14 @@ results are serialized and how failures map onto their transport.
 """
 from __future__ import annotations
 
+import datetime
 import os
 from typing import Any
+
+
+def utc_now() -> str:
+    """Return the current timezone-aware UTC timestamp."""
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class DomainError(Exception):
@@ -18,15 +24,19 @@ class DomainError(Exception):
         message: str | None = None,
         *,
         exit_code: int = 2,
+        payload: dict[str, Any] | None = None,
         **extra: Any,
     ) -> None:
         super().__init__(message or reason)
         self.reason = reason
         self.message = message
         self.exit_code = exit_code
+        self.payload = dict(payload) if payload is not None else None
         self.extra = {key: value for key, value in extra.items() if value is not None}
 
     def as_dict(self) -> dict[str, Any]:
+        if self.payload is not None:
+            return dict(self.payload)
         payload: dict[str, Any] = {"status": "error", "reason": self.reason}
         if self.message is not None:
             payload["message"] = self.message

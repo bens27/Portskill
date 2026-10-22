@@ -26,6 +26,21 @@ from socketserver import TCPServer
 from urllib.parse import urlparse, unquote
 
 from . import __version__
+from .auth import (
+    ensure_http_auth_token,
+    http_auth_public_status,
+    http_auth_token,
+    http_bearer_matches,
+    regenerate_http_auth_token,
+)
+from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
+from .domain import DomainError
+from .network import (
+    ALLOW_NON_LOOPBACK_FLAG,
+    bind_host_warning,
+    is_loopback_host,
+    non_loopback_refuse_message,
+)
 from .request_origin import http_host_name
 from .registry import (
     config_dir,
@@ -56,29 +71,21 @@ from .mcp import (
     run_cli,
 )
 from .cli import (
-    ALLOW_NON_LOOPBACK_FLAG,
-    HTTP_AUTH_COOKIE_NAME,
-    HTTP_SESSION_COOKIE_NAME,
     apply_portskill_tailscale_serve,
-    bind_host_warning,
+    probe_portskill_serve_status,
+)
+from .registry_domain import (
     default_machines,
-    ensure_http_auth_token,
     extract_tailscale_advertise_host,
     get_machine,
-    http_auth_public_status,
-    http_auth_token,
-    http_bearer_matches,
-    is_loopback_host,
-    non_loopback_refuse_message,
     normalize_machines,
-    probe_portskill_serve_status,
-    probe_tailscale_status,
-    regenerate_http_auth_token,
     resolve_range_host,
     resolve_range_scheme,
     resolve_range_url,
 )
 from .status import observed_range_status, service_statuses
+from .settings import settings_set
+from .tailscale import probe_tailscale_status
 from .webauthn import (
     authentication_options,
     clear_bearer_cookie_header,
@@ -4189,30 +4196,31 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         code, payload, stdout = run_cli(argv)
         return _cli_result(code, payload, stdout)
     if action == "settings-save":
-        argv = ["settings", "set"]
+        options = {}
         if "autoApplyOnLaunch" in body:
-            argv += ["--auto-apply-on-launch", "on" if body.get("autoApplyOnLaunch") else "off"]
+            options["auto_apply_on_launch"] = bool(body.get("autoApplyOnLaunch"))
         preset = body.get("autoApplyPreset")
         if preset is None or preset == "":
-            argv += ["--auto-apply-preset", "none"]
+            options["auto_apply_preset"] = "none"
         elif isinstance(preset, str):
-            argv += ["--auto-apply-preset", preset]
+            options["auto_apply_preset"] = preset
         if "autoExitOnShutdown" in body:
-            argv += [
-                "--auto-exit-on-shutdown",
-                "on" if body.get("autoExitOnShutdown") else "off",
-            ]
+            options["auto_exit_on_shutdown"] = bool(body.get("autoExitOnShutdown"))
         if "stopAlsoRelease" in body:
-            argv += [
-                "--stop-also-release",
-                "on" if body.get("stopAlsoRelease") else "off",
-            ]
+            options["stop_also_release"] = bool(body.get("stopAlsoRelease"))
         if body.get("defaultTailnet") in ("serve", "none"):
-            argv += ["--default-tailnet", body["defaultTailnet"]]
+            options["default_tailnet"] = body["defaultTailnet"]
         # Always force require_compat on
-        argv += ["--require-compat", "on"]
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+        options["require_compat"] = True
+        try:
+            return 0, {"ok": True, "result": settings_set(options)}
+        except DomainError as exc:
+            payload = exc.as_dict()
+            return _cli_result(
+                exc.exit_code,
+                payload,
+                json.dumps(payload, separators=(",", ":"), sort_keys=True),
+            )
 
     if action == "serve-portskill":
         enabled = parse_bool(body.get("enabled"))

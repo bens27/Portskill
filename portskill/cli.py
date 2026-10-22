@@ -3,7 +3,28 @@ from __future__ import annotations
 import argparse
 from . import __version__
 from . import discover_ports as discover_ports_mod
-from .handoff import doctor_handoff
+from .auth import (
+    ensure_http_auth_token,
+    http_auth_public_status,
+    http_auth_token,
+    http_bearer_matches,
+    regenerate_http_auth_token,
+)
+from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
+from .doctor import DOCTOR_FAIL_CLOSED_EXIT, DOCTOR_HARD_CHECKS
+from .domain import (
+    DomainError,
+    pid_alive as domain_pid_alive,
+    pool_bounds_from_environment,
+    utc_now,
+)
+from .network import (
+    ALLOW_NON_LOOPBACK_FLAG,
+    bind_host_warning,
+    is_loopback_host,
+    listen_allows_non_loopback,
+    non_loopback_refuse_message,
+)
 from .registry import (
     CorruptRegistryError,
     MCP_USER_COMMAND_MAX_STEPS,
@@ -24,12 +45,47 @@ from .registry import (
     read_settings,
     registry_path,
 )
-from .service import launch_service, service_launch
-from .domain import (
-    DomainError,
-    pid_alive as domain_pid_alive,
-    pool_bounds_from_environment,
+from .registry_domain import (
+    DEFAULT_LIFECYCLE_DIR,
+    DEFAULT_START_LOG,
+    DEFAULT_START_SCRIPT,
+    DEFAULT_STOP_LOG,
+    DEFAULT_STOP_SCRIPT,
+    HISTORY_ALL_KEY,
+    HISTORY_STEPS_CAP,
+    SESSION_HISTORY_CAP,
+    default_sessions,
+    default_lifecycle,
+    default_machines,
+    extract_tailscale_advertise_host,
+    get_machine,
+    history_is_modified,
+    is_remote_range,
+    migrate_legacy_project_files,
+    normalize_default_state,
+    normalize_environment_history,
+    normalize_history_entry,
+    normalize_lifecycle,
+    normalize_machines,
+    normalize_optional_str,
+    normalize_preset_entry,
+    normalize_preset_service,
+    normalize_presets,
+    normalize_range_extra,
+    normalize_range_machine_fields,
+    normalize_range_record,
+    normalize_registry,
+    normalize_session_preset,
+    normalize_session_source,
+    normalize_sessions,
+    normalize_workspace_draft,
+    project_path,
+    resolve_range_host,
+    resolve_range_scheme,
+    resolve_range_url,
+    workspace_draft_is_modified,
 )
+from .service import launch_service, script_is_placeholder, service_launch
 from .status import (
     enrich_range as enrich_range_for_status,
     observed_range_status,
@@ -38,49 +94,28 @@ from .status import (
 )
 import copy
 import datetime
-import hashlib
-import hmac
 import json
 import os
 import pathlib
-import secrets
 import shlex
 import shutil
 import signal
 import subprocess
 import time
 import uuid
-import urllib.error
-import urllib.request
 import webbrowser
+from .tailscale import (
+    extract_tailscale_auth_url,
+    probe_tailscale_status,
+    resolve_tailscale_bin,
+    tailscale_base_command,
+    tailscale_bin_available,
+)
 
 
 VERSION = 1
-HTTP_AUTH_COOKIE_NAME = "portskill_http"
-HTTP_SESSION_COOKIE_NAME = "portskill_session"
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
-# Doctor exit contract (main): 0 = healthy / informational warnings; 2 = fail-closed.
-# Hard checks only; informational checks never flip the exit code.
-# scripts/doctor.sh execs the same CLI and must return these codes.
-DOCTOR_FAIL_CLOSED_EXIT = 2
-DOCTOR_HARD_CHECKS = frozenset({
-    "registry",
-    "listen",
-    "skill_files",
-    "ui_reachability",
-    "mcp_reachability",
-    "handoff_kit",
-    "bind_host",
-})
-DEFAULT_TAILSCALE_BIN = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
 DEFAULT_POOL_START = 20000
 DEFAULT_POOL_END = 29999
-DEFAULT_LIFECYCLE_DIR = ".portskill"
-DEFAULT_START_SCRIPT = ".portskill/start.sh"
-DEFAULT_STOP_SCRIPT = ".portskill/stop.sh"
-DEFAULT_START_LOG = ".portskill/start.log"
-DEFAULT_STOP_LOG = ".portskill/stop.log"
-PLACEHOLDER_SENTINEL = "portskill: edit .portskill/"
 
 
 class JsonArgumentParser(argparse.ArgumentParser):
@@ -88,161 +123,12 @@ class JsonArgumentParser(argparse.ArgumentParser):
         raise DomainError("invalid_args", message)
 
 
-def utc_now():
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-
 def emit(payload):
     print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
 
 
-def is_loopback_host(host):
-    """True for 127.0.0.1 / ::1 / localhost (and 127.0.0.0/8). Missing host is loopback."""
-    if not isinstance(host, str):
-        return True
-    h = host.strip().lower()
-    if not h:
-        return True
-    if h in LOOPBACK_HOSTS:
-        return True
-    if h.startswith("[") and h.endswith("]"):
-        h = h[1:-1]
-    if h == "::1":
-        return True
-    if h.startswith("127."):
-        return True
-    return False
-
-
-ALLOW_NON_LOOPBACK_FLAG = "--allow-non-loopback"
-
-
-def bind_host_warning(host):
-    """Clear warning when --host is not loopback. None when loopback / unset."""
-    if host is None or is_loopback_host(host):
-        return None
-    return (
-        f"Bound to {host} (not loopback). "
-        "The HTTP UI and MCP listener are reachable beyond this machine "
-        "(Tailscale is not authentication). "
-        "Default bind remains 127.0.0.1. "
-        f"This requires {ALLOW_NON_LOOPBACK_FLAG} (documented footgun). Remotes HOLD."
-    )
-
-
-def non_loopback_refuse_message(host):
-    """Error when bind host is not loopback and the override flag is absent."""
-    return (
-        f"Refusing to bind {host} (not loopback). "
-        "The HTTP UI and MCP listener would be reachable beyond this machine. "
-        f"Default bind is 127.0.0.1. Pass {ALLOW_NON_LOOPBACK_FLAG} only if you "
-        "intentionally accept that exposure (documented footgun). "
-        "Sharing that listener with Tailscale Serve or Funnel is not authentication."
-    )
-
-
-def listen_allows_non_loopback(listen_payload):
-    """True when listen.json records an explicit non-loopback override."""
-    if not isinstance(listen_payload, dict):
-        return False
-    return bool(listen_payload.get("allow_non_loopback"))
-
-
-def mint_http_auth_secret():
-    return secrets.token_urlsafe(32)
-
-
-def read_http_auth_file():
-    """Return http_auth.json object or None. Read-only; never creates a file."""
-    path = http_auth_path()
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    token = data.get("token")
-    if not isinstance(token, str) or not token.strip():
-        return None
-    return data
-
-
-def http_auth_token():
-    data = read_http_auth_file()
-    if not data:
-        return None
-    token = data.get("token")
-    return token.strip() if isinstance(token, str) else None
-
-
-def http_auth_configured():
-    return bool(http_auth_token())
-
-
-def http_auth_public_status():
-    """Doctor/UI-safe: path + configured. Never includes the secret."""
-    from .webauthn import passkey_public_status
-
-    pk = passkey_public_status()
-    return {
-        "configured": http_auth_configured(),
-        "present": http_auth_configured(),
-        "path": str(http_auth_path()),
-        "passkey_gate": bool(pk.get("gate")),
-        "passkey_credentials": int(pk.get("count") or 0),
-        "passkey_path": pk.get("path"),
-    }
-
-
-def write_http_auth_file(token, *, created_at=None):
-    path = http_auth_path()
-    now = utc_now()
-    payload = {
-        "version": 1,
-        "token": token,
-        "created_at": created_at or now,
-        "updated_at": now,
-    }
-    atomic_write_json(path, payload, mode=0o600)
-    return payload
-
-
-def ensure_http_auth_token():
-    """Load existing token or mint one. Returns (payload, minted)."""
-    existing = read_http_auth_file()
-    if existing:
-        return existing, False
-    return write_http_auth_file(mint_http_auth_secret()), True
-
-
-def regenerate_http_auth_token():
-    """Mint a new token; the previous value is invalidated."""
-    prev = read_http_auth_file()
-    created = prev.get("created_at") if prev else None
-    return write_http_auth_file(mint_http_auth_secret(), created_at=created)
-
-
-def http_bearer_matches(provided):
-    expected = http_auth_token()
-    if not expected or not isinstance(provided, str) or not provided:
-        return False
-    got = provided.strip()
-    if not got:
-        return False
-    return hmac.compare_digest(
-        hashlib.sha256(got.encode("utf-8")).digest(),
-        hashlib.sha256(expected.encode("utf-8")).digest(),
-    )
-
-
 def pool_bounds():
     return pool_bounds_from_environment()
-
-
-def project_path(value):
-    return str(pathlib.Path(value).expanduser().resolve())
 
 
 def local_registry_path(project):
@@ -285,10 +171,6 @@ def needs_tailnet(project, count_or_range):
     }
 
 
-SESSION_HISTORY_CAP = 50
-SESSION_SOURCES = ("preset_apply", "apply_defaults", "enter_house")
-
-
 def resolve_stop_also_release(registry_or_settings=None, override=None) -> bool:
     """Whether stop should also release. override True/False wins; else the setting (default true)."""
     if override is not None:
@@ -317,67 +199,7 @@ def _also_release_override_from_args(args):
     return None
 
 
-
 MCP_USER_COMMAND_TOOL_NAMES = None  # filled lazily from mcp.TOOL_DEFS when validating
-
-
-def default_sessions():
-    return {"active": None, "history": []}
-
-
-def normalize_session_preset(value):
-    if value is None:
-        return None
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
-
-
-def normalize_session_source(value):
-    if isinstance(value, str) and value.strip() in SESSION_SOURCES:
-        return value.strip()
-    return "apply_defaults"
-
-
-def normalize_history_entry(item):
-    if not isinstance(item, dict):
-        return None
-    started_at = item.get("started_at")
-    if not isinstance(started_at, str) or not started_at.strip():
-        return None
-    ended_at = item.get("ended_at")
-    if ended_at is not None and (not isinstance(ended_at, str) or not ended_at.strip()):
-        ended_at = None
-    return {
-        "preset": normalize_session_preset(item.get("preset")),
-        "started_at": started_at.strip(),
-        "ended_at": ended_at.strip() if isinstance(ended_at, str) else None,
-        "opaque": True,
-    }
-
-
-def normalize_sessions(sessions):
-    out = default_sessions()
-    if not isinstance(sessions, dict):
-        return out
-    active = sessions.get("active")
-    if isinstance(active, dict):
-        started_at = active.get("started_at")
-        if isinstance(started_at, str) and started_at.strip():
-            out["active"] = {
-                "preset": normalize_session_preset(active.get("preset")),
-                "started_at": started_at.strip(),
-                "source": normalize_session_source(active.get("source")),
-            }
-    history = sessions.get("history")
-    cleaned = []
-    if isinstance(history, list):
-        for item in history:
-            entry = normalize_history_entry(item)
-            if entry is not None:
-                cleaned.append(entry)
-    out["history"] = cleaned[-SESSION_HISTORY_CAP:]
-    return out
 
 
 def overlap_denied_payload(active):
@@ -527,156 +349,6 @@ def build_schedule_windows(registry, focus=None):
     }
 
 
-def normalize_preset_service(service):
-    if not isinstance(service, dict):
-        return None
-    project = service.get("project")
-    if not isinstance(project, str) or not project.strip():
-        return None
-    try:
-        count = int(service.get("count") or 1)
-    except (TypeError, ValueError):
-        count = 1
-    if count <= 0:
-        count = 1
-    tailnet = service.get("tailnet") or "none"
-    if tailnet not in ("serve", "funnel", "none"):
-        tailnet = "none"
-    out = {
-        "project": project,
-        "note": service.get("note"),
-        "count": count,
-        "tailnet": tailnet,
-        "default_state": normalize_default_state(service.get("default_state")),
-    }
-    range_id = service.get("range_id")
-    if isinstance(range_id, str) and range_id.strip():
-        out["range_id"] = range_id.strip()
-    return out
-
-
-def normalize_preset_entry(name, entry):
-    if not isinstance(entry, dict):
-        entry = {}
-    services_in = entry.get("services")
-    services = []
-    if isinstance(services_in, list):
-        for item in services_in:
-            normalized = normalize_preset_service(item)
-            if normalized is not None:
-                services.append(normalized)
-    preset_name = entry.get("name") if isinstance(entry.get("name"), str) and entry.get("name").strip() else name
-    description = entry.get("description") if isinstance(entry.get("description"), str) else ""
-    updated_at = entry.get("updated_at") if isinstance(entry.get("updated_at"), str) else utc_now()
-    return {
-        "name": preset_name,
-        "description": description,
-        "updated_at": updated_at,
-        "services": services,
-    }
-
-
-def normalize_presets(presets):
-    if not isinstance(presets, dict):
-        return {}
-    out = {}
-    for key, value in presets.items():
-        if not isinstance(key, str) or not key.strip():
-            continue
-        name = key.strip()
-        out[name] = normalize_preset_entry(name, value)
-    return out
-
-
-
-def default_machines():
-    return {
-        "local": {
-            "id": "local",
-            "label": "This Mac",
-            "host": "127.0.0.1",
-            "kind": "local",
-        }
-    }
-
-
-def normalize_machine_entry(machine_id, entry):
-    mid = str(machine_id).strip() if machine_id is not None else ""
-    if not mid:
-        return None
-    if not isinstance(entry, dict):
-        entry = {}
-    kind = entry.get("kind") or ("local" if mid == "local" else "remote")
-    if kind not in ("local", "remote"):
-        kind = "remote" if mid != "local" else "local"
-    host = entry.get("host")
-    if not isinstance(host, str) or not host.strip():
-        host = "127.0.0.1" if kind == "local" else None
-    else:
-        host = host.strip()
-    label = entry.get("label")
-    if not isinstance(label, str) or not label.strip():
-        label = "This Mac" if mid == "local" else mid
-    else:
-        label = label.strip()
-    out = {"id": mid, "label": label, "host": host, "kind": kind}
-    return out
-
-
-def normalize_machines(machines):
-    """Additive machines map: always includes local; merges remotes by id."""
-    out = default_machines()
-    if not isinstance(machines, dict):
-        return out
-    for key, entry in machines.items():
-        normalized = normalize_machine_entry(key, entry)
-        if normalized is None:
-            continue
-        mid = normalized["id"]
-        if mid == "local":
-            out["local"] = {
-                "id": "local",
-                "label": normalized.get("label") or "This Mac",
-                "host": normalized.get("host") or "127.0.0.1",
-                "kind": "local",
-            }
-        else:
-            if not normalized.get("host"):
-                continue
-            out[mid] = normalized
-    return out
-
-
-def get_machine(registry, machine_id):
-    machines = registry.get("machines") if isinstance(registry, dict) else None
-    if not isinstance(machines, dict):
-        machines = default_machines()
-    mid = (machine_id or "local")
-    if not isinstance(mid, str) or not mid.strip():
-        mid = "local"
-    mid = mid.strip()
-    entry = machines.get(mid)
-    if isinstance(entry, dict):
-        return entry
-    if mid == "local":
-        return default_machines()["local"]
-    return None
-
-
-
-def is_remote_range(registry, item):
-    """True when the range is owned by a remote registry machine (links only)."""
-    if not isinstance(item, dict):
-        return False
-    mid = item.get("machine_id") or item.get("machine") or item.get("host_id") or "local"
-    if not isinstance(mid, str) or not mid.strip() or mid.strip() == "local":
-        return False
-    machine = get_machine(registry or {}, mid.strip())
-    if not isinstance(machine, dict):
-        return True  # unknown non-local id → treat as remote
-    return (machine.get("kind") or "remote") == "remote"
-
-
 def refuse_remote_process(registry, item, action="start"):
     mid = item.get("machine_id") or item.get("machine") or item.get("host_id") or "local"
     fail(
@@ -687,269 +359,6 @@ def refuse_remote_process(registry, item, action="start"):
         range_id=item.get("id"),
         hint="Use the remote host's own Portskill/keepalive, or open the port URL.",
     )
-
-
-def extract_tailscale_advertise_host(self_node):
-    """Pick MagicDNS / DNSName / Tailscale IP from status --json Self."""
-    if not isinstance(self_node, dict):
-        return None
-    for key in ("DNSName", "dnsName", "HostName", "hostname"):
-        val = self_node.get(key)
-        if isinstance(val, str) and val.strip():
-            host = val.strip().rstrip(".")
-            if host:
-                return host
-    ips = self_node.get("TailscaleIPs") or self_node.get("TailscaleIPs".lower()) or self_node.get("AllowedIPs")
-    if isinstance(ips, list):
-        for ip in ips:
-            if isinstance(ip, str) and ip.strip():
-                # Prefer IPv4
-                if ":" not in ip.strip():
-                    return ip.strip()
-        for ip in ips:
-            if isinstance(ip, str) and ip.strip():
-                return ip.strip().split("/")[0]
-    return None
-
-
-def resolve_range_host(registry, item, tailscale_self=None, allow_probe=True):
-    """Host resolution order for port hyperlinks / status.
-
-    1. Explicit host / advertise_host on the range
-    2. Else if tailnet serve/funnel and Tailscale Self gives MagicDNS/IP — use that
-    3. Else if machine_id / machine / host_id points at a registry machine — use its host
-    4. Else 127.0.0.1 for local-only
-    Never link a remote service as 127.0.0.1 (returns None if remote host missing).
-    """
-    if not isinstance(item, dict):
-        return "127.0.0.1"
-    explicit = item.get("host") or item.get("advertise_host")
-    if isinstance(explicit, str) and explicit.strip():
-        return explicit.strip()
-
-    mid = item.get("machine_id") or item.get("machine") or item.get("host_id") or "local"
-    if not isinstance(mid, str) or not mid.strip():
-        mid = "local"
-    else:
-        mid = mid.strip()
-    machine = get_machine(registry or {}, mid)
-    kind = "local"
-    if isinstance(machine, dict):
-        kind = machine.get("kind") or ("local" if mid == "local" else "remote")
-
-    # 2. Tailscale advertise for local serve/funnel
-    tailnet = item.get("tailnet") if isinstance(item.get("tailnet"), dict) else {}
-    mode = tailnet.get("mode")
-    if mode in ("serve", "funnel") and kind != "remote":
-        ts_host = extract_tailscale_advertise_host(tailscale_self)
-        if ts_host:
-            return ts_host
-        if allow_probe and tailscale_self is None:
-            try:
-                status = probe_tailscale_status()
-                ts_host = extract_tailscale_advertise_host(status.get("Self"))
-                if ts_host:
-                    return ts_host
-            except Exception:
-                pass
-
-    # 3. Registry machine advertise host
-    if isinstance(machine, dict):
-        mhost = machine.get("host")
-        if isinstance(mhost, str) and mhost.strip():
-            mhost = mhost.strip()
-            if kind == "remote" and mhost in ("127.0.0.1", "localhost", "::1"):
-                return None
-            return mhost
-        if kind == "remote":
-            return None
-
-    # 4. Local-only
-    return "127.0.0.1"
-
-
-def resolve_range_scheme(item):
-    """Resolve URL scheme for a range hyperlink.
-
-    - Explicit http|https on the item wins when set.
-    - Else Tailscale Serve/Funnel advertise HTTPS.
-    - Else http.
-
-    Note: many older records defaulted scheme to "http" even for serve/funnel.
-    For those modes, treat stored "http" as the legacy default and use https
-    (Serve/Funnel are HTTPS). Explicit "https" is unchanged.
-    """
-    if not isinstance(item, dict):
-        return "http"
-    tailnet = item.get("tailnet") if isinstance(item.get("tailnet"), dict) else {}
-    mode = tailnet.get("mode")
-    if isinstance(mode, str):
-        mode = mode.strip().lower()
-    else:
-        mode = None
-    scheme = item.get("scheme")
-    if isinstance(scheme, str) and scheme.strip():
-        scheme = scheme.strip().lower()
-        if scheme in ("http", "https"):
-            if scheme == "https":
-                return "https"
-            # scheme == http
-            if mode in ("serve", "funnel"):
-                return "https"
-            return "http"
-    if mode in ("serve", "funnel"):
-        return "https"
-    return "http"
-
-
-def resolve_range_url(registry, item, port=None, tailscale_self=None, allow_probe=True):
-    """Build scheme://host:port/ for a range (or a specific port in the range)."""
-    scheme = resolve_range_scheme(item)
-    host = resolve_range_host(
-        registry, item, tailscale_self=tailscale_self, allow_probe=allow_probe
-    )
-    if not host:
-        return None
-    # Serve/Funnel terminate TLS at the tailnet endpoint and forward HTTP to
-    # the local service. A loopback fallback must not inherit that HTTPS scheme.
-    if (host in ("127.0.0.1", "localhost", "::1")
-            and (item.get("tailnet") or {}).get("mode") in ("serve", "funnel")
-            and not is_remote_range(registry, item)):
-        scheme = "http"
-    if port is None:
-        port = int(item.get("start") or 0) if isinstance(item, dict) else 0
-    else:
-        port = int(port)
-    if port <= 0:
-        return None
-    return f"{scheme}://{host}:{port}/"
-
-
-def normalize_range_machine_fields(item):
-    if not isinstance(item, dict):
-        return item
-    mid = item.get("machine_id") or item.get("machine") or item.get("host_id")
-    if isinstance(mid, str) and mid.strip():
-        item["machine_id"] = mid.strip()
-    else:
-        item["machine_id"] = "local"
-    host = item.get("host")
-    if host is not None and (not isinstance(host, str) or not host.strip()):
-        item["host"] = None
-    elif isinstance(host, str):
-        item["host"] = host.strip()
-    advertise = item.get("advertise_host")
-    if isinstance(advertise, str) and advertise.strip() and not item.get("host"):
-        item["host"] = advertise.strip()
-    tailnet = item.get("tailnet") if isinstance(item.get("tailnet"), dict) else {}
-    mode = tailnet.get("mode")
-    if isinstance(mode, str):
-        mode = mode.strip().lower()
-    else:
-        mode = None
-    scheme = item.get("scheme")
-    if not isinstance(scheme, str) or not scheme.strip():
-        item["scheme"] = "https" if mode in ("serve", "funnel") else "http"
-    else:
-        s = scheme.strip().lower()
-        if s not in ("http", "https"):
-            s = "https" if mode in ("serve", "funnel") else "http"
-        elif mode in ("serve", "funnel") and s == "http":
-            # Prefer https when serve/funnel and scheme was left at default http
-            s = "https"
-        item["scheme"] = s
-    return item
-
-
-def normalize_registry(data, start, end):
-    data = normalize_registry_schema(data, start, end)
-    projects = data["projects"]
-    for project_key, project_entry in projects.items():
-        if isinstance(project_key, str) and project_key.startswith("/"):
-            migrate_legacy_project_files(project_key)
-        ranges = project_entry.get("ranges")
-        if isinstance(ranges, list):
-            for item in ranges:
-                if isinstance(item, dict):
-                    normalize_range_record(item)
-    # Additive: never wipe projects when presets/settings/sessions missing
-    data["presets"] = normalize_presets(data.get("presets"))
-    data["settings"] = normalize_settings(data.get("settings"))
-    data["sessions"] = normalize_sessions(data.get("sessions"))
-    data["machines"] = normalize_machines(data.get("machines"))
-    data["environment_history"] = normalize_environment_history(data.get("environment_history"))
-    data["workspace_draft"] = normalize_workspace_draft(data.get("workspace_draft"))
-    return data
-
-
-
-HISTORY_STEPS_CAP = 40
-HISTORY_ALL_KEY = "__all__"
-
-
-def normalize_history_step(step):
-    if not isinstance(step, dict):
-        return None
-    sid = step.get("id")
-    if not isinstance(sid, str) or not sid.strip():
-        sid = str(uuid.uuid4())
-    else:
-        sid = sid.strip()
-    label = step.get("label")
-    if not isinstance(label, str) or not label.strip():
-        label = "edit"
-    else:
-        label = label.strip()
-    at = step.get("at")
-    if not isinstance(at, str) or not at.strip():
-        at = utc_now()
-    snapshot = step.get("snapshot")
-    if not isinstance(snapshot, dict):
-        return None
-    return {"id": sid, "label": label, "at": at, "snapshot": snapshot}
-
-
-def normalize_history_entry(entry):
-    if not isinstance(entry, dict):
-        entry = {}
-    baseline = entry.get("baseline")
-    if baseline is not None and not isinstance(baseline, dict):
-        baseline = None
-    steps_in = entry.get("steps")
-    steps = []
-    if isinstance(steps_in, list):
-        for item in steps_in:
-            normalized = normalize_history_step(item)
-            if normalized is not None:
-                steps.append(normalized)
-    if len(steps) > HISTORY_STEPS_CAP:
-        steps = steps[-HISTORY_STEPS_CAP:]
-    try:
-        cursor = int(entry.get("cursor", 0))
-    except (TypeError, ValueError):
-        cursor = 0
-    max_cursor = len(steps)  # 0=baseline, len(steps)=tip
-    if cursor < 0:
-        cursor = 0
-    if cursor > max_cursor:
-        cursor = max_cursor
-    return {"baseline": baseline, "steps": steps, "cursor": cursor}
-
-
-def normalize_environment_history(data):
-    if not isinstance(data, dict):
-        return {}
-    out = {}
-    for key, value in data.items():
-        if not isinstance(key, str) or not key.strip():
-            continue
-        out[key.strip()] = normalize_history_entry(value)
-    return out
-
-
-def history_is_modified(entry):
-    entry = normalize_history_entry(entry)
-    return int(entry.get("cursor") or 0) > 0
 
 
 def resolve_history_env_name(registry, explicit=None):
@@ -1331,121 +740,6 @@ def history_list_payload(registry, env_name):
         "steps": steps_out,
         "step_count": len(steps_out),
     }
-
-
-
-def default_lifecycle():
-    return {
-        "start_script": DEFAULT_START_SCRIPT,
-        "stop_script": DEFAULT_STOP_SCRIPT,
-        "start_log": DEFAULT_START_LOG,
-        "stop_log": DEFAULT_STOP_LOG,
-        "pid": None,
-        "pgid": None,
-        "started_at": None,
-        "stopped_at": None,
-        "last_exit_code": None,
-    }
-
-
-LEGACY_LIFECYCLE_DIR = ".port-registry"  # pre-rename name; migrated on load
-
-
-def normalize_lifecycle(lifecycle):
-    normalized = default_lifecycle()
-    if isinstance(lifecycle, dict):
-        for key in normalized:
-            if key in lifecycle:
-                normalized[key] = lifecycle[key]
-    for key in ("start_script", "stop_script", "start_log", "stop_log"):
-        value = normalized.get(key)
-        if isinstance(value, str) and value.startswith(LEGACY_LIFECYCLE_DIR + "/"):
-            normalized[key] = DEFAULT_LIFECYCLE_DIR + value[len(LEGACY_LIFECYCLE_DIR):]
-    return normalized
-
-
-def migrate_legacy_project_files(project):
-    """Move <project>/.port-registry(.json) to the Portskill names, leaving a symlink
-    at the old name so scripts that still reference it keep working."""
-    root = pathlib.Path(project)
-    for old_name, new_name in (
-        (LEGACY_LIFECYCLE_DIR, DEFAULT_LIFECYCLE_DIR),
-        (LEGACY_LIFECYCLE_DIR + ".json", DEFAULT_LIFECYCLE_DIR + ".json"),
-    ):
-        old, new = root / old_name, root / new_name
-        try:
-            if old.exists() and not old.is_symlink() and not new.exists():
-                old.rename(new)
-                old.symlink_to(new_name)
-        except OSError:
-            pass  # read-only FS: leave it; start reports the missing script
-
-
-def normalize_default_state(value):
-    if isinstance(value, str) and value.strip().lower() == "on":
-        return "on"
-    return "off"
-
-
-def normalize_range_extra(extra):
-    if not isinstance(extra, dict):
-        return {}
-    out = {}
-    for key, value in extra.items():
-        if isinstance(key, str) and key.strip():
-            out[key.strip()] = value
-    return out
-
-
-def normalize_optional_str(value):
-    if value is None:
-        return None
-    if isinstance(value, str):
-        value = value.strip()
-        return value or None
-    return str(value).strip() or None
-
-
-def normalize_range_record(item):
-    item["lifecycle"] = normalize_lifecycle(item.get("lifecycle"))
-    item["default_state"] = normalize_default_state(item.get("default_state"))
-    # Additive edit-mode fields (stdlib-safe normalize)
-    if "command" in item or item.get("command") is not None:
-        item["command"] = normalize_optional_str(item.get("command"))
-    else:
-        item.setdefault("command", None)
-    if "cwd" in item or item.get("cwd") is not None:
-        item["cwd"] = normalize_optional_str(item.get("cwd"))
-    else:
-        item.setdefault("cwd", None)
-    item["extra"] = normalize_range_extra(item.get("extra"))
-    normalize_range_machine_fields(item)
-    return item
-
-
-def normalize_workspace_draft(draft):
-    """Pending edit-mode metadata until Save (range_id -> fields)."""
-    if not isinstance(draft, dict):
-        return {"ranges": {}, "edit_mode": False}
-    ranges = draft.get("ranges") if isinstance(draft.get("ranges"), dict) else {}
-    clean = {}
-    for rid, fields in ranges.items():
-        if not isinstance(rid, str) or not rid.strip() or not isinstance(fields, dict):
-            continue
-        entry = {}
-        for key in ("start_script", "stop_script", "command", "cwd"):
-            if key in fields:
-                entry[key] = normalize_optional_str(fields.get(key))
-        if "extra" in fields:
-            entry["extra"] = normalize_range_extra(fields.get("extra"))
-        clean[rid.strip()] = entry
-    edit_mode = parse_bool(draft.get("edit_mode"), False)
-    return {"ranges": clean, "edit_mode": edit_mode}
-
-
-def workspace_draft_is_modified(draft):
-    draft = normalize_workspace_draft(draft)
-    return bool(draft.get("ranges"))
 
 
 def export_workspace_backup(registry, label="workspace"):
@@ -1904,23 +1198,6 @@ def find_project_range(registry, project, range_id):
     return None
 
 
-def resolve_tailscale_bin():
-    configured = os.environ.get("PORTSKILL_TAILSCALE_BIN")
-    if configured:
-        return configured
-    which = shutil.which("tailscale")
-    if which:
-        return which
-    mac_default = pathlib.Path(DEFAULT_TAILSCALE_BIN)
-    if mac_default.exists():
-        return str(mac_default)
-    return DEFAULT_TAILSCALE_BIN
-
-
-def tailscale_base_command():
-    return shlex.split(resolve_tailscale_bin())
-
-
 def should_use_sudo():
     return os.environ.get("PORTSKILL_TAILSCALE_SUDO", "1") != "0"
 
@@ -1977,138 +1254,6 @@ def run_tailnet(mode, port, off=False):
             stdout=(result.stdout or "")[:500],
             stderr=(result.stderr or "")[:500],
         )
-
-
-def tailscale_bin_available():
-    ts_bin = resolve_tailscale_bin()
-    if not ts_bin:
-        return False, ts_bin
-    first = shlex.split(ts_bin)[0]
-    path = pathlib.Path(first)
-    if path.exists() or shutil.which(first):
-        return True, ts_bin
-    return False, ts_bin
-
-
-def extract_tailscale_auth_url(text):
-    if not text:
-        return None
-    import re
-    match = re.search(r"https://login\.tailscale\.com/\S+", text)
-    if match:
-        return match.group(0).rstrip(").,;'\"")
-    match = re.search(r"https://[^\s]+tailscale[^\s]*", text)
-    if match:
-        return match.group(0).rstrip(").,;'\"")
-    return None
-
-
-def probe_tailscale_status():
-    """Non-interactive Tailscale status summary for UI/CLI/doctor.
-
-    Returns a dict with chip label Connected / Needs login / Binary missing,
-    BackendState, Self (when present), and reason when not connected.
-    """
-    available, ts_bin = tailscale_bin_available()
-    if not available:
-        return {
-            "ok": False,
-            "chip": "Binary missing",
-            "state": "binary_missing",
-            "reason": "tailscale_bin_missing",
-            "message": f"Tailscale binary not found: {ts_bin}",
-            "BackendState": None,
-            "Self": None,
-            "AuthURL": None,
-            "binary": ts_bin,
-            "logged_in": False,
-        }
-    try:
-        result = subprocess.run(
-            tailscale_base_command() + ["status", "--json"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=8,
-            stdin=subprocess.DEVNULL,
-        )
-    except subprocess.TimeoutExpired:
-        return {
-            "ok": False,
-            "chip": "Needs login",
-            "state": "needs_login",
-            "reason": "tailscale_status_timeout",
-            "message": "tailscale status timed out (is the daemon running / logged in?)",
-            "BackendState": None,
-            "Self": None,
-            "AuthURL": None,
-            "binary": ts_bin,
-            "logged_in": False,
-        }
-    except OSError as exc:
-        return {
-            "ok": False,
-            "chip": "Binary missing",
-            "state": "binary_missing",
-            "reason": "tailscale_bin_exec_failed",
-            "message": str(exc),
-            "BackendState": None,
-            "Self": None,
-            "AuthURL": None,
-            "binary": ts_bin,
-            "logged_in": False,
-        }
-
-    raw_out = (result.stdout or "").strip()
-    raw_err = (result.stderr or "").strip()
-    data = {}
-    if raw_out:
-        try:
-            data = json.loads(raw_out)
-        except json.JSONDecodeError:
-            data = {}
-    if not isinstance(data, dict):
-        data = {}
-
-    backend = data.get("BackendState")
-    self_node = data.get("Self") if isinstance(data.get("Self"), dict) else None
-    auth_url = data.get("AuthURL") or extract_tailscale_auth_url(raw_out) or extract_tailscale_auth_url(raw_err)
-
-    logged_in = False
-    if backend == "Running" and self_node:
-        logged_in = True
-    elif backend == "Running":
-        logged_in = True
-    elif self_node and backend not in ("NeedsLogin", "NoState"):
-        logged_in = True
-
-    if logged_in:
-        chip, state, reason = "Connected", "connected", None
-        message = f"BackendState={backend}"
-    elif backend == "NeedsLogin" or auth_url:
-        chip, state, reason = "Needs login", "needs_login", "tailscale_auth_required"
-        message = "Tailscale is installed but not logged in."
-    elif result.returncode != 0 and not data:
-        # Daemon missing / not running often looks like needs login on Mac-first setups
-        chip, state, reason = "Needs login", "needs_login", "tailscale_auth_required"
-        message = raw_err or raw_out or f"tailscale status exited {result.returncode}"
-    else:
-        chip, state, reason = "Needs login", "needs_login", "tailscale_auth_required"
-        message = f"Tailscale BackendState={backend!r}; login required for Serve."
-
-    return {
-        "ok": logged_in,
-        "chip": chip,
-        "state": state,
-        "reason": reason,
-        "message": message,
-        "BackendState": backend,
-        "Self": self_node,
-        "AuthURL": auth_url,
-        "binary": ts_bin,
-        "logged_in": logged_in,
-        "raw_exit": result.returncode,
-    }
 
 
 def ensure_tailscale_authenticated(mode):
@@ -2170,13 +1315,6 @@ def scaffold_lifecycle_scripts(project):
         if not path.exists():
             path.write_text(placeholder_content(name), encoding="utf-8")
             path.chmod(0o755)
-
-
-def script_is_placeholder(path):
-    try:
-        return PLACEHOLDER_SENTINEL in path.read_text(encoding="utf-8")
-    except OSError:
-        return False
 
 
 def validate_start_script(path):
@@ -3657,252 +2795,15 @@ def cmd_preset(args):
 
 
 def cmd_settings_get(args):
-    def read(registry):
-        settings = normalize_settings(registry.get("settings"))
-        return {"status": "ok", "settings": settings}, False, []
+    from .settings import settings_get
 
-    emit(mutate_registry_meta(read))
+    return settings_get()
 
 
 def cmd_settings_set(args):
-    def mutate(registry):
-        settings = normalize_settings(registry.get("settings"))
-        changed = False
-        # Combined shortcut: --auto-apply NAME|off
-        auto_apply = getattr(args, "auto_apply", None)
-        if auto_apply is not None:
-            token = str(auto_apply).strip()
-            if token.lower() in ("off", "none", "null", ""):
-                settings["auto_apply_preset"] = None
-                settings["auto_apply_on_launch"] = False
-            else:
-                settings["auto_apply_preset"] = token
-                settings["auto_apply_on_launch"] = True
-            changed = True
-        if getattr(args, "auto_apply_preset", None) is not None:
-            token = str(args.auto_apply_preset).strip()
-            if token.lower() in ("none", "off", "null", ""):
-                settings["auto_apply_preset"] = None
-            else:
-                settings["auto_apply_preset"] = token
-            changed = True
-        if getattr(args, "auto_apply_on_launch", None) is not None:
-            token = str(args.auto_apply_on_launch).strip().lower()
-            if token not in ("on", "off"):
-                fail("invalid_args", "--auto-apply-on-launch must be on|off")
-            settings["auto_apply_on_launch"] = token == "on"
-            changed = True
-        if getattr(args, "auto_exit_on_shutdown", None) is not None:
-            token = str(args.auto_exit_on_shutdown).strip().lower()
-            if token not in ("on", "off"):
-                fail("invalid_args", "--auto-exit-on-shutdown must be on|off")
-            settings["auto_exit_on_shutdown"] = token == "on"
-            changed = True
-        if getattr(args, "stop_also_release", None) is not None:
-            token = str(args.stop_also_release).strip().lower()
-            if token not in ("on", "off"):
-                fail("invalid_args", "--stop-also-release must be on|off")
-            settings["stop_also_release"] = token == "on"
-            changed = True
-        if getattr(args, "default_tailnet", None) is not None:
-            token = str(args.default_tailnet).strip().lower()
-            if token not in ("serve", "none"):
-                fail("invalid_args", "--default-tailnet must be serve|none")
-            settings["default_tailnet"] = token
-            changed = True
-        if getattr(args, "overlap_policy", None) is not None:
-            token = str(args.overlap_policy).strip().lower()
-            if token not in ("allow", "deny"):
-                fail("invalid_args", "--overlap-policy must be allow|deny")
-            settings["overlap_policy"] = token
-            changed = True
-        if getattr(args, "require_compat", None) is not None:
-            token = str(args.require_compat).strip().lower()
-            if token not in ("on", "off"):
-                fail("invalid_args", "--require-compat must be on|off")
-            # Always on — ignore off attempts; keep flag for CLI compat
-            settings["require_compat"] = True
-            changed = True
-        if getattr(args, "open_environment_tabs", None) is not None:
-            raw = args.open_environment_tabs
-            if isinstance(raw, str):
-                if raw.strip().lower() in ("", "none", "off", "[]"):
-                    tabs = []
-                else:
-                    tabs = [p.strip() for p in raw.split(",") if p.strip()]
-            elif isinstance(raw, list):
-                tabs = [str(p).strip() for p in raw if str(p).strip()]
-            else:
-                fail("invalid_args", "--open-environment-tabs must be comma-separated names or none")
-            settings["open_environment_tabs"] = tabs
-            changed = True
-        if getattr(args, "focused_environment", None) is not None:
-            token = str(args.focused_environment).strip()
-            if token.lower() in ("none", "off", "null", ""):
-                settings["focused_environment"] = None
-            else:
-                settings["focused_environment"] = token
-            changed = True
-        if getattr(args, "open_tab", None) is not None:
-            name = str(args.open_tab).strip()
-            if not name:
-                fail("invalid_args", "--open-tab requires a name")
-            tabs = list(settings.get("open_environment_tabs") or [])
-            if name not in tabs:
-                tabs.append(name)
-            settings["open_environment_tabs"] = tabs
-            settings["focused_environment"] = name
-            changed = True
-        if getattr(args, "close_tab", None) is not None:
-            name = str(args.close_tab).strip()
-            tabs = [t for t in (settings.get("open_environment_tabs") or []) if t != name]
-            settings["open_environment_tabs"] = tabs
-            if settings.get("focused_environment") == name:
-                settings["focused_environment"] = tabs[-1] if tabs else None
-            changed = True
-        # Named mcp_tools profile: --mcp-tools-profile full|lean (writes settings.mcp_tools)
-        if getattr(args, "mcp_tools_profile", None) is not None:
-            token = str(args.mcp_tools_profile).strip().lower()
-            if token not in ("full", "lean"):
-                fail("invalid_args", "--mcp-tools-profile must be full|lean")
-            from .mcp import mcp_tools_map_for_profile  # noqa: PLC0415
+    from .settings import settings_set
 
-            settings["mcp_tools"] = mcp_tools_map_for_profile(
-                token, settings.get("mcp_tools") or {}
-            )
-            settings["mcp_tools_profile"] = token
-            changed = True
-        # Per-tool MCP prefs: --mcp-tool NAME=on|off (repeatable)
-        mcp_tool_args = getattr(args, "mcp_tool", None) or []
-        if mcp_tool_args:
-            tools = dict(settings.get("mcp_tools") or {})
-            for item in mcp_tool_args:
-                token = str(item).strip()
-                if "=" not in token:
-                    fail("invalid_args", "--mcp-tool requires NAME=on|off")
-                name, _, state = token.partition("=")
-                name = name.strip()
-                state = state.strip().lower()
-                if not name:
-                    fail("invalid_args", "--mcp-tool requires a tool name")
-                if state not in ("on", "off"):
-                    fail("invalid_args", "--mcp-tool state must be on|off")
-                from .mcp import canonical_mcp_tool_name  # noqa: PLC0415
-
-                tools[canonical_mcp_tool_name(name)] = state == "on"
-            settings["mcp_tools"] = tools
-            changed = True
-        if getattr(args, "serve_portskill_on_tailscale", None) is not None:
-            token = str(args.serve_portskill_on_tailscale).strip().lower()
-            if token not in ("on", "off"):
-                fail("invalid_args", "--serve-portskill-on-tailscale must be on|off")
-            settings["serve_portskill_on_tailscale"] = token == "on"
-            changed = True
-        mcp_user_commands_json = getattr(args, "mcp_user_commands_json", None)
-        if mcp_user_commands_json is not None:
-            raw = str(mcp_user_commands_json).strip()
-            try:
-                parsed = json.loads(raw) if raw else {}
-            except json.JSONDecodeError as exc:
-                fail("invalid_args", f"--mcp-user-commands-json must be valid JSON: {exc}")
-            if not isinstance(parsed, dict):
-                fail("invalid_args", "--mcp-user-commands-json must be a JSON object")
-            settings["mcp_user_commands"] = normalize_mcp_user_commands(parsed)
-            changed = True
-        mcp_user_command_upsert = getattr(args, "mcp_user_command_upsert", None)
-        if mcp_user_command_upsert is not None:
-            raw = str(mcp_user_command_upsert).strip()
-            try:
-                parsed = json.loads(raw) if raw else {}
-            except json.JSONDecodeError as exc:
-                fail("invalid_args", f"--mcp-user-command-upsert must be valid JSON: {exc}")
-            if not isinstance(parsed, dict):
-                fail("invalid_args", "--mcp-user-command-upsert must be a JSON object")
-            cmds = dict(settings.get("mcp_user_commands") or {})
-            one = normalize_mcp_user_commands({parsed.get("name") or "cmd": parsed})
-            if not one:
-                fail("invalid_args", "user command needs name + at least one valid step")
-            cmds.update(one)
-            settings["mcp_user_commands"] = normalize_mcp_user_commands(cmds)
-            changed = True
-        mcp_user_command_delete = getattr(args, "mcp_user_command_delete", None)
-        if mcp_user_command_delete is not None:
-            name = str(mcp_user_command_delete).strip()
-            if not name:
-                fail("invalid_args", "--mcp-user-command-delete requires a name")
-            cmds = dict(settings.get("mcp_user_commands") or {})
-            cmds.pop(name, None)
-            settings["mcp_user_commands"] = normalize_mcp_user_commands(cmds)
-            # Drop orphan enable flag for this user command
-            tools = dict(settings.get("mcp_tools") or {})
-            if name in tools:
-                tools.pop(name, None)
-                settings["mcp_tools"] = tools
-            changed = True
-        if getattr(args, "handoff_enabled", None) is not None:
-            token = str(args.handoff_enabled).strip().lower()
-            if token not in ("on", "off"):
-                fail("invalid_args", "--handoff-enabled must be on|off")
-            settings["handoff_enabled"] = token == "on"
-            changed = True
-        if getattr(args, "handoff_kit", None) is not None:
-            token = str(args.handoff_kit).strip()
-            if token.lower() in ("none", "off", "null", ""):
-                settings["handoff_kit"] = None
-            else:
-                settings["handoff_kit"] = token
-            changed = True
-        if getattr(args, "handoff_skill", None) is not None:
-            token = str(args.handoff_skill).strip()
-            if token.lower() in ("none", "off", "null", ""):
-                settings["handoff_skill"] = None
-            else:
-                settings["handoff_skill"] = token
-            changed = True
-        mcp_tools_json = getattr(args, "mcp_tools_json", None)
-        if mcp_tools_json is not None:
-            raw = str(mcp_tools_json).strip()
-            try:
-                parsed = json.loads(raw) if raw else {}
-            except json.JSONDecodeError as exc:
-                fail("invalid_args", f"--mcp-tools-json must be valid JSON: {exc}")
-            if not isinstance(parsed, dict):
-                fail("invalid_args", "--mcp-tools-json must be a JSON object")
-            tools = dict(settings.get("mcp_tools") or {})
-            for key, val in parsed.items():
-                if not isinstance(key, str) or not key.strip():
-                    continue
-                from .mcp import canonical_mcp_tool_name  # noqa: PLC0415
-
-                name = canonical_mcp_tool_name(key.strip())
-                if isinstance(val, bool):
-                    tools[name] = val
-                elif isinstance(val, str):
-                    token = val.strip().lower()
-                    if token in ("on", "off"):
-                        tools[name] = token == "on"
-                    else:
-                        tools[name] = token in ("1", "true", "yes")
-                else:
-                    tools[name] = bool(val)
-            settings["mcp_tools"] = tools
-            changed = True
-        if not changed:
-            fail(
-                "invalid_args",
-                "settings set requires a recognized flag (--auto-apply-preset, tabs, focus, --mcp-tool, --mcp-tools-profile, …)",
-            )
-        # Validate preset exists when enabling launch apply with a name
-        preset_name = settings.get("auto_apply_preset")
-        if settings.get("auto_apply_on_launch") and preset_name:
-            presets = registry.get("presets") or {}
-            if preset_name not in presets:
-                fail("preset_not_found", f"preset not found: {preset_name}")
-        settings["require_compat"] = True
-        registry["settings"] = normalize_settings(settings)
-        return {"status": "ok", "settings": registry["settings"]}, True, []
-
-    emit(mutate_registry_meta(mutate))
+    return settings_set(vars(args))
 
 
 def cmd_settings(args):
@@ -4113,20 +3014,6 @@ def cmd_compat(args):
         raise SystemExit(2)
 
 
-def package_root():
-    """Distribution root containing portskill/, skill/, scripts/, and docs/."""
-    return pathlib.Path(__file__).resolve().parent.parent
-
-
-def skill_dir():
-    """Prefer package root (app layout); fall back to module parent for thin wrappers."""
-    root = package_root()
-    if (root / "portskill").is_dir() or (root / "pyproject.toml").exists():
-        return root
-    return pathlib.Path(__file__).resolve().parent
-
-
-
 def cmd_set_tailnet(args):
     """Update recorded tailnet mode; apply/tear down Serve when range is active.
 
@@ -4192,7 +3079,6 @@ def cmd_set_tailnet(args):
         }, [found_project]
 
     emit(locked_registry(mutate))
-
 
 
 def read_listen_port_from_disk():
@@ -4874,377 +3760,9 @@ def cmd_tailscale(args):
 
 
 def cmd_doctor(args):
-    """Health check for install + live UI/MCP.
+    from .doctor import doctor_result
 
-    Exit contract (idempotent, read-only — never wipes files):
-    - 0 when healthy offline (absent/cold registry + listen, loopback / default bind)
-    - 0 when only informational warnings fail (Tailscale missing; non-loopback
-      bind_host with allow_non_loopback recorded)
-    - DOCTOR_FAIL_CLOSED_EXIT (2) when a DOCTOR_HARD_CHECKS item is not ok:
-      corrupt registry/listen, missing skill files, listening=true but UI/MCP
-      unreachable, non-loopback bind without --allow-non-loopback, or invalid
-      Session Handoff kit override
-    scripts/doctor.sh must return the same codes (it execs this command).
-    """
-    checks = []
-    path = registry_path()
-    registry_ok = False
-    if not path.exists():
-        # Cold install: absent registry is OK (created on first write).
-        checks.append({
-            "name": "registry",
-            "ok": True,
-            "detail": f"absent (cold): {path} — created on first allocate/serve",
-        })
-    else:
-        try:
-            raw = path.read_text(encoding="utf-8")
-            data = json.loads(raw) if raw.strip() else {}
-            if not isinstance(data, dict):
-                checks.append({
-                    "name": "registry",
-                    "ok": False,
-                    "detail": f"corrupt_registry: not an object at {path}",
-                })
-            else:
-                registry_ok = True
-                checks.append({"name": "registry", "ok": True, "detail": str(path)})
-        except json.JSONDecodeError as exc:
-            checks.append({
-                "name": "registry",
-                "ok": False,
-                "detail": (
-                    f"corrupt_registry at {path}: {exc.msg} "
-                    f"(line {exc.lineno} col {exc.colno}); refusing to wipe"
-                ),
-            })
-        except OSError as exc:
-            checks.append({"name": "registry", "ok": False, "detail": f"unreadable: {path}: {exc}"})
-
-    checks.append({
-        "name": "version",
-        "ok": True,
-        "detail": f"portskill {__version__}",
-    })
-
-    listen_file = listen_path()
-    listen_payload = None
-    ui_url = None
-    mcp_url = None
-    listening = False
-    bind_host = None
-    if not listen_file.is_file():
-        checks.append({
-            "name": "listen",
-            "ok": True,
-            "detail": f"absent: {listen_file} (server writes sticky listen after bind)",
-        })
-    else:
-        try:
-            listen_payload = json.loads(listen_file.read_text(encoding="utf-8"))
-            if not isinstance(listen_payload, dict):
-                checks.append({
-                    "name": "listen",
-                    "ok": False,
-                    "detail": f"corrupt listen.json (not an object): {listen_file}",
-                })
-                listen_payload = None
-            else:
-                listening = bool(listen_payload.get("listening"))
-                ui_url = listen_payload.get("ui_url")
-                mcp_url = listen_payload.get("mcp_url")
-                port = listen_payload.get("port")
-                bind_host = listen_payload.get("host")
-                checks.append({
-                    "name": "listen",
-                    "ok": True,
-                    "detail": (
-                        f"{listen_file} listening={listening} port={port} "
-                        f"host={bind_host} ui_url={ui_url} mcp_url={mcp_url}"
-                    ),
-                })
-        except json.JSONDecodeError as exc:
-            checks.append({
-                "name": "listen",
-                "ok": False,
-                "detail": f"corrupt listen.json at {listen_file}: {exc.msg}; refusing to wipe",
-            })
-        except OSError as exc:
-            checks.append({"name": "listen", "ok": False, "detail": f"unreadable: {listen_file}: {exc}"})
-
-    auth_status = http_auth_public_status()
-    gate = "on" if auth_status.get("passkey_gate") else "off"
-    cred_n = int(auth_status.get("passkey_credentials") or 0)
-    if auth_status.get("configured"):
-        checks.append({
-            "name": "http_auth",
-            "ok": True,
-            "detail": (
-                f"configured (token present) at {auth_status.get('path')}; "
-                f"passkey_gate={gate} credentials={cred_n}"
-            ),
-        })
-    else:
-        checks.append({
-            "name": "http_auth",
-            "ok": True,  # informational — minted on first HTTP serve; doctor never writes
-            "detail": (
-                f"absent: {auth_status.get('path')} "
-                "(minted on first HTTP serve; doctor never writes this file); "
-                f"passkey_gate={gate} credentials={cred_n}"
-            ),
-        })
-
-    loopback_warn = bind_host_warning(bind_host)
-    allow_non_loopback = listen_allows_non_loopback(listen_payload)
-    if loopback_warn:
-        if allow_non_loopback:
-            checks.append({
-                "name": "bind_host",
-                "ok": True,
-                "detail": loopback_warn,
-                "warning": True,
-            })
-        else:
-            checks.append({
-                "name": "bind_host",
-                "ok": False,
-                "detail": loopback_warn + f" doctor fails closed without {ALLOW_NON_LOOPBACK_FLAG}.",
-                "warning": True,
-            })
-    elif bind_host:
-        checks.append({
-            "name": "bind_host",
-            "ok": True,
-            "detail": f"loopback ({bind_host})",
-        })
-    else:
-        checks.append({
-            "name": "bind_host",
-            "ok": True,
-            "detail": "unset (default bind is loopback 127.0.0.1)",
-        })
-
-    def _probe(name: str, url: object, *, bearer: str | None = None) -> None:
-        if not listening:
-            checks.append({
-                "name": name,
-                "ok": True,
-                "detail": "skipped (not listening)",
-            })
-            return
-        if not isinstance(url, str) or not url.strip():
-            checks.append({
-                "name": name,
-                "ok": False,
-                "detail": f"listening=true but {name} URL missing in listen.json",
-            })
-            return
-        try:
-            req = urllib.request.Request(url, method="GET")
-            if bearer:
-                req.add_header("Authorization", f"Bearer {bearer}")
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                code = int(getattr(resp, "status", None) or resp.getcode())
-            if code != 200:
-                checks.append({
-                    "name": name,
-                    "ok": False,
-                    "detail": f"GET {url} -> HTTP {code}",
-                })
-            else:
-                checks.append({
-                    "name": name,
-                    "ok": True,
-                    "detail": f"GET {url} -> HTTP {code}",
-                })
-        except urllib.error.HTTPError as exc:
-            checks.append({
-                "name": name,
-                "ok": False,
-                "detail": f"GET {url} -> HTTP {int(exc.code)}",
-            })
-        except urllib.error.URLError as exc:
-            checks.append({
-                "name": name,
-                "ok": False,
-                "detail": f"GET {url}: {exc}",
-            })
-        except Exception as exc:  # pragma: no cover
-            checks.append({
-                "name": name,
-                "ok": False,
-                "detail": f"GET {url}: {exc}",
-            })
-
-    _probe("ui_reachability", ui_url)
-    _probe("mcp_reachability", mcp_url, bearer=http_auth_token())
-
-    ts_bin = resolve_tailscale_bin()
-    ts_path = pathlib.Path(shlex.split(ts_bin)[0]) if ts_bin else None
-    ts_exists = bool(ts_path and (ts_path.exists() or shutil.which(str(ts_path))))
-    checks.append({
-        "name": "tailscale_bin",
-        "ok": True,  # informational — Serve is optional; do not fail CI/cold Linux
-        "detail": f"{ts_bin}" + ("" if ts_exists else " (not found; Serve unavailable)"),
-    })
-
-    ts_status = probe_tailscale_status()
-    checks.append({
-        "name": "tailscale_auth",
-        "ok": True,  # informational
-        "detail": (
-            f"{ts_status.get('chip')}: BackendState={ts_status.get('BackendState')!r}"
-            + (
-                ""
-                if ts_status.get("logged_in")
-                else f"; {ts_status.get('message') or 'login required for Serve'}"
-            )
-        ),
-    })
-    checks.append({
-        "name": "tailscale_serve",
-        "ok": True,
-        "detail": (
-            "Serve maps localhost ports onto your tailnet when logged in. "
-            "UI toggle is Serve on/off; Funnel of user service ports remains "
-            "available via CLI `--mode funnel`. Funnel of the Portskill listen "
-            "port is refused. Tailscale is not HTTP authentication."
-            + ("" if ts_status.get("logged_in") else " Log in before enabling Serve.")
-        ),
-    })
-
-    skill = skill_dir()
-    app_pkg = skill / "portskill"
-    required_rel = [
-        "portskill/__init__.py",
-        "portskill/cli.py",
-        "portskill/server.py",
-        "portskill/mcp.py",
-    ]
-    missing = [name for name in required_rel if not (skill / name).exists()]
-    skill_md_ok = (skill / "skill" / "SKILL.md").exists() or (skill / "SKILL.md").exists()
-    ui_ok = (app_pkg / "static").is_dir()
-    skill_ok = not missing and ui_ok
-    detail = str(skill)
-    if missing:
-        detail += f"; missing {', '.join(missing)}"
-    if not skill_md_ok:
-        detail += "; optional agent skill sidecar not installed"
-    if not ui_ok:
-        detail += "; missing portskill/static/"
-    checks.append({"name": "skill_files", "ok": skill_ok, "detail": detail})
-
-    project = project_path(args.project)
-    start_script = pathlib.Path(project) / DEFAULT_START_SCRIPT
-    if start_script.exists():
-        is_placeholder = script_is_placeholder(start_script)
-        checks.append({
-            "name": "start_script",
-            "ok": True,  # informational — placeholder is common until customize
-            "detail": (
-                f"placeholder still present: {start_script}"
-                if is_placeholder
-                else f"customized: {start_script}"
-            ),
-        })
-    else:
-        checks.append({
-            "name": "start_script",
-            "ok": True,
-            "detail": f"none at {start_script} (ok until allocate scaffolds one)",
-        })
-
-    default_on = 0
-    default_off = 0
-    if registry_ok:
-        try:
-            raw = path.read_text(encoding="utf-8")
-            data = json.loads(raw) if raw.strip() else {}
-            if isinstance(data, dict):
-                for project_entry in (data.get("projects") or {}).values():
-                    for item in (project_entry or {}).get("ranges") or []:
-                        if not isinstance(item, dict) or item.get("state") == "released":
-                            continue
-                        if normalize_default_state(item.get("default_state")) == "on":
-                            default_on += 1
-                        else:
-                            default_off += 1
-            checks.append({
-                "name": "default_state",
-                "ok": True,
-                "detail": f"on={default_on} off={default_off} (non-released)",
-            })
-        except (OSError, json.JSONDecodeError):
-            checks.append({
-                "name": "default_state",
-                "ok": True,
-                "detail": "unavailable (registry unreadable after initial check)",
-            })
-    else:
-        checks.append({
-            "name": "default_state",
-            "ok": True,
-            "detail": "skipped (registry not readable)",
-        })
-
-    settings_for_handoff = {}
-    if registry_ok:
-        try:
-            raw = path.read_text(encoding="utf-8")
-            data = json.loads(raw) if raw.strip() else {}
-            if isinstance(data, dict) and isinstance(data.get("settings"), dict):
-                settings_for_handoff = data["settings"]
-        except (OSError, json.JSONDecodeError):
-            settings_for_handoff = {}
-    handoff_check, handoff_info = doctor_handoff(settings_for_handoff)
-    checks.append(handoff_check)
-
-    # Hard fail-closed: corrupt registry/listen, broken install, claimed-but-unreachable UI/MCP,
-    # missing Session Handoff kit or invalid kit override, non-loopback bind without allow.
-    ok = all(item["ok"] for item in checks if item.get("name") in DOCTOR_HARD_CHECKS)
-    focused_hist = None
-    if registry_ok:
-        try:
-            raw = path.read_text(encoding="utf-8")
-            data = json.loads(raw) if raw.strip() else {}
-            if isinstance(data, dict):
-                start, end = pool_bounds()
-                data = normalize_registry(data, start, end)
-                focused = (data.get("settings") or {}).get("focused_environment")
-                key = focused if isinstance(focused, str) and focused.strip() else HISTORY_ALL_KEY
-                entry = (data.get("environment_history") or {}).get(key)
-                focused_hist = {
-                    "environment": key,
-                    "modified": history_is_modified(entry) if entry else False,
-                    "cursor": int((entry or {}).get("cursor") or 0) if isinstance(entry, dict) else 0,
-                }
-        except (OSError, json.JSONDecodeError, SystemExit):
-            focused_hist = None
-    emit({
-        "status": "ok" if ok else "error",
-        "reason": None if ok else "doctor_failed",
-        "message": loopback_warn,
-        "version": __version__,
-        "checks": checks,
-        "registry_path": str(path),
-        "registry_readable": registry_ok,
-        "listen_path": str(listen_file),
-        "listen": listen_payload,
-        "bind_host": bind_host,
-        "loopback": loopback_warn is None,
-        "allow_non_loopback": allow_non_loopback,
-        "http_auth": auth_status,
-        "ui_url": ui_url,
-        "mcp_url": mcp_url,
-        "skill_dir": str(skill),
-        "default_state_counts": {"on": default_on, "off": default_off},
-        "tailscale": ts_status,
-        "environment_history": focused_hist,
-        "handoff_kit": handoff_info,
-    })
-    if not ok:
-        raise SystemExit(DOCTOR_FAIL_CLOSED_EXIT)
+    return doctor_result(args.project)
 
 
 def cmd_handoff_fetch(args):
@@ -5327,7 +3845,6 @@ def cmd_path(args):
 
 def cmd_status(args):
     return status_result(args.project)
-
 
 
 def cmd_discover_ports(args):

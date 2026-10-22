@@ -255,17 +255,21 @@ class DoctorContractTests(unittest.TestCase):
                 self.assertFalse(info["present"])
 
     def test_skill_files_missing_fail_closed_inprocess(self) -> None:
+        from portskill import doctor
+        from portskill.domain import DomainError
+
         with IsolatedConfig() as iso:
             empty = iso.root / "missing-skill"
             empty.mkdir()
             buf = StringIO()
-            with patch.object(cli, "skill_dir", return_value=empty), patch(
+            with patch.object(doctor, "skill_dir", return_value=empty), patch(
                 "sys.stdout", buf
             ):
-                with self.assertRaises(SystemExit) as ctx:
+                with self.assertRaises(DomainError) as ctx:
                     cli.cmd_doctor(Namespace(project="."))
-            self.assertEqual(ctx.exception.code, DOCTOR_FAIL_CLOSED_EXIT)
-            payload = json.loads(buf.getvalue())
+            self.assertEqual(ctx.exception.exit_code, DOCTOR_FAIL_CLOSED_EXIT)
+            self.assertEqual(buf.getvalue(), "")
+            payload = ctx.exception.as_dict()
         self.assertEqual(payload.get("reason"), "doctor_failed")
         skill = next(c for c in payload["checks"] if c.get("name") == "skill_files")
         self.assertFalse(skill.get("ok"))

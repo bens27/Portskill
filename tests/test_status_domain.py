@@ -31,7 +31,7 @@ class StatusDomainTests(unittest.TestCase):
 
         with IsolatedConfig() as iso:
             iso.write_registry()
-            with mock.patch("portskill.cli.probe_tailscale_status", return_value={"Self": None}):
+            with mock.patch("portskill.status.probe_tailscale_status", return_value={"Self": None}):
                 result = status_result()
 
         self.assertIsInstance(result, dict)
@@ -60,7 +60,7 @@ class StatusDomainTests(unittest.TestCase):
                     }
                 }
             })
-            with mock.patch("portskill.cli.probe_tailscale_status", return_value={"Self": None}):
+            with mock.patch("portskill.status.probe_tailscale_status", return_value={"Self": None}):
                 result = status_result(project)
             completed = iso.run_cli(["status", "--project", project])
 

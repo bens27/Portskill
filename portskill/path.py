@@ -14,6 +14,20 @@ import pathlib
 from dataclasses import dataclass
 from typing import Any
 
+from .registry import normalize_settings
+from .registry_domain import (
+    DEFAULT_START_SCRIPT,
+    DEFAULT_STOP_SCRIPT,
+    is_remote_range,
+    normalize_default_state,
+    normalize_machines,
+    normalize_optional_str,
+    project_path,
+)
+from .service import script_is_placeholder
+from .status import enrich_range as enrich_range_for_status, project_from_context
+from .tailscale import probe_tailscale_status
+
 PATH_MODES = ("start", "stop", "release", "restart", "status")
 
 PHASES_BY_MODE = {
@@ -136,19 +150,11 @@ def _tailnet_needs_input(ran: list, skipped: list, result: dict) -> dict:
 
 
 def _scripts_exist(project: str) -> bool:
-    from .cli import DEFAULT_START_SCRIPT, DEFAULT_STOP_SCRIPT
-
     root = pathlib.Path(project)
     return (root / DEFAULT_START_SCRIPT).is_file() and (root / DEFAULT_STOP_SCRIPT).is_file()
 
 
 def _start_ready(item: dict | None, project: str) -> bool:
-    from .cli import (
-        DEFAULT_START_SCRIPT,
-        normalize_optional_str,
-        script_is_placeholder,
-    )
-
     if item is not None and normalize_optional_str(item.get("command")):
         return True
     path = pathlib.Path(project) / DEFAULT_START_SCRIPT
@@ -158,8 +164,6 @@ def _start_ready(item: dict | None, project: str) -> bool:
 
 
 def _wire_pending(item: dict | None, command: str | None, cwd: str | None, default_state: str | None) -> bool:
-    from .cli import normalize_default_state, normalize_optional_str
-
     if item is None:
         return bool(command or cwd or default_state)
     if command and normalize_optional_str(command) != normalize_optional_str(item.get("command")):
@@ -241,7 +245,7 @@ def _facts_from_state(
 
 
 def _apply_wire(item, project, command, cwd, default_state):
-    from .cli import normalize_default_state, normalize_optional_str, scaffold_lifecycle_scripts
+    from .cli import scaffold_lifecycle_scripts
 
     scaffold_lifecycle_scripts(project)
     changed = []
@@ -291,13 +295,10 @@ def run_path(
         activate_item,
         allocate_range,
         fail,
-        is_remote_range,
         locked_registry,
         mark_item_active,
         maybe_push_history,
         park_item_for_exit,
-        probe_tailscale_status,
-        project_path,
         range_has_live_process,
         refuse_remote_process,
         release_item,
@@ -305,7 +306,6 @@ def run_path(
         resolve_history_env_name,
         resolve_stop_also_release,
         ensure_baseline,
-        normalize_settings,
     )
 
     mode = (mode or "").strip().lower()
@@ -343,10 +343,7 @@ def run_path(
         result: dict[str, Any] = {"range": item, "project": project, "mode": mode}
 
         if mode == "status":
-            from .cli import enrich_range_for_status, normalize_machines, status_project_from_context
-            from argparse import Namespace
-
-            selected = status_project_from_context(Namespace(project=project))
+            selected = project_from_context(project)
             if selected is None:
                 ranges = []
                 for entry in registry["projects"].values():

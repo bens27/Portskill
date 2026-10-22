@@ -59,7 +59,7 @@ def _project_relative(project: str, value: object, field: str) -> pathlib.Path:
     return path
 
 
-def _script_is_placeholder(path: pathlib.Path) -> bool:
+def script_is_placeholder(path: pathlib.Path) -> bool:
     try:
         return PLACEHOLDER_SENTINEL in path.read_text(encoding="utf-8")
     except OSError:
@@ -132,7 +132,7 @@ def launch_service(item: dict[str, Any], project: str) -> ServiceLaunchOutcome:
                 str(start_script),
                 source,
             )
-        if _script_is_placeholder(start_script):
+        if script_is_placeholder(start_script):
             return ServiceLaunchOutcome(
                 False,
                 "start_script_placeholder",

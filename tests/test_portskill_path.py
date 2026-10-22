@@ -273,7 +273,7 @@ class PathCliMcpTests(unittest.TestCase):
 
             with (
                 mock.patch(
-                    "portskill.cli.probe_tailscale_status",
+                    "portskill.path.probe_tailscale_status",
                     return_value={"logged_in": True},
                 ),
                 mock.patch(

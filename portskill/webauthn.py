@@ -16,7 +16,8 @@ from typing import Any
 
 from . import cbor_lite
 from . import p256
-from .cli import utc_now
+from .domain import utc_now
+from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
 from .registry import (
     atomic_write_json,
     http_passkey_path as passkey_path,
@@ -24,7 +25,6 @@ from .registry import (
 )
 from .request_origin import origin_and_rpid
 
-HTTP_SESSION_COOKIE_NAME = "portskill_session"
 SESSION_TTL_SEC = 12 * 60 * 60
 CHALLENGE_TTL_SEC = 5 * 60
 RP_NAME = "Portskill"
@@ -622,8 +622,6 @@ def session_cookie_header(token: str, *, ttl_sec: int = SESSION_TTL_SEC, clear: 
 
 
 def clear_bearer_cookie_header() -> tuple[str, str]:
-    from .cli import HTTP_AUTH_COOKIE_NAME
-
     return ("Set-Cookie", f"{HTTP_AUTH_COOKIE_NAME}=; Path=/; SameSite=Lax; Max-Age=0")
 
 
