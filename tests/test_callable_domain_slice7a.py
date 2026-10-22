@@ -118,9 +118,8 @@ class CallableDomainSlice7ATests(unittest.TestCase):
         for body in settings_cases:
             with self.subTest(action=body["action"]), mock.patch.object(
                 server, "run_cli", side_effect=AssertionError("subprocess used")
-            ), mock.patch.object(
-                server,
-                "settings_set",
+            ), mock.patch(
+                "portskill.settings.settings_set",
                 side_effect=[
                     DomainError("settings_unavailable", "boom", exit_code=1),
                     {"status": "ok", "settings": {}},
@@ -162,9 +161,8 @@ class CallableDomainSlice7ATests(unittest.TestCase):
             server,
             "persist_custom_skill",
             return_value={"ok": True, "path": "/tmp/custom-skill.md"},
-        ), mock.patch.object(
-            server,
-            "settings_set",
+        ), mock.patch(
+            "portskill.settings.settings_set",
             side_effect=[
                 DomainError("settings_unavailable", "boom", exit_code=1),
                 {"status": "ok", "settings": {}},

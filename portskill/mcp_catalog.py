@@ -2,9 +2,14 @@
 from __future__ import annotations
 
 from .command_specs import (
+    ACTIVATE_COMMAND,
+    ALLOCATE_COMMAND,
     COMMAND_SPECS,
     DOCTOR_COMMAND,
     MISSING,
+    RELEASE_COMMAND,
+    SETTINGS_GET_COMMAND,
+    SETTINGS_SET_COMMAND,
     STATUS_COMMAND,
     CommandSpec,
 )
@@ -38,7 +43,15 @@ def _mcp_tool_definition(spec: CommandSpec) -> dict:
         raise ValueError(f"command has no MCP binding: {spec.id}")
     properties = {}
     required = []
-    for parameter in spec.params:
+    ordered_parameters = sorted(
+        enumerate(spec.params),
+        key=lambda item: (
+            item[0]
+            if item[1].mcp is None or item[1].mcp.order is MISSING
+            else item[1].mcp.order
+        ),
+    )
+    for _, parameter in ordered_parameters:
         param_binding = parameter.mcp
         if param_binding is None:
             continue
@@ -48,8 +61,6 @@ def _mcp_tool_definition(spec: CommandSpec) -> dict:
             if param_binding.json_type is MISSING
             else param_binding.json_type,
         }
-        if param_binding.description is not MISSING:
-            schema["description"] = param_binding.description
         if param_binding.enum is not MISSING:
             schema["enum"] = list(param_binding.enum)
         if param_binding.minimum is not MISSING:
@@ -60,6 +71,8 @@ def _mcp_tool_definition(spec: CommandSpec) -> dict:
             schema["additionalProperties"] = {
                 "type": param_binding.additional_properties_type
             }
+        if param_binding.description is not MISSING:
+            schema["description"] = param_binding.description
         properties[name] = schema
         if param_binding.required:
             required.append(name)
@@ -86,63 +99,14 @@ _SPEC_LEAN_MCP_TOOLS = frozenset(
 LEAN_MCP_TOOLS_ENABLED = frozenset(
     {
         PORTSKILL_TOOL_NAME,
-        "settings_get",
         "stop",
-        "release",
-        "allocate",
     }
 ) | _SPEC_LEAN_MCP_TOOLS
 
 
 TOOL_DEFS = [
-    {
-        "name": "allocate",
-        "description": "Low-level: only reserve free ports without starting anything. To register and serve a project, use portskill mode=start instead.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "count": {"type": "integer", "minimum": 1, "description": "Number of ports"},
-                "project": {"type": "string", "description": "Project directory (default .)"},
-                "note": {"type": "string"},
-                "tailnet": {
-                    "type": "string",
-                    "enum": ["serve", "funnel", "none"],
-                    "description": "Required to avoid exit-3 needs_input; omit to be asked",
-                },
-                "machine": {
-                    "type": "string",
-                    "description": "Registry machine id (default local). Remotes are registry+links only.",
-                },
-                "host": {
-                    "type": "string",
-                    "description": "Optional advertise host override for port hyperlinks",
-                },
-                "scheme": {
-                    "type": "string",
-                    "enum": ["http", "https"],
-                    "description": "URL scheme for port hyperlinks (default http)",
-                },
-            },
-            "required": ["count"],
-        },
-    },
-    {
-        "name": "activate",
-        "description": (
-            "Internal primitive: mark an allocated range active without running start.sh. "
-            "Prefer start or the portskill orchestrator. Off in the lean profile; "
-            "not a happy-path peer. Enable with settings set --mcp-tool activate=on."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "range_id": {"type": "string"},
-                "project": {"type": "string"},
-                "tailnet": {"type": "string", "enum": ["serve", "funnel", "none"]},
-            },
-            "required": ["range_id"],
-        },
-    },
+    _mcp_tool_definition(ALLOCATE_COMMAND),
+    _mcp_tool_definition(ACTIVATE_COMMAND),
     {
         "name": "start",
         "description": "Low-level: run start.sh for an already-reserved range_id. To register and serve a new project, use portskill mode=start instead.",
@@ -177,21 +141,7 @@ TOOL_DEFS = [
             "required": ["range_id"],
         },
     },
-    {
-        "name": "release",
-        "description": (
-            "Free a range that is not running (portskill release). "
-            "Refuses with process_still_running if pid/pgid still live — use stop instead."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "range_id": {"type": "string"},
-                "project": {"type": "string"},
-            },
-            "required": ["range_id"],
-        },
-    },
+    _mcp_tool_definition(RELEASE_COMMAND),
     _mcp_tool_definition(STATUS_COMMAND),
     {
         "name": "portskill",
@@ -391,78 +341,8 @@ TOOL_DEFS = [
             "required": ["name"],
         },
     },
-    {
-        "name": "settings_get",
-        "description": "Read registry settings (auto_apply_preset, auto_apply_on_launch, auto_exit_on_shutdown, stop_also_release, default_tailnet, require_compat, mcp_tools, mcp_tools_profile).",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "settings_set",
-        "description": "Update auto-apply settings or apply mcp_tools_profile lean|full. Use auto_apply as shortcut (name enables launch apply; off clears).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "mcp_tools_profile": {
-                    "type": "string",
-                    "enum": ["full", "lean"],
-                    "description": (
-                        "Apply named MCP tools profile into settings.mcp_tools. "
-                        "full = all core tools enabled (empty map); Session Handoff requires separate opt-in. "
-                        "lean = portskill, status, settings_get, plus escape hatches "
-                        "allocate/stop/release; activate and other CRUD and handoff_* stay off until toggled. "
-                        "Opt-in: existing installs stay full until this is applied."
-                    ),
-                },
-                "default_tailnet": {
-                    "type": "string",
-                    "enum": ["serve", "none"],
-                    "description": (
-                        "Default chain: serve makes portskill start/restart register, Tailscale Serve and run "
-                        "when tailnet is omitted. none (default) skips Tailscale. Funnel is never a default."
-                    ),
-                },
-                "stop_also_release": {
-                    "type": "boolean",
-                    "description": (
-                        "When true (default), stop also releases the range. "
-                        "When false, stop keeps the range reserved; use release to free it."
-                    ),
-                },
-                "auto_apply_preset": {
-                    "type": "string",
-                    "description": "Preset name, or none/off to clear",
-                },
-                "auto_apply_on_launch": {"type": "boolean"},
-                "auto_apply": {
-                    "type": "string",
-                    "description": "Shortcut: preset name enables launch apply; off clears",
-                },
-                "auto_exit_on_shutdown": {
-                    "type": "boolean",
-                    "description": "If true, Portskill UI attempts deactivate on SIGINT/SIGTERM",
-                },
-                "require_compat": {
-                    "type": "boolean",
-                    "description": "If true, refuse activate/apply/allocate that would collide on ports",
-                },
-                "overlap_policy": {
-                    "type": "string",
-                    "enum": ["allow", "deny"],
-                    "description": "Legacy; prefer require_compat",
-                },
-                "open_environment_tabs": {
-                    "type": "string",
-                    "description": "Comma-separated open environment tab names, or none",
-                },
-                "focused_environment": {
-                    "type": "string",
-                    "description": "Focused environment name, or none",
-                },
-                "open_tab": {"type": "string", "description": "Open and focus an environment tab"},
-                "close_tab": {"type": "string", "description": "Close an environment tab (does not delete)"},
-            },
-        },
-    },
+    _mcp_tool_definition(SETTINGS_GET_COMMAND),
+    _mcp_tool_definition(SETTINGS_SET_COMMAND),
     {
         "name": "set_tailnet",
         "description": "Set Tailscale mode for a range: serve|none|funnel. UI toggles Serve on/off; Funnel is CLI-only. Requires Browser Login when enabling serve/funnel.",

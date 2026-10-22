@@ -17,12 +17,18 @@ from .compatibility import (
     enforce_compatibility as domain_enforce_compatibility,
 )
 from .command_specs import (
+    ACTIVATE_COMMAND,
+    ALLOCATE_COMMAND,
     CLIParamBinding,
     CommandSpec,
     DOCTOR_COMMAND,
     MISSING,
+    RELEASE_COMMAND,
+    SETTINGS_GET_COMMAND,
+    SETTINGS_SET_COMMAND,
     STATUS_COMMAND,
 )
+from .command_runtime import execute_command
 from .defaults import set_default_result, set_defaults_from_current_result
 from .deactivate import deactivate_result, item_matches_preset_service
 from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
@@ -139,7 +145,7 @@ from .registry_domain import (
     resolve_range_url,
     workspace_draft_is_modified,
 )
-from .registry_mutations import (
+from .registry_mutations import (  # noqa: F401 - compatibility reexports
     activate_result,
     allocate_result,
     release_result,
@@ -197,7 +203,7 @@ from .status import (
     enrich_range as enrich_range_for_status,
     observed_range_status,
     project_from_context,
-    status_result,
+    status_result,  # noqa: F401 - compatibility reexport
 )
 from .workspace import (
     workspace_draft_revert_result,
@@ -480,17 +486,17 @@ def enforce_compat_or_fail(
 
 
 def cmd_allocate(args):
-    return allocate_result(vars(args))
+    return execute_command(ALLOCATE_COMMAND, vars(args))
 
 
 def cmd_activate(args):
-    return activate_result(vars(args))
+    return execute_command(ACTIVATE_COMMAND, vars(args))
 
 
 
 
 def cmd_release(args):
-    return release_result(vars(args))
+    return execute_command(RELEASE_COMMAND, vars(args))
 
 
 def cmd_start(args):
@@ -710,15 +716,11 @@ def cmd_preset(args):
 
 
 def cmd_settings_get(args):
-    from .settings import settings_get
-
-    return settings_get()
+    return execute_command(SETTINGS_GET_COMMAND)
 
 
 def cmd_settings_set(args):
-    from .settings import settings_set
-
-    return settings_set(vars(args))
+    return execute_command(SETTINGS_SET_COMMAND, vars(args))
 
 
 def cmd_settings(args):
@@ -880,9 +882,7 @@ def cmd_tailscale(args):
 
 
 def cmd_doctor(args):
-    from .doctor import doctor_result
-
-    return doctor_result(args.project)
+    return execute_command(DOCTOR_COMMAND, vars(args))
 
 
 def cmd_handoff_fetch(args):
@@ -939,7 +939,7 @@ def cmd_path(args):
 
 
 def cmd_status(args):
-    return status_result(args.project)
+    return execute_command(STATUS_COMMAND, vars(args))
 
 
 def cmd_discover_ports(args):
@@ -969,8 +969,26 @@ def cmd_discover(args):
 
 def _add_spec_cli_parser(subparsers, spec: CommandSpec, *, handler):
     binding = spec.cli
-    if binding is None or len(binding.path) != 1:
-        raise ValueError(f"slice-1 CLI spec must have one path token: {spec.id}")
+    if binding is None or not binding.path:
+        raise ValueError(f"command has no CLI path: {spec.id}")
+    group_cache = getattr(subparsers, "_portskill_spec_groups", None)
+    if group_cache is None:
+        group_cache = {}
+        setattr(subparsers, "_portskill_spec_groups", group_cache)
+    command_subparsers = subparsers
+    for depth, parent_name in enumerate(binding.path[:-1]):
+        prefix = binding.path[: depth + 1]
+        cached = group_cache.get(prefix)
+        if cached is not None:
+            command_subparsers = cached
+            continue
+        parent_parser = command_subparsers.add_parser(parent_name)
+        destination = binding.parent_destinations[depth]
+        required = binding.parent_required[depth]
+        command_subparsers = parent_parser.add_subparsers(
+            dest=destination, required=required
+        )
+        group_cache[prefix] = command_subparsers
     parser_kwargs = {}
     if binding.aliases:
         parser_kwargs["aliases"] = list(binding.aliases)
@@ -978,8 +996,18 @@ def _add_spec_cli_parser(subparsers, spec: CommandSpec, *, handler):
         parser_kwargs["help"] = binding.help
     if binding.description is not MISSING:
         parser_kwargs["description"] = binding.description
-    command_parser = subparsers.add_parser(binding.path[0], **parser_kwargs)
-    for parameter in spec.params:
+    command_parser = command_subparsers.add_parser(
+        binding.path[-1], **parser_kwargs
+    )
+    ordered_parameters = sorted(
+        enumerate(spec.params),
+        key=lambda item: (
+            item[0]
+            if item[1].cli is None or item[1].cli.order is MISSING
+            else item[1].cli.order
+        ),
+    )
+    for _, parameter in ordered_parameters:
         cli_binding = parameter.cli
         if cli_binding is None:
             continue
@@ -1011,46 +1039,9 @@ def parser():
     root = JsonArgumentParser(prog="portskill-cli")
     subparsers = root.add_subparsers(dest="command", required=True)
 
-    allocate = subparsers.add_parser("allocate")
-    allocate.add_argument("--count", type=int, required=True)
-    allocate.add_argument("--note", default=None)
-    allocate.add_argument("--project", default=".")
-    allocate.add_argument("--tailnet", choices=["serve", "funnel", "none"], default=None)
-    allocate.add_argument(
-        "--start",
-        type=int,
-        default=None,
-        help="Optional explicit start port (manual assign); warns if preset conflict",
-    )
-    allocate.add_argument(
-        "--machine",
-        default="local",
-        help="Registry machine id that owns this range (default: local)",
-    )
-    allocate.add_argument(
-        "--host",
-        default=None,
-        help="Optional advertise host override for links (e.g. MagicDNS name)",
-    )
-    allocate.add_argument(
-        "--scheme",
-        default="http",
-        help="URL scheme for port hyperlinks (default http)",
-    )
-    allocate.add_argument("--environment", default=None, help="History env scope (default: focused or __all__)")
-    allocate.set_defaults(func=cmd_allocate)
-
-    activate = subparsers.add_parser("activate")
-    activate.add_argument("--range-id", required=True)
-    activate.add_argument("--project", default=".")
-    activate.add_argument("--tailnet", choices=["serve", "funnel", "none"], default=None)
-    activate.set_defaults(func=cmd_activate)
-
-    release = subparsers.add_parser("release")
-    release.add_argument("--range-id", required=True)
-    release.add_argument("--project", default=".")
-    release.add_argument("--environment", default=None, help="History env scope")
-    release.set_defaults(func=cmd_release)
+    _add_spec_cli_parser(subparsers, ALLOCATE_COMMAND, handler=cmd_allocate)
+    _add_spec_cli_parser(subparsers, ACTIVATE_COMMAND, handler=cmd_activate)
+    _add_spec_cli_parser(subparsers, RELEASE_COMMAND, handler=cmd_release)
 
     start = subparsers.add_parser("start")
     start.add_argument("--range-id", default=None)
@@ -1315,147 +1306,8 @@ def parser():
     )
     preset_check.set_defaults(func=cmd_preset)
 
-    settings = subparsers.add_parser("settings")
-    settings_sub = settings.add_subparsers(dest="settings_command", required=True)
-
-    settings_get = settings_sub.add_parser("get")
-    settings_get.set_defaults(func=cmd_settings)
-
-    settings_set = settings_sub.add_parser("set")
-    settings_set.add_argument(
-        "--auto-apply-preset",
-        default=None,
-        help="Preset name to auto-apply, or --none / none to clear",
-    )
-    # Allow literal flag form: --auto-apply-preset NAME|--none via argparse nargs?
-    # Spec: settings set --auto-apply-preset NAME|--none
-    settings_set.add_argument(
-        "--auto-apply-on-launch",
-        choices=["on", "off"],
-        default=None,
-        help="Enable or disable auto-apply when the HTTP UI launches",
-    )
-    settings_set.add_argument(
-        "--auto-apply",
-        default=None,
-        help="Shortcut: preset name enables launch apply; 'off' clears both",
-    )
-    settings_set.add_argument(
-        "--auto-exit-on-shutdown",
-        choices=["on", "off"],
-        default=None,
-        help="When on, Portskill UI attempts deactivate once on SIGINT/SIGTERM",
-    )
-    settings_set.add_argument(
-        "--default-tailnet",
-        choices=["serve", "none"],
-        default=None,
-        help="Tailnet used by path/portskill start|restart when --tailnet is omitted (default none).",
-    )
-    settings_set.add_argument(
-        "--stop-also-release",
-        choices=["on", "off"],
-        default=None,
-        help=(
-            "When on (default), stop also releases the range. "
-            "When off, stop keeps the range reserved; use release to free it."
-        ),
-    )
-    settings_set.add_argument(
-        "--overlap-policy",
-        choices=["allow", "deny"],
-        default=None,
-        help="Legacy; prefer --require-compat. deny maps to require_compat when unset",
-    )
-    settings_set.add_argument(
-        "--require-compat",
-        choices=["on", "off"],
-        default=None,
-        help="When on, refuse activate/apply/allocate that would collide on ports",
-    )
-    settings_set.add_argument(
-        "--open-environment-tabs",
-        default=None,
-        help="Comma-separated open environment tab names, or none",
-    )
-    settings_set.add_argument(
-        "--focused-environment",
-        default=None,
-        help="Focused environment tab name, or none",
-    )
-    settings_set.add_argument(
-        "--open-tab",
-        default=None,
-        help="Open (and focus) an environment tab by preset name",
-    )
-    settings_set.add_argument(
-        "--close-tab",
-        default=None,
-        help="Close an environment tab (does not delete the preset)",
-    )
-    settings_set.add_argument(
-        "--mcp-tool",
-        action="append",
-        default=None,
-        help="Enable/disable an MCP tool for tools/list+call: NAME=on|off (repeatable)",
-    )
-    settings_set.add_argument(
-        "--mcp-tools-json",
-        default=None,
-        help="JSON object of MCP tool name -> bool (merged into settings.mcp_tools)",
-    )
-    settings_set.add_argument(
-        "--mcp-tools-profile",
-        choices=["full", "lean"],
-        default=None,
-        help=(
-            "Apply named MCP tools profile into settings.mcp_tools. "
-            "full = all core tools enabled (default); Handoff requires separate opt-in. "
-            "lean = portskill, status, settings_get, allocate/stop/release; "
-            "activate and other CRUD and handoff_* stay off until toggled. Opt-in."
-        ),
-    )
-    settings_set.add_argument(
-        "--serve-portskill-on-tailscale",
-        choices=["on", "off"],
-        default=None,
-        help=(
-            "Persist preference to Tailscale-Serve the Portskill listen port "
-            "(never Funnel). New installs default off."
-        ),
-    )
-    settings_set.add_argument(
-        "--mcp-user-commands-json",
-        default=None,
-        help="Replace settings.mcp_user_commands with this JSON object",
-    )
-    settings_set.add_argument(
-        "--mcp-user-command-upsert",
-        default=None,
-        help="JSON object for one user command {name,description,steps} to upsert",
-    )
-    settings_set.add_argument(
-        "--mcp-user-command-delete",
-        default=None,
-        help="Delete a user MCP command by name",
-    )
-    settings_set.add_argument(
-        "--handoff-enabled",
-        choices=["on", "off"],
-        default=None,
-        help="Enable experimental Session Handoff MCP tools and dashboard ledger access (default off)",
-    )
-    settings_set.add_argument(
-        "--handoff-kit",
-        default=None,
-        help="Optional Session Handoff kit path override (or none to use the fetched kit)",
-    )
-    settings_set.add_argument(
-        "--handoff-skill",
-        default=None,
-        help="Optional custom Write-a-Handoff SKILL.md path (or none to use bundled skill)",
-    )
-    settings_set.set_defaults(func=cmd_settings)
+    _add_spec_cli_parser(subparsers, SETTINGS_GET_COMMAND, handler=cmd_settings)
+    _add_spec_cli_parser(subparsers, SETTINGS_SET_COMMAND, handler=cmd_settings)
 
     set_tailnet = subparsers.add_parser(
         "set-tailnet",

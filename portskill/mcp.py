@@ -10,6 +10,16 @@ import sys
 from typing import Any
 
 from . import __version__
+from .command_runtime import execute_command
+from .command_specs import (
+    ACTIVATE_COMMAND,
+    ALLOCATE_COMMAND,
+    DOCTOR_COMMAND,
+    RELEASE_COMMAND,
+    SETTINGS_GET_COMMAND,
+    SETTINGS_SET_COMMAND,
+    STATUS_COMMAND,
+)
 from .handoff import HANDOFF_TOOL_NAMES, call_handoff_tool, handoff_enabled
 from .mcp_catalog import (
     LEAN_MCP_TOOLS_ENABLED,
@@ -40,7 +50,7 @@ from .compatibility import compatibility_result
 from .apply_defaults import apply_defaults_result
 from .defaults import set_default_result
 from .deactivate import deactivate_result
-from .doctor import doctor_result
+from .doctor import doctor_result  # noqa: F401 - compatibility reexport
 from .environments import environment_export_result, environment_import_result
 from .history import history_list_result, history_reset_result, history_restore_result
 from .presets import (
@@ -49,9 +59,13 @@ from .presets import (
     preset_list_result,
     preset_save_result,
 )
-from .settings import settings_get, settings_set
-from .status import status_result
-from .registry_mutations import activate_result, allocate_result, release_result
+from .settings import settings_get, settings_set  # noqa: F401 - compatibility reexports
+from .status import status_result  # noqa: F401 - compatibility reexport
+from .registry_mutations import (  # noqa: F401 - compatibility reexports
+    activate_result,
+    allocate_result,
+    release_result,
+)
 from .process_commands import start_result, stop_result
 from .path import run_path
 
@@ -588,7 +602,7 @@ def _call_tool(name: str, arguments: dict) -> dict:
             return {"content": [{"type": "text", "text": json.dumps(body)}], "structuredContent": body, "isError": True}
         return call_handoff_tool(name, args, settings)
     if name == "status":
-        body = status_result(args.get("project"))
+        body = execute_command(STATUS_COMMAND, args)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,
@@ -668,33 +682,35 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "isError": False,
         }
     if name == "doctor":
-        body = doctor_result(args.get("project", "."))
+        doctor_args = dict(args)
+        doctor_args.setdefault("project", ".")
+        body = execute_command(DOCTOR_COMMAND, doctor_args)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,
             "isError": False,
         }
     if name == "settings_get":
-        body = settings_get()
+        body = execute_command(SETTINGS_GET_COMMAND)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,
             "isError": False,
         }
     if name == "settings_set":
-        body = settings_set(args)
+        body = execute_command(SETTINGS_SET_COMMAND, args)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,
             "isError": False,
         }
     if name in ("allocate", "activate", "release"):
-        operation = {
-            "allocate": allocate_result,
-            "activate": activate_result,
-            "release": release_result,
+        spec = {
+            "allocate": ALLOCATE_COMMAND,
+            "activate": ACTIVATE_COMMAND,
+            "release": RELEASE_COMMAND,
         }[name]
-        body = operation(args)
+        body = execute_command(spec, args)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,

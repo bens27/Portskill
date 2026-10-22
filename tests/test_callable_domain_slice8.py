@@ -329,9 +329,8 @@ class CallableDomainSlice8Tests(unittest.TestCase):
             server, "run_cli", side_effect=AssertionError("subprocess used")
         ), mock.patch.object(
             server, "_portskill_project_path", return_value="/tmp/portskill"
-        ), mock.patch.object(
-            server,
-            "allocate_result",
+        ), mock.patch(
+            "portskill.registry_mutations.allocate_result",
             side_effect=[
                 DomainError("port_in_use", "busy"),
                 {"status": "ok", "range": {"start": 23456}},

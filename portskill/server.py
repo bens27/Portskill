@@ -33,6 +33,8 @@ from .auth import (
     http_auth_token,
     http_bearer_matches,
 )
+from .command_runtime import execute_command
+from .command_specs import ALLOCATE_COMMAND, COMMAND_SPECS, CommandSpec
 from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
 from .domain import DomainError
 from .apply_defaults import apply_defaults_result
@@ -97,9 +99,11 @@ from .registry_domain import (
     resolve_range_url,
 )
 from .status import observed_range_status, service_statuses
-from .settings import settings_set
-from .registry_mutations import allocate_result
-from .registry_mutations import release_result
+from .settings import settings_set  # noqa: F401 - compatibility reexport
+from .registry_mutations import (  # noqa: F401 - compatibility reexports
+    allocate_result,
+    release_result,
+)
 from .process_commands import start_result, stop_result
 from .presets import preset_apply_result, preset_delete_result, preset_save_result
 from .tailscale import probe_tailscale_status
@@ -121,6 +125,171 @@ from .workspace import (
     workspace_draft_save_result,
     workspace_draft_set_result,
 )
+
+
+def _build_ui_command_index() -> tuple[dict[str, CommandSpec], dict[str, str]]:
+    specs = {}
+    binders = {}
+    for spec in COMMAND_SPECS:
+        if spec.ui is None:
+            continue
+        action_binders = dict(spec.ui.action_binders)
+        for action in spec.ui.actions:
+            if action in specs:
+                raise ValueError(f"duplicate UI command action: {action}")
+            specs[action] = spec
+            binders[action] = action_binders.get(action, spec.ui.binder)
+    return specs, binders
+
+
+UI_COMMAND_SPECS, UI_COMMAND_BINDERS = _build_ui_command_index()
+
+
+def _ui_field_value(binding, payload: dict):
+    if not binding.fields:
+        return None
+    for field in binding.fields[:-1]:
+        value = payload.get(field)
+        if value:
+            return value
+    return payload.get(binding.fields[-1])
+
+
+def _coerce_ui_identity(value):
+    return value
+
+
+def _coerce_ui_integer_or_one(value):
+    try:
+        return int(value or 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _coerce_ui_string_or_dot(value):
+    return str(value or ".")
+
+
+def _coerce_ui_tailnet_mode_or_none(value):
+    return str(value or "none")
+
+
+_UI_VALUE_COERCERS = {
+    "identity": _coerce_ui_identity,
+    "integer_or_one": _coerce_ui_integer_or_one,
+    "string_or_dot": _coerce_ui_string_or_dot,
+    "tailnet_mode_or_none": _coerce_ui_tailnet_mode_or_none,
+}
+
+
+def _bind_ui_declared_params(spec: CommandSpec, payload: dict) -> dict:
+    options = {}
+    for parameter in spec.params:
+        binding = parameter.ui
+        if binding is None:
+            continue
+        options[parameter.key] = _UI_VALUE_COERCERS[binding.coercion](
+            _ui_field_value(binding, payload)
+        )
+    return options
+
+
+def _bind_ui_settings_save(spec: CommandSpec, payload: dict) -> dict:
+    del spec
+    options = {}
+    if "autoApplyOnLaunch" in payload:
+        options["auto_apply_on_launch"] = bool(payload.get("autoApplyOnLaunch"))
+    preset = payload.get("autoApplyPreset")
+    if preset is None or preset == "":
+        options["auto_apply_preset"] = "none"
+    elif isinstance(preset, str):
+        options["auto_apply_preset"] = preset
+    if "autoExitOnShutdown" in payload:
+        options["auto_exit_on_shutdown"] = bool(payload.get("autoExitOnShutdown"))
+    if "stopAlsoRelease" in payload:
+        options["stop_also_release"] = bool(payload.get("stopAlsoRelease"))
+    if payload.get("defaultTailnet") in ("serve", "none"):
+        options["default_tailnet"] = payload["defaultTailnet"]
+    options["require_compat"] = True
+    return options
+
+
+def _bind_ui_mcp_user_command_save(spec: CommandSpec, payload: dict) -> dict:
+    del spec
+    command = payload["command"]
+    return _settings_set_options(
+        ("--mcp-user-command-upsert", json.dumps(command)),
+        ("--mcp-tool", f"{command['name']}=on"),
+    )
+
+
+def _bind_ui_mcp_user_command_delete(spec: CommandSpec, payload: dict) -> dict:
+    del spec
+    return _settings_set_options(
+        ("--mcp-user-command-delete", payload["name"].strip())
+    )
+
+
+def _bind_ui_mcp_tool_set(spec: CommandSpec, payload: dict) -> dict:
+    del spec
+    enabled = parse_bool(payload.get("enabled"))
+    tool_arg = f"{payload['name'].strip()}={'on' if enabled else 'off'}"
+    return _settings_set_options(("--mcp-tool", tool_arg))
+
+
+def _bind_ui_handoff_set_enabled(spec: CommandSpec, payload: dict) -> dict:
+    del spec
+    return {"handoff_enabled": parse_bool(payload.get("enabled"))}
+
+
+def _bind_ui_handoff_set_kit(spec: CommandSpec, payload: dict) -> dict:
+    del spec
+    return {"handoff_kit": payload["path"].strip() or "none"}
+
+
+def _bind_ui_handoff_skill_upload(spec: CommandSpec, payload: dict) -> dict:
+    del spec
+    return {"handoff_skill": payload["path"]}
+
+
+def _bind_ui_handoff_skill_clear(spec: CommandSpec, payload: dict) -> dict:
+    del spec, payload
+    return {"handoff_skill": "none"}
+
+
+def _bind_ui_open_environment_tab(spec: CommandSpec, payload: dict) -> dict:
+    del spec
+    return _settings_set_options(("--open-tab", payload["name"].strip()))
+
+
+def _bind_ui_close_environment_tab(spec: CommandSpec, payload: dict) -> dict:
+    del spec
+    return _settings_set_options(("--close-tab", payload["name"].strip()))
+
+
+_UI_PAYLOAD_BINDERS = {
+    "allocate_body": _bind_ui_declared_params,
+    "range_action": _bind_ui_declared_params,
+    "settings_save": _bind_ui_settings_save,
+    "mcp_user_command_save": _bind_ui_mcp_user_command_save,
+    "mcp_user_command_delete": _bind_ui_mcp_user_command_delete,
+    "mcp_tool_set": _bind_ui_mcp_tool_set,
+    "handoff_set_enabled": _bind_ui_handoff_set_enabled,
+    "handoff_set_kit": _bind_ui_handoff_set_kit,
+    "handoff_skill_upload": _bind_ui_handoff_skill_upload,
+    "handoff_skill_clear": _bind_ui_handoff_skill_clear,
+    "open_environment_tab": _bind_ui_open_environment_tab,
+    "close_environment_tab": _bind_ui_close_environment_tab,
+}
+
+
+def _execute_ui_command(action: str, payload: dict) -> dict:
+    try:
+        spec = UI_COMMAND_SPECS[action]
+        binder = _UI_PAYLOAD_BINDERS[UI_COMMAND_BINDERS[action]]
+    except KeyError as exc:
+        raise ValueError(f"unknown declarative UI command action: {action}") from exc
+    return execute_command(spec, binder(spec, payload))
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765  # historical default only; launch prefers sticky/allocate
@@ -294,7 +463,9 @@ def _dogfood_allocate_port(prefer_start: int | None = None) -> int | None:
     }
     if prefer_start is not None:
         options["start"] = int(prefer_start)
-    code, payload, stdout = _run_domain(lambda: allocate_result(options))
+    code, payload, stdout = _run_domain(
+        lambda: execute_command(ALLOCATE_COMMAND, options)
+    )
     if code != 0:
         print(
             f"dogfood allocate failed ({code}): {payload or stdout}",
@@ -4031,11 +4202,14 @@ def run_cli_action(project: str, range_id: str, action: str) -> tuple[int, dict]
         operation = "start"
         options["reclaim"] = True
     try:
-        payload = {
-            "start": start_result,
-            "stop": stop_result,
-            "release": release_result,
-        }[operation](options)
+        if operation == "release":
+            payload = _execute_ui_command(
+                "release", {"project": project, "rangeId": range_id}
+            )
+        else:
+            payload = {"start": start_result, "stop": stop_result}[operation](
+                options
+            )
         code, stdout = 0, ""
     except DomainError as exc:
         payload, code, stdout = exc.as_dict(), exc.exit_code, ""
@@ -4260,24 +4434,11 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             return 400, {"ok": False, "message": "expected name"}
         return _domain_cli_result(lambda: preset_delete_result({"name": name.strip()}))
     if action == "settings-save":
-        options = {}
-        if "autoApplyOnLaunch" in body:
-            options["auto_apply_on_launch"] = bool(body.get("autoApplyOnLaunch"))
-        preset = body.get("autoApplyPreset")
-        if preset is None or preset == "":
-            options["auto_apply_preset"] = "none"
-        elif isinstance(preset, str):
-            options["auto_apply_preset"] = preset
-        if "autoExitOnShutdown" in body:
-            options["auto_exit_on_shutdown"] = bool(body.get("autoExitOnShutdown"))
-        if "stopAlsoRelease" in body:
-            options["stop_also_release"] = bool(body.get("stopAlsoRelease"))
-        if body.get("defaultTailnet") in ("serve", "none"):
-            options["default_tailnet"] = body["defaultTailnet"]
-        # Always force require_compat on
-        options["require_compat"] = True
         try:
-            return 0, {"ok": True, "result": settings_set(options)}
+            return 0, {
+                "ok": True,
+                "result": _execute_ui_command("settings-save", body),
+            }
         except DomainError as exc:
             payload = exc.as_dict()
             return _cli_result(
@@ -4381,14 +4542,9 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             "description": body.get("description") if isinstance(body.get("description"), str) else "",
             "steps": cleaned_steps,
         }
-        import json as _json
-
         code, payload, stdout = _run_domain(
-            lambda: settings_set(
-                _settings_set_options(
-                    ("--mcp-user-command-upsert", _json.dumps(cmd)),
-                    ("--mcp-tool", f"{name}=on"),
-                )
+            lambda: _execute_ui_command(
+                "mcp-user-command-save", {"command": cmd}
             )
         )
         return _cli_result(code, payload, stdout)
@@ -4399,9 +4555,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             return 400, {"ok": False, "message": "expected name"}
         # CLI delete also drops orphan settings.mcp_tools[name]
         code, payload, stdout = _run_domain(
-            lambda: settings_set(
-                _settings_set_options(("--mcp-user-command-delete", name.strip()))
-            )
+            lambda: _execute_ui_command("mcp-user-command-delete", body)
         )
         return _cli_result(code, payload, stdout)
 
@@ -4412,10 +4566,8 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         enabled = body.get("enabled")
         if enabled is None:
             return 400, {"ok": False, "message": "expected enabled bool"}
-        enabled = parse_bool(enabled)
-        tool_arg = f"{name.strip()}={'on' if enabled else 'off'}"
         code, payload, stdout = _run_domain(
-            lambda: settings_set(_settings_set_options(("--mcp-tool", tool_arg)))
+            lambda: _execute_ui_command("mcp-tool-set", body)
         )
         return _cli_result(code, payload, stdout)
 
@@ -4423,8 +4575,9 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         enabled = body.get("enabled")
         if enabled is None:
             return 400, {"ok": False, "message": "expected enabled bool"}
-        enabled = parse_bool(enabled)
-        return _domain_cli_result(lambda: settings_set({"handoff_enabled": enabled}))
+        return _domain_cli_result(
+            lambda: _execute_ui_command("handoff-set-enabled", body)
+        )
 
     if action == "handoff-set-kit":
         path = body.get("path")
@@ -4432,8 +4585,9 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             path = ""
         if not isinstance(path, str):
             return 400, {"ok": False, "message": "expected path"}
-        token = path.strip() or "none"
-        return _domain_cli_result(lambda: settings_set({"handoff_kit": token}))
+        return _domain_cli_result(
+            lambda: _execute_ui_command("handoff-set-kit", {"path": path})
+        )
 
     if action == "handoff-fetch":
         ref = body.get("ref")
@@ -4464,7 +4618,9 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             return 422, written
         path = written.get("path") or ""
         try:
-            payload = settings_set({"handoff_skill": path})
+            payload = _execute_ui_command(
+                "handoff-skill-upload", {"path": path}
+            )
         except Exception as exc:
             return _domain_exception_result(exc)
         out = dict(payload) if isinstance(payload, dict) else {}
@@ -4474,7 +4630,9 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         return 0, out
 
     if action == "handoff-skill-clear":
-        return _domain_cli_result(lambda: settings_set({"handoff_skill": "none"}))
+        return _domain_cli_result(
+            lambda: _execute_ui_command("handoff-skill-clear", body)
+        )
 
     if action in ("handoff-package", "handoff-codex-install") and not handoff_enabled(load_registry().get("settings")):
         return 409, {"ok": False, "error": "handoff_disabled", "message": "Enable Session Handoff under Experimental (Beta) before installing or packaging the kit."}
@@ -4587,7 +4745,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
         code, payload, stdout = _run_domain(
-            lambda: settings_set(_settings_set_options(("--open-tab", name.strip())))
+            lambda: _execute_ui_command(action, body)
         )
         return _cli_result(code, payload, stdout)
     if action == "close-environment-tab":
@@ -4595,7 +4753,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
         code, payload, stdout = _run_domain(
-            lambda: settings_set(_settings_set_options(("--close-tab", name.strip())))
+            lambda: _execute_ui_command("close-environment-tab", body)
         )
         return _cli_result(code, payload, stdout)
     if action == "discover-ports":
@@ -4663,23 +4821,11 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         }
         return (0 if out["ok"] else 422), out
     if action == "allocate":
-        count = body.get("count") or 1
         try:
-            count = int(count)
-        except (TypeError, ValueError):
-            count = 1
-        project = body.get("project") or "."
-        options = {
-            "count": count,
-            "project": str(project),
-            "tailnet": str(body.get("tailnet") or "none"),
-            "note": body.get("note"),
-            "machine": body.get("machine") or body.get("machineId") or body.get("machine_id"),
-            "host": body.get("host"),
-            "scheme": body.get("scheme"),
-        }
-        try:
-            return 0, {"ok": True, "result": allocate_result(options)}
+            return 0, {
+                "ok": True,
+                "result": _execute_ui_command("allocate", body),
+            }
         except DomainError as exc:
             payload = exc.as_dict()
             return _cli_result(exc.exit_code, payload, json.dumps(payload, separators=(",", ":"), sort_keys=True))

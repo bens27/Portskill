@@ -111,13 +111,14 @@ class CallableDomainSlice2Tests(unittest.TestCase):
 
         with mock.patch.object(
             mcp, "run_cli", side_effect=AssertionError("subprocess used")
-        ), mock.patch.object(
-            mcp, "doctor_result", return_value={"status": "ok", "checks": []}
-        ) as doctor, mock.patch.object(
-            mcp, "settings_get", return_value={"status": "ok", "settings": {}}
-        ) as get_settings, mock.patch.object(
-            mcp,
-            "settings_set",
+        ), mock.patch(
+            "portskill.doctor.doctor_result",
+            return_value={"status": "ok", "checks": []},
+        ) as doctor, mock.patch(
+            "portskill.settings.settings_get",
+            return_value={"status": "ok", "settings": {}},
+        ) as get_settings, mock.patch(
+            "portskill.settings.settings_set",
             return_value={"status": "ok", "settings": {"stop_also_release": False}},
         ) as set_settings:
             doctor_call = mcp.call_tool("doctor", {"project": "/tmp/project"})
@@ -209,8 +210,8 @@ class CallableDomainSlice2Tests(unittest.TestCase):
         expected = {"status": "ok", "settings": {"stop_also_release": False}}
         with mock.patch.object(
             server, "run_cli", side_effect=AssertionError("subprocess used")
-        ), mock.patch.object(
-            server, "settings_set", return_value=expected
+        ), mock.patch(
+            "portskill.settings.settings_set", return_value=expected
         ) as set_settings:
             code, body = server.dispatch_ui_action(
                 {"action": "settings-save", "stopAlsoRelease": False}
@@ -238,7 +239,9 @@ class CallableDomainSlice2Tests(unittest.TestCase):
         }
         with mock.patch.object(
             mcp, "run_cli", side_effect=AssertionError("subprocess used")
-        ), mock.patch.object(mcp, "doctor_result", return_value=expected) as doctor:
+        ), mock.patch(
+            "portskill.doctor.doctor_result", return_value=expected
+        ) as doctor:
             response = server.mcp_handle(message)
 
         doctor.assert_called_once_with(".")
