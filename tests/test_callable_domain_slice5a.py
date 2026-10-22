@@ -214,9 +214,8 @@ class CallableDomainSlice5ATests(unittest.TestCase):
         from portskill import server
         from portskill.domain import DomainError
 
-        with mock.patch.object(
-            server,
-            "environment_export_result",
+        with mock.patch(
+            "portskill.environments.environment_export_result",
             side_effect=DomainError("invalid_environment", "bad environment"),
         ):
             code, body = server.dispatch_ui_action({

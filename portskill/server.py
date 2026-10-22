@@ -38,10 +38,8 @@ from .command_specs import ALLOCATE_COMMAND, COMMAND_SPECS, CommandSpec
 from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
 from .domain import DomainError
 from .apply_defaults import apply_defaults_result  # noqa: F401 - compatibility reexport
-from .compatibility import compatibility_result
 from .defaults import set_default_result, set_defaults_from_current_result  # noqa: F401 - compatibility reexports
 from .deactivate import deactivate_result
-from .environments import environment_export_result, environment_import_result
 from .history import history_clear_result, history_reset_result, history_restore_result
 from .network import (
     ALLOW_NON_LOOPBACK_FLAG,
@@ -105,7 +103,7 @@ from .registry_mutations import (  # noqa: F401 - compatibility reexports
     release_result,
 )
 from .process_commands import start_result, stop_result  # noqa: F401 - compatibility reexports
-from .presets import preset_apply_result, preset_delete_result, preset_save_result
+from .presets import preset_save_result
 from .tailscale import probe_tailscale_status
 from .webauthn import (
     authentication_options,
@@ -186,6 +184,11 @@ def _coerce_ui_nonempty_string_or_none(value):
     return value if isinstance(value, str) and value else None
 
 
+def _coerce_ui_environment_name(value):
+    name = value or "environment"
+    return name.strip() if isinstance(name, str) and name.strip() else "environment"
+
+
 _UI_VALUE_COERCERS = {
     "identity": _coerce_ui_identity,
     "integer_or_one": _coerce_ui_integer_or_one,
@@ -194,6 +197,7 @@ _UI_VALUE_COERCERS = {
     "stripped_or_none": _coerce_ui_stripped_or_none,
     "boolean": _coerce_ui_boolean,
     "nonempty_string_or_none": _coerce_ui_nonempty_string_or_none,
+    "environment_name": _coerce_ui_environment_name,
 }
 
 
@@ -242,6 +246,20 @@ def _bind_ui_fixed(spec: CommandSpec, payload: dict, **fixed) -> dict:
 def _bind_ui_reclaim_start(spec: CommandSpec, payload: dict) -> dict:
     options = _bind_ui_declared_params(spec, payload)
     options["reclaim"] = True
+    return options
+
+
+def _bind_ui_compat(spec: CommandSpec, payload: dict) -> dict:
+    options = _bind_ui_declared_params(spec, payload)
+    if not options.get("presets"):
+        options["include_default_on"] = True
+    return options
+
+
+def _bind_ui_preset_save(spec: CommandSpec, payload: dict) -> dict:
+    options = _bind_ui_declared_params(spec, payload)
+    if not options.get("description"):
+        options.pop("description", None)
     return options
 
 
@@ -301,6 +319,7 @@ def _bind_ui_close_environment_tab(spec: CommandSpec, payload: dict) -> dict:
 _UI_PAYLOAD_BINDERS = {
     "allocate_body": _bind_ui_declared_params,
     "range_action": _bind_ui_declared_params,
+    "declared_params": _bind_ui_declared_params,
     "none": _bind_ui_none,
     "reclaim_start": _bind_ui_reclaim_start,
     "start_all": lambda spec, payload: _bind_ui_fixed(spec, payload, all=True),
@@ -308,6 +327,8 @@ _UI_PAYLOAD_BINDERS = {
     "stop_non_default": lambda spec, payload: _bind_ui_fixed(spec, payload, non_default=True),
     "set_default": _bind_ui_declared_params,
     "deactivate": _bind_ui_declared_params,
+    "compat": _bind_ui_compat,
+    "preset_save": _bind_ui_preset_save,
     "settings_save": _bind_ui_settings_save,
     "mcp_user_command_save": _bind_ui_mcp_user_command_save,
     "mcp_user_command_delete": _bind_ui_mcp_user_command_delete,
@@ -4387,11 +4408,8 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         presets = body.get("presets") or body.get("names") or []
         if isinstance(presets, str) and presets.strip():
             presets = [p.strip() for p in presets.split(",") if p.strip()]
-        options = {"presets": presets}
-        if not presets:
-            options["include_default_on"] = True
         try:
-            payload = compatibility_result(options)
+            payload = _execute_ui_command(action, {**body, "presets": presets})
             return 0, {"ok": True, "compatReport": payload, "result": payload}
         except Exception as exc:
             return _domain_exception_result(exc)
@@ -4400,7 +4418,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         if not isinstance(name, str) or not name.strip():
             name = "environment"
         try:
-            payload = environment_export_result({"name": name.strip()})
+            payload = _execute_ui_command(action, {**body, "name": name.strip()})
         except Exception as exc:
             return _domain_exception_result(exc)
         download = json.dumps(payload, indent=2, sort_keys=True) + "\n"
@@ -4425,7 +4443,9 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         else:
             return 400, {"ok": False, "message": "expected content or path for import"}
         try:
-            return _domain_cli_result(lambda: environment_import_result({"file": file_arg}))
+            return _domain_cli_result(
+                lambda: _execute_ui_command(action, {**body, "file": file_arg})
+            )
         finally:
             if tmp_path:
                 try:
@@ -4436,22 +4456,23 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         name = body.get("name")
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
-        options = {"name": name.strip()}
-        desc = body.get("description")
-        if isinstance(desc, str) and desc:
-            options["description"] = desc
-        return _domain_cli_result(lambda: preset_save_result(options))
+        return _domain_cli_result(
+            lambda: _execute_ui_command(action, {**body, "name": name.strip()})
+        )
     if action == "preset-apply":
         name = body.get("name")
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
-        options = {"name": name.strip(), "also_stop_off": bool(body.get("alsoStopOff"))}
-        return _domain_cli_result(lambda: preset_apply_result(options))
+        return _domain_cli_result(
+            lambda: _execute_ui_command(action, {**body, "name": name.strip()})
+        )
     if action == "preset-delete":
         name = body.get("name")
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
-        return _domain_cli_result(lambda: preset_delete_result({"name": name.strip()}))
+        return _domain_cli_result(
+            lambda: _execute_ui_command(action, {**body, "name": name.strip()})
+        )
     if action == "settings-save":
         try:
             return 0, {

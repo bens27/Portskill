@@ -70,12 +70,33 @@ def _bind_apply_defaults(
     )
 
 
+def _bind_compatibility(
+    handler: Callable[..., dict], options: dict[str, Any]
+) -> dict:
+    names = []
+    for key in ("preset", "name"):
+        value = options.get(key)
+        if value:
+            names.extend(value if isinstance(value, list) else [value])
+    presets = options.get("presets")
+    if isinstance(presets, str) and presets.strip():
+        names.extend(part.strip() for part in presets.split(",") if part.strip())
+    elif isinstance(presets, list):
+        names.extend(presets)
+    return handler({
+        "presets": names,
+        "file": options.get("file"),
+        "include_default_on": bool(options.get("include_default_on")),
+    })
+
+
 _BINDERS = {
     "options": _bind_options,
     "none": _bind_none,
     "project": _bind_project,
     "path": _bind_path,
     "apply_defaults": _bind_apply_defaults,
+    "compatibility": _bind_compatibility,
 }
 
 

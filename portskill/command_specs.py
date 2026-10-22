@@ -446,6 +446,128 @@ DOCTOR_COMMAND = CommandSpec(
 )
 
 
+ENVIRONMENT_EXPORT_COMMAND = CommandSpec(
+    id="environment_export",
+    handler=HandlerRef("portskill.environments", "environment_export_result"),
+    params=(
+        ParamSpec(key="name", cli=CLIParamBinding(flags=("--name",), required=True), mcp=MCPParamBinding(required=True, description="Environment name (e.g. ui-work)", order=0), ui=UIParamBinding(("name",), coercion="environment_name")),
+        ParamSpec(key="out", cli=CLIParamBinding(flags=("--out",), default=None), mcp=MCPParamBinding(description="Optional output path; omit to return JSON in the tool result", order=1)),
+        ParamSpec(key="description", cli=CLIParamBinding(flags=("--description",), default=""), mcp=MCPParamBinding(order=3)),
+        ParamSpec(key="project", kind="array", cli=CLIParamBinding(flags=("--project",), action="append", default=None), mcp=MCPParamBinding(items_type="string", description="Optional project path filters", order=2)),
+        ParamSpec(key="from_preset", cli=CLIParamBinding(flags=("--from-preset",), default=None, help="Export services from a named in-registry preset instead of live ranges")),
+    ),
+    cli=CLICommandBinding(path=("environment", "export"), parent_destinations=("env_command",), parent_required=(True,)),
+    mcp=MCPCommandBinding(name="environment_export", description="Export a portable environment JSON of registered services (portskill environment export).", catalog_position=8),
+    ui=UICommandBinding(actions=("export-environment",), binder="declared_params"),
+)
+
+
+ENVIRONMENT_IMPORT_COMMAND = CommandSpec(
+    id="environment_import",
+    handler=HandlerRef("portskill.environments", "environment_import_result"),
+    params=(
+        ParamSpec(key="file", cli=CLIParamBinding(flags=("--file",), required=True), mcp=MCPParamBinding(required=True, description="Path to environment JSON", order=0), ui=UIParamBinding(("file",), required=True)),
+        ParamSpec(key="apply_defaults", kind="boolean", cli=CLIParamBinding(flags=("--apply-defaults",), action="store_true", help="After import, start services marked default_state=on"), mcp=MCPParamBinding(description="If true, run apply-defaults after import", order=1)),
+        ParamSpec(key="environment", cli=CLIParamBinding(flags=("--environment",), default=None, help="History env scope")),
+    ),
+    cli=CLICommandBinding(path=("environment", "import"), parent_destinations=("env_command",), parent_required=(True,)),
+    mcp=MCPCommandBinding(name="environment_import", description="Import an environment JSON into the registry (portskill environment import). Does not auto-start unless apply_defaults is true.", catalog_position=9),
+    ui=UICommandBinding(actions=("import-environment",), binder="declared_params"),
+)
+
+
+ENVIRONMENT_CHECK_COMMAND = CommandSpec(
+    id="environment_check",
+    handler=HandlerRef("portskill.compatibility", "compatibility_result", "compatibility"),
+    params=(
+        ParamSpec(key="name", kind="array", cli=CLIParamBinding(flags=("--name",), action="append", default=None, help="Preset name(s) to check")),
+        ParamSpec(key="file", cli=CLIParamBinding(flags=("--file",), default=None, help="Environment JSON file to check")),
+        ParamSpec(key="include_default_on", kind="boolean", cli=CLIParamBinding(flags=("--include-default-on",), action="store_true", help="Include live Default On ranges in the check")),
+    ),
+    cli=CLICommandBinding(path=("environment", "check"), parent_destinations=("env_command",), parent_required=(True,)),
+)
+
+
+COMPAT_COMMAND = CommandSpec(
+    id="compat_check",
+    handler=HandlerRef("portskill.compatibility", "compatibility_result"),
+    params=(
+        ParamSpec(key="preset", kind="array", cli=CLIParamBinding(flags=("--preset",), action="append", default=None, help="Preset name (repeatable)")),
+        ParamSpec(key="name", kind="array", cli=CLIParamBinding(flags=("--name",), action="append", default=None, help="Alias of --preset")),
+        ParamSpec(key="presets", kind="array", cli=CLIParamBinding(flags=("--presets",), default=None, help="Comma-separated preset names"), mcp=MCPParamBinding(items_type="string", description="Preset names to check together", order=0), ui=UIParamBinding(("presets", "names"))),
+        ParamSpec(key="file", cli=CLIParamBinding(flags=("--file",), default=None, help="Environment JSON file"), mcp=MCPParamBinding(description="Optional environment JSON path", order=1)),
+        ParamSpec(key="include_default_on", kind="boolean", cli=CLIParamBinding(flags=("--include-default-on",), action="store_true", help="Include live Default On ranges"), mcp=MCPParamBinding(description="Include live Default On ranges", order=2)),
+    ),
+    cli=CLICommandBinding(path=("compat", "check"), help="Report port conflicts (default)", parent_destinations=("compat_command",), parent_required=(False,)),
+    mcp=MCPCommandBinding(name="compat_check", description="Check whether selected presets/environments can share ports safely. Returns conflicts JSON; non-compatible is an error when used as a gate.", catalog_position=14),
+    ui=UICommandBinding(actions=("compat-check",), binder="compat"),
+)
+
+
+PRESET_SAVE_COMMAND = CommandSpec(
+    id="preset_save",
+    handler=HandlerRef("portskill.presets", "preset_save_result"),
+    params=(
+        ParamSpec(key="name", cli=CLIParamBinding(flags=("--name",), required=True), mcp=MCPParamBinding(required=True, order=0), ui=UIParamBinding(("name",), required=True, coercion="stripped_or_none")),
+        ParamSpec(key="description", cli=CLIParamBinding(flags=("--description",), default=""), mcp=MCPParamBinding(order=1), ui=UIParamBinding(("description",))),
+        ParamSpec(key="project", kind="array", cli=CLIParamBinding(flags=("--project",), action="append", default=None), mcp=MCPParamBinding(items_type="string", description="Optional project path filters when snapshotting live ranges", order=2)),
+        ParamSpec(key="from_file", cli=CLIParamBinding(flags=("--from-file",), default=None, help="Load services from an environment JSON file instead of live ranges"), mcp=MCPParamBinding(description="Optional environment JSON path", order=3)),
+        ParamSpec(key="empty", kind="boolean", cli=CLIParamBinding(flags=("--empty",), action="store_true", help="Create an empty environment (no services)")),
+        ParamSpec(key="environment", cli=CLIParamBinding(flags=("--environment",), default=None, help="History env scope")),
+    ),
+    cli=CLICommandBinding(path=("preset", "save"), parent_destinations=("preset_command",), parent_required=(True,)),
+    mcp=MCPCommandBinding(name="preset_save", description="Save a named preset into the registry (snapshot live ranges or --from-file environment JSON).", catalog_position=15),
+    ui=UICommandBinding(actions=("preset-save",), binder="preset_save"),
+)
+
+
+PRESET_LIST_COMMAND = CommandSpec(
+    id="preset_list",
+    handler=HandlerRef("portskill.presets", "preset_list_result", "none"),
+    cli=CLICommandBinding(path=("preset", "list"), parent_destinations=("preset_command",), parent_required=(True,)),
+    mcp=MCPCommandBinding(name="preset_list", description="List named presets stored in the registry.", catalog_position=16),
+)
+
+
+PRESET_SHOW_COMMAND = CommandSpec(
+    id="preset_show",
+    handler=HandlerRef("portskill.presets", "preset_show_result"),
+    params=(ParamSpec(key="name", cli=CLIParamBinding(flags=("--name",), required=True)),),
+    cli=CLICommandBinding(path=("preset", "show"), parent_destinations=("preset_command",), parent_required=(True,)),
+)
+
+
+PRESET_DELETE_COMMAND = CommandSpec(
+    id="preset_delete",
+    handler=HandlerRef("portskill.presets", "preset_delete_result"),
+    params=(ParamSpec(key="name", cli=CLIParamBinding(flags=("--name",), required=True), mcp=MCPParamBinding(required=True), ui=UIParamBinding(("name",), required=True, coercion="stripped_or_none")),),
+    cli=CLICommandBinding(path=("preset", "delete"), parent_destinations=("preset_command",), parent_required=(True,)),
+    mcp=MCPCommandBinding(name="preset_delete", description="Delete a named preset from the registry.", catalog_position=18),
+    ui=UICommandBinding(actions=("preset-delete",), binder="declared_params"),
+)
+
+
+PRESET_APPLY_COMMAND = CommandSpec(
+    id="preset_apply",
+    handler=HandlerRef("portskill.presets", "preset_apply_result"),
+    params=(
+        ParamSpec(key="name", cli=CLIParamBinding(flags=("--name",), required=True), mcp=MCPParamBinding(required=True, order=0), ui=UIParamBinding(("name",), required=True, coercion="stripped_or_none")),
+        ParamSpec(key="also_stop_off", kind="boolean", cli=CLIParamBinding(flags=("--also-stop-off",), action="store_true", help="Also stop running services whose default_state is off"), mcp=MCPParamBinding(order=1), ui=UIParamBinding(("alsoStopOff",), coercion="boolean")),
+    ),
+    cli=CLICommandBinding(path=("preset", "apply"), parent_destinations=("preset_command",), parent_required=(True,)),
+    mcp=MCPCommandBinding(name="preset_apply", description="Apply a named preset (import services + apply-defaults). Optional also_stop_off.", catalog_position=17),
+    ui=UICommandBinding(actions=("preset-apply",), binder="declared_params"),
+)
+
+
+PRESET_CHECK_COMMAND = CommandSpec(
+    id="preset_check",
+    handler=HandlerRef("portskill.presets", "preset_check_result"),
+    params=(ParamSpec(key="name", kind="array", cli=CLIParamBinding(flags=("--name",), action="append", required=True, help="Preset name (repeatable) to check for port conflicts")),),
+    cli=CLICommandBinding(path=("preset", "check"), parent_destinations=("preset_command",), parent_required=(True,)),
+)
+
+
 SET_DEFAULT_COMMAND = CommandSpec(
     id="set_default",
     handler=HandlerRef("portskill.defaults", "set_default_result"),
@@ -910,11 +1032,21 @@ COMMAND_SPECS = (
     STATUS_COMMAND,
     PATH_COMMAND,
     DOCTOR_COMMAND,
+    ENVIRONMENT_EXPORT_COMMAND,
+    ENVIRONMENT_IMPORT_COMMAND,
     SET_DEFAULT_COMMAND,
     SET_DEFAULTS_FROM_CURRENT_COMMAND,
     APPLY_DEFAULTS_COMMAND,
     DEACTIVATE_COMMAND,
     EXIT_HOUSE_COMMAND,
+    COMPAT_COMMAND,
+    PRESET_SAVE_COMMAND,
+    PRESET_LIST_COMMAND,
+    PRESET_APPLY_COMMAND,
+    PRESET_DELETE_COMMAND,
+    ENVIRONMENT_CHECK_COMMAND,
+    PRESET_SHOW_COMMAND,
+    PRESET_CHECK_COMMAND,
     SETTINGS_GET_COMMAND,
     SETTINGS_SET_COMMAND,
 )

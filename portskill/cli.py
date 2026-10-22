@@ -13,7 +13,6 @@ from .auth import (
 from .apply_defaults import apply_defaults_result as domain_apply_defaults_result
 from .compatibility import (
     compat_report as domain_compat_report,
-    compatibility_result as domain_compatibility_result,
     enforce_compatibility as domain_enforce_compatibility,
 )
 from .command_specs import (
@@ -24,8 +23,18 @@ from .command_specs import (
     CommandSpec,
     DEACTIVATE_COMMAND,
     DOCTOR_COMMAND,
+    ENVIRONMENT_CHECK_COMMAND,
+    ENVIRONMENT_EXPORT_COMMAND,
+    ENVIRONMENT_IMPORT_COMMAND,
     MISSING,
     PATH_COMMAND,
+    PRESET_APPLY_COMMAND,
+    PRESET_CHECK_COMMAND,
+    PRESET_DELETE_COMMAND,
+    PRESET_LIST_COMMAND,
+    PRESET_SAVE_COMMAND,
+    PRESET_SHOW_COMMAND,
+    COMPAT_COMMAND,
     RELEASE_COMMAND,
     SET_DEFAULT_COMMAND,
     SET_DEFAULTS_FROM_CURRENT_COMMAND,
@@ -66,8 +75,6 @@ from .network import (
 )
 from .environments import (
     build_environment_payload as domain_build_environment_payload,
-    environment_export_result,
-    environment_import_result,
     environment_payload_from_preset as domain_environment_payload_from_preset,
     import_services_into_registry as domain_import_services_into_registry,
     load_environment_file as domain_load_environment_file,
@@ -187,9 +194,6 @@ from .presets import (
     preset_apply_for_launch,
     preset_apply_result,
     preset_check_result,
-    preset_delete_result,
-    preset_list_result,
-    preset_save_result,
     preset_show_result,
 )
 from .process_commands import (
@@ -541,14 +545,7 @@ def environment_payload_from_preset(registry, preset_name, export_name=None, des
 
 
 def cmd_environment_export(args):
-    options = {
-        "name": args.name,
-        "description": getattr(args, "description", None),
-        "from_preset": getattr(args, "from_preset", None),
-        "project": list(args.project) if args.project else None,
-        "out": args.out,
-    }
-    payload = environment_export_result(options)
+    payload = execute_command(ENVIRONMENT_EXPORT_COMMAND, vars(args))
     if args.out:
         emit(payload)
     else:
@@ -565,11 +562,7 @@ def import_services_into_registry(registry, services):
 
 
 def cmd_environment_import(args):
-    emit(environment_import_result({
-        "file": args.file,
-        "environment": getattr(args, "environment", None),
-        "apply_defaults": bool(args.apply_defaults),
-    }))
+    emit(execute_command(ENVIRONMENT_IMPORT_COMMAND, vars(args)))
     return
 
 
@@ -636,29 +629,22 @@ def mutate_registry_meta(mutator):
 
 
 def cmd_preset_save(args):
-    emit(preset_save_result({
-        "name": args.name,
-        "description": getattr(args, "description", "") or "",
-        "project": list(args.project) if args.project else None,
-        "from_file": getattr(args, "from_file", None),
-        "empty": bool(getattr(args, "empty", False)),
-        "environment": getattr(args, "environment", None),
-    }))
+    emit(execute_command(PRESET_SAVE_COMMAND, vars(args)))
     return
 
 
 def cmd_preset_list(args):
-    emit(preset_list_result())
+    emit(execute_command(PRESET_LIST_COMMAND, vars(args)))
     return
 
 
 def cmd_preset_show(args):
-    emit(preset_show_result({"name": args.name}))
+    emit(execute_command(PRESET_SHOW_COMMAND, vars(args)))
     return
 
 
 def cmd_preset_delete(args):
-    emit(preset_delete_result({"name": args.name}))
+    emit(execute_command(PRESET_DELETE_COMMAND, vars(args)))
     return
 
 
@@ -667,12 +653,11 @@ def run_preset_apply(name, also_stop_off=False):
 
 
 def cmd_preset_apply(args):
-    also_stop_off = bool(getattr(args, "also_stop_off", False))
-    emit(run_preset_apply(args.name, also_stop_off=also_stop_off))
+    emit(execute_command(PRESET_APPLY_COMMAND, vars(args)))
 
 
 def cmd_preset_check(args):
-    report = preset_check_result({"name": list(args.name) if getattr(args, "name", None) else []})
+    report = execute_command(PRESET_CHECK_COMMAND, vars(args))
     emit(report)
     if not report.get("compatible"):
         raise SystemExit(2)
@@ -730,11 +715,7 @@ def cmd_schedule(args):
 
 
 def cmd_environment_check(args):
-    report = domain_compatibility_result({
-        "presets": list(getattr(args, "name", None) or []),
-        "file": getattr(args, "file", None),
-        "include_default_on": bool(getattr(args, "include_default_on", False)),
-    })
+    report = execute_command(ENVIRONMENT_CHECK_COMMAND, vars(args))
     emit(report)
     if not report.get("compatible"):
         raise SystemExit(2)
@@ -754,20 +735,19 @@ def cmd_environment(args):
 def cmd_compat(args):
     """compat check — port-conflict report for selected presets/environments."""
     names = []
-    if getattr(args, "preset", None):
-        names.extend(list(args.preset))
-    if getattr(args, "name", None):
-        names.extend(list(args.name))
+    for key in ("preset", "name"):
+        value = getattr(args, key, None)
+        if value:
+            names.extend(value if isinstance(value, list) else [value])
     presets_csv = getattr(args, "presets", None)
     if isinstance(presets_csv, str) and presets_csv.strip():
-        names.extend([p.strip() for p in presets_csv.split(",") if p.strip()])
-    file_path = getattr(args, "file", None)
-    include_default_on = bool(getattr(args, "include_default_on", False))
-
-    report = domain_compatibility_result({
+        names.extend(
+            part.strip() for part in presets_csv.split(",") if part.strip()
+        )
+    report = execute_command(COMPAT_COMMAND, {
         "presets": names,
-        "file": file_path,
-        "include_default_on": include_default_on,
+        "file": getattr(args, "file", None),
+        "include_default_on": bool(getattr(args, "include_default_on", False)),
     })
     emit(report)
     if not report.get("compatible"):
@@ -946,38 +926,8 @@ def cmd_discover(args):
     fail("invalid_args", "discover requires ports|import")
 
 
-def _add_spec_cli_parser(subparsers, spec: CommandSpec, *, handler):
-    binding = spec.cli
-    if binding is None or not binding.path:
-        raise ValueError(f"command has no CLI path: {spec.id}")
-    group_cache = getattr(subparsers, "_portskill_spec_groups", None)
-    if group_cache is None:
-        group_cache = {}
-        setattr(subparsers, "_portskill_spec_groups", group_cache)
-    command_subparsers = subparsers
-    for depth, parent_name in enumerate(binding.path[:-1]):
-        prefix = binding.path[: depth + 1]
-        cached = group_cache.get(prefix)
-        if cached is not None:
-            command_subparsers = cached
-            continue
-        parent_parser = command_subparsers.add_parser(parent_name)
-        destination = binding.parent_destinations[depth]
-        required = binding.parent_required[depth]
-        command_subparsers = parent_parser.add_subparsers(
-            dest=destination, required=required
-        )
-        group_cache[prefix] = command_subparsers
-    parser_kwargs = {}
-    if binding.aliases:
-        parser_kwargs["aliases"] = list(binding.aliases)
-    if binding.help is not MISSING:
-        parser_kwargs["help"] = binding.help
-    if binding.description is not MISSING:
-        parser_kwargs["description"] = binding.description
-    command_parser = command_subparsers.add_parser(
-        binding.path[-1], **parser_kwargs
-    )
+def _add_spec_cli_arguments(command_parser, spec: CommandSpec):
+    """Add a command spec's declared arguments to an existing parser."""
     ordered_parameters = sorted(
         enumerate(spec.params),
         key=lambda item: (
@@ -1010,6 +960,42 @@ def _add_spec_cli_parser(subparsers, spec: CommandSpec, *, handler):
         if cli_binding.choices is not MISSING:
             argument_kwargs["choices"] = list(cli_binding.choices)
         command_parser.add_argument(*argument_names, **argument_kwargs)
+    return command_parser
+
+
+def _add_spec_cli_parser(subparsers, spec: CommandSpec, *, handler):
+    binding = spec.cli
+    if binding is None or not binding.path:
+        raise ValueError(f"command has no CLI path: {spec.id}")
+    group_cache = getattr(subparsers, "_portskill_spec_groups", None)
+    if group_cache is None:
+        group_cache = {}
+        setattr(subparsers, "_portskill_spec_groups", group_cache)
+    command_subparsers = subparsers
+    for depth, parent_name in enumerate(binding.path[:-1]):
+        prefix = binding.path[: depth + 1]
+        cached = group_cache.get(prefix)
+        if cached is not None:
+            command_subparsers = cached
+            continue
+        parent_parser = command_subparsers.add_parser(parent_name)
+        destination = binding.parent_destinations[depth]
+        required = binding.parent_required[depth]
+        command_subparsers = parent_parser.add_subparsers(
+            dest=destination, required=required
+        )
+        group_cache[prefix] = command_subparsers
+    parser_kwargs = {}
+    if binding.aliases:
+        parser_kwargs["aliases"] = list(binding.aliases)
+    if binding.help is not MISSING:
+        parser_kwargs["help"] = binding.help
+    if binding.description is not MISSING:
+        parser_kwargs["description"] = binding.description
+    command_parser = command_subparsers.add_parser(
+        binding.path[-1], **parser_kwargs
+    )
+    _add_spec_cli_arguments(command_parser, spec)
     command_parser.set_defaults(func=handler)
     return command_parser
 
@@ -1103,96 +1089,19 @@ def parser():
     compat_sub = compat.add_subparsers(dest="compat_command")
     compat_check = compat_sub.add_parser("check", help="Report port conflicts (default)")
     for p in (compat, compat_check):
-        p.add_argument("--preset", action="append", default=None, help="Preset name (repeatable)")
-        p.add_argument("--name", action="append", default=None, help="Alias of --preset")
-        p.add_argument("--presets", default=None, help="Comma-separated preset names")
-        p.add_argument("--file", default=None, help="Environment JSON file")
-        p.add_argument(
-            "--include-default-on",
-            action="store_true",
-            help="Include live Default On ranges",
-        )
+        _add_spec_cli_arguments(p, COMPAT_COMMAND)
         p.set_defaults(func=cmd_compat)
 
-    environment = subparsers.add_parser("environment")
-    env_sub = environment.add_subparsers(dest="env_command", required=True)
+    _add_spec_cli_parser(subparsers, ENVIRONMENT_EXPORT_COMMAND, handler=cmd_environment)
+    _add_spec_cli_parser(subparsers, ENVIRONMENT_IMPORT_COMMAND, handler=cmd_environment)
+    _add_spec_cli_parser(subparsers, ENVIRONMENT_CHECK_COMMAND, handler=cmd_environment)
 
-    env_export = env_sub.add_parser("export")
-    env_export.add_argument("--name", required=True)
-    env_export.add_argument("--out", default=None)
-    env_export.add_argument("--description", default="")
-    env_export.add_argument("--project", action="append", default=None)
-    env_export.add_argument(
-        "--from-preset",
-        default=None,
-        help="Export services from a named in-registry preset instead of live ranges",
-    )
-    env_export.set_defaults(func=cmd_environment)
-
-    env_import = env_sub.add_parser("import")
-    env_import.add_argument("--file", required=True)
-    env_import.add_argument(
-        "--apply-defaults",
-        action="store_true",
-        help="After import, start services marked default_state=on",
-    )
-    env_import.add_argument("--environment", default=None, help="History env scope")
-    env_import.set_defaults(func=cmd_environment)
-
-    env_check = env_sub.add_parser("check")
-    env_check.add_argument("--name", action="append", default=None, help="Preset name(s) to check")
-    env_check.add_argument("--file", default=None, help="Environment JSON file to check")
-    env_check.add_argument(
-        "--include-default-on",
-        action="store_true",
-        help="Include live Default On ranges in the check",
-    )
-    env_check.set_defaults(func=cmd_environment)
-
-    preset = subparsers.add_parser("preset")
-    preset_sub = preset.add_subparsers(dest="preset_command", required=True)
-
-    preset_save = preset_sub.add_parser("save")
-    preset_save.add_argument("--name", required=True)
-    preset_save.add_argument("--description", default="")
-    preset_save.add_argument("--project", action="append", default=None)
-    preset_save.add_argument(
-        "--from-file",
-        default=None,
-        help="Load services from an environment JSON file instead of live ranges",
-    )
-    preset_save.add_argument("--empty", action="store_true", help="Create an empty environment (no services)")
-    preset_save.add_argument("--environment", default=None, help="History env scope")
-    preset_save.set_defaults(func=cmd_preset)
-
-    preset_list = preset_sub.add_parser("list")
-    preset_list.set_defaults(func=cmd_preset)
-
-    preset_show = preset_sub.add_parser("show")
-    preset_show.add_argument("--name", required=True)
-    preset_show.set_defaults(func=cmd_preset)
-
-    preset_delete = preset_sub.add_parser("delete")
-    preset_delete.add_argument("--name", required=True)
-    preset_delete.set_defaults(func=cmd_preset)
-
-    preset_apply = preset_sub.add_parser("apply")
-    preset_apply.add_argument("--name", required=True)
-    preset_apply.add_argument(
-        "--also-stop-off",
-        action="store_true",
-        help="Also stop running services whose default_state is off",
-    )
-    preset_apply.set_defaults(func=cmd_preset)
-
-    preset_check = preset_sub.add_parser("check")
-    preset_check.add_argument(
-        "--name",
-        action="append",
-        required=True,
-        help="Preset name (repeatable) to check for port conflicts",
-    )
-    preset_check.set_defaults(func=cmd_preset)
+    _add_spec_cli_parser(subparsers, PRESET_SAVE_COMMAND, handler=cmd_preset)
+    _add_spec_cli_parser(subparsers, PRESET_LIST_COMMAND, handler=cmd_preset)
+    _add_spec_cli_parser(subparsers, PRESET_SHOW_COMMAND, handler=cmd_preset)
+    _add_spec_cli_parser(subparsers, PRESET_DELETE_COMMAND, handler=cmd_preset)
+    _add_spec_cli_parser(subparsers, PRESET_APPLY_COMMAND, handler=cmd_preset)
+    _add_spec_cli_parser(subparsers, PRESET_CHECK_COMMAND, handler=cmd_preset)
 
     _add_spec_cli_parser(subparsers, SETTINGS_GET_COMMAND, handler=cmd_settings)
     _add_spec_cli_parser(subparsers, SETTINGS_SET_COMMAND, handler=cmd_settings)

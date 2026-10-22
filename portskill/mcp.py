@@ -17,8 +17,15 @@ from .command_specs import (
     APPLY_DEFAULTS_COMMAND,
     DEACTIVATE_COMMAND,
     DOCTOR_COMMAND,
+    ENVIRONMENT_EXPORT_COMMAND,
+    ENVIRONMENT_IMPORT_COMMAND,
     EXIT_HOUSE_COMMAND,
     PATH_COMMAND,
+    PRESET_APPLY_COMMAND,
+    PRESET_DELETE_COMMAND,
+    PRESET_LIST_COMMAND,
+    PRESET_SAVE_COMMAND,
+    COMPAT_COMMAND,
     RELEASE_COMMAND,
     SET_DEFAULT_COMMAND,
     SETTINGS_GET_COMMAND,
@@ -53,19 +60,11 @@ from .registry import (
 from .domain import DomainError
 from .port_discovery import discover_import_result, discover_ports_result
 from .tailscale_commands import set_tailnet_result, tailscale_login_result, tailscale_status_result
-from .compatibility import compatibility_result
 from .apply_defaults import apply_defaults_result  # noqa: F401 - compatibility reexport
 from .defaults import set_default_result  # noqa: F401 - compatibility reexport
 from .deactivate import deactivate_result  # noqa: F401 - compatibility reexport
 from .doctor import doctor_result  # noqa: F401 - compatibility reexport
-from .environments import environment_export_result, environment_import_result
 from .history import history_list_result, history_reset_result, history_restore_result
-from .presets import (
-    preset_apply_result,
-    preset_delete_result,
-    preset_list_result,
-    preset_save_result,
-)
 from .settings import settings_get, settings_set  # noqa: F401 - compatibility reexports
 from .status import status_result  # noqa: F401 - compatibility reexport
 from .registry_mutations import (  # noqa: F401 - compatibility reexports
@@ -616,7 +615,7 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "isError": False,
         }
     if name == "environment_export":
-        exported = environment_export_result(args)
+        exported = execute_command(ENVIRONMENT_EXPORT_COMMAND, args)
         body = exported if args.get("out") else {"status": "ok", "environment": exported}
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
@@ -624,7 +623,7 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "isError": False,
         }
     if name == "environment_import":
-        body = environment_import_result(args)
+        body = execute_command(ENVIRONMENT_IMPORT_COMMAND, args)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,
@@ -653,7 +652,7 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "isError": False,
         }
     if name == "compat_check":
-        body = compatibility_result(args)
+        body = execute_command(COMPAT_COMMAND, args)
         if not body.get("compatible"):
             body["ok"] = False
         return {
@@ -663,12 +662,12 @@ def _call_tool(name: str, arguments: dict) -> dict:
         }
     if name in ("preset_save", "preset_list", "preset_apply", "preset_delete"):
         operation = {
-            "preset_save": preset_save_result,
-            "preset_list": preset_list_result,
-            "preset_apply": preset_apply_result,
-            "preset_delete": preset_delete_result,
+            "preset_save": PRESET_SAVE_COMMAND,
+            "preset_list": PRESET_LIST_COMMAND,
+            "preset_apply": PRESET_APPLY_COMMAND,
+            "preset_delete": PRESET_DELETE_COMMAND,
         }[name]
-        body = operation(args)
+        body = execute_command(operation, args)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,

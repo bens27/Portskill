@@ -8,11 +8,18 @@ from .command_specs import (
     COMMAND_SPECS,
     DEACTIVATE_COMMAND,
     DOCTOR_COMMAND,
+    ENVIRONMENT_EXPORT_COMMAND,
+    ENVIRONMENT_IMPORT_COMMAND,
     EXIT_HOUSE_COMMAND,
     MISSING,
     PATH_COMMAND,
     PORTSKILL_TOOL_DESCRIPTION,
     PORTSKILL_TOOL_PITCH,
+    PRESET_APPLY_COMMAND,
+    PRESET_DELETE_COMMAND,
+    PRESET_LIST_COMMAND,
+    PRESET_SAVE_COMMAND,
+    COMPAT_COMMAND,
     RELEASE_COMMAND,
     SET_DEFAULT_COMMAND,
     SETTINGS_GET_COMMAND,
@@ -107,106 +114,17 @@ TOOL_DEFS = [
     _mcp_tool_definition(STATUS_COMMAND),
     _mcp_tool_definition(PATH_COMMAND),
     _mcp_tool_definition(DOCTOR_COMMAND),
-    {
-        "name": "environment_export",
-        "description": "Export a portable environment JSON of registered services (portskill environment export).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Environment name (e.g. ui-work)"},
-                "out": {"type": "string", "description": "Optional output path; omit to return JSON in the tool result"},
-                "project": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional project path filters",
-                },
-                "description": {"type": "string"},
-            },
-            "required": ["name"],
-        },
-    },
-    {
-        "name": "environment_import",
-        "description": "Import an environment JSON into the registry (portskill environment import). Does not auto-start unless apply_defaults is true.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "file": {"type": "string", "description": "Path to environment JSON"},
-                "apply_defaults": {
-                    "type": "boolean",
-                    "description": "If true, run apply-defaults after import",
-                },
-            },
-            "required": ["file"],
-        },
-    },
+    _mcp_tool_definition(ENVIRONMENT_EXPORT_COMMAND),
+    _mcp_tool_definition(ENVIRONMENT_IMPORT_COMMAND),
     _mcp_tool_definition(SET_DEFAULT_COMMAND),
     _mcp_tool_definition(APPLY_DEFAULTS_COMMAND),
     _mcp_tool_definition(DEACTIVATE_COMMAND),
     _mcp_tool_definition(EXIT_HOUSE_COMMAND),
-    {
-        "name": "compat_check",
-        "description": "Check whether selected presets/environments can share ports safely. Returns conflicts JSON; non-compatible is an error when used as a gate.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "presets": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Preset names to check together",
-                },
-                "file": {"type": "string", "description": "Optional environment JSON path"},
-                "include_default_on": {
-                    "type": "boolean",
-                    "description": "Include live Default On ranges",
-                },
-            },
-        },
-    },
-    {
-        "name": "preset_save",
-        "description": "Save a named preset into the registry (snapshot live ranges or --from-file environment JSON).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "description": {"type": "string"},
-                "project": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional project path filters when snapshotting live ranges",
-                },
-                "from_file": {"type": "string", "description": "Optional environment JSON path"},
-            },
-            "required": ["name"],
-        },
-    },
-    {
-        "name": "preset_list",
-        "description": "List named presets stored in the registry.",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "preset_apply",
-        "description": "Apply a named preset (import services + apply-defaults). Optional also_stop_off.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "also_stop_off": {"type": "boolean"},
-            },
-            "required": ["name"],
-        },
-    },
-    {
-        "name": "preset_delete",
-        "description": "Delete a named preset from the registry.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"name": {"type": "string"}},
-            "required": ["name"],
-        },
-    },
+    _mcp_tool_definition(COMPAT_COMMAND),
+    _mcp_tool_definition(PRESET_SAVE_COMMAND),
+    _mcp_tool_definition(PRESET_LIST_COMMAND),
+    _mcp_tool_definition(PRESET_APPLY_COMMAND),
+    _mcp_tool_definition(PRESET_DELETE_COMMAND),
     _mcp_tool_definition(SETTINGS_GET_COMMAND),
     _mcp_tool_definition(SETTINGS_SET_COMMAND),
     {
