@@ -4094,6 +4094,32 @@ def _run_domain(operation) -> tuple[int, object, str]:
         return 1, None, str(exc) or exc.__class__.__name__
 
 
+class _SettingsArgvParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise DomainError("invalid_args", message)
+
+
+def _settings_set_options(*pairs: tuple[str, str]) -> dict:
+    """Build settings_set options as `settings set FLAG VALUE ...` argparse would.
+
+    The HTTP actions used to pass these values through the CLI parser, which
+    rejects option-like values (``--x``, ``-x``, ``--``) with
+    ``argument FLAG: expected one argument`` before any write. A one-flag
+    parser per value reproduces that rule and its message exactly.
+    """
+    options: dict = {}
+    for flag, value in pairs:
+        parser = _SettingsArgvParser(prog="portskill-cli settings set", add_help=False)
+        parser.add_argument(flag, action="append" if flag == "--mcp-tool" else "store")
+        parsed = vars(parser.parse_args([flag, value]))
+        for key, parsed_value in parsed.items():
+            if key == "mcp_tool":
+                options.setdefault(key, []).extend(parsed_value)
+            else:
+                options[key] = parsed_value
+    return options
+
+
 def _domain_cli_result(operation) -> tuple[int, dict]:
     """Run an in-process domain action with the legacy HTTP result envelope."""
     try:
@@ -4350,15 +4376,14 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         }
         import json as _json
 
-        argv = [
-            "settings",
-            "set",
-            "--mcp-user-command-upsert",
-            _json.dumps(cmd),
-            "--mcp-tool",
-            f"{name}=on",
-        ]
-        code, payload, stdout = run_cli(argv)
+        code, payload, stdout = _run_domain(
+            lambda: settings_set(
+                _settings_set_options(
+                    ("--mcp-user-command-upsert", _json.dumps(cmd)),
+                    ("--mcp-tool", f"{name}=on"),
+                )
+            )
+        )
         return _cli_result(code, payload, stdout)
 
     if action == "mcp-user-command-delete":
@@ -4366,8 +4391,11 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
         # CLI delete also drops orphan settings.mcp_tools[name]
-        argv = ["settings", "set", "--mcp-user-command-delete", name.strip()]
-        code, payload, stdout = run_cli(argv)
+        code, payload, stdout = _run_domain(
+            lambda: settings_set(
+                _settings_set_options(("--mcp-user-command-delete", name.strip()))
+            )
+        )
         return _cli_result(code, payload, stdout)
 
     if action == "mcp-tool-set":
@@ -4378,13 +4406,10 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         if enabled is None:
             return 400, {"ok": False, "message": "expected enabled bool"}
         enabled = parse_bool(enabled)
-        argv = [
-            "settings",
-            "set",
-            "--mcp-tool",
-            f"{name.strip()}={'on' if enabled else 'off'}",
-        ]
-        code, payload, stdout = run_cli(argv)
+        tool_arg = f"{name.strip()}={'on' if enabled else 'off'}"
+        code, payload, stdout = _run_domain(
+            lambda: settings_set(_settings_set_options(("--mcp-tool", tool_arg)))
+        )
         return _cli_result(code, payload, stdout)
 
     if action == "handoff-set-enabled":
@@ -4540,15 +4565,17 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         name = body.get("name")
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
-        argv = ["settings", "set", "--open-tab", name.strip()]
-        code, payload, stdout = run_cli(argv)
+        code, payload, stdout = _run_domain(
+            lambda: settings_set(_settings_set_options(("--open-tab", name.strip())))
+        )
         return _cli_result(code, payload, stdout)
     if action == "close-environment-tab":
         name = body.get("name")
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
-        argv = ["settings", "set", "--close-tab", name.strip()]
-        code, payload, stdout = run_cli(argv)
+        code, payload, stdout = _run_domain(
+            lambda: settings_set(_settings_set_options(("--close-tab", name.strip())))
+        )
         return _cli_result(code, payload, stdout)
     if action == "discover-ports":
         code, payload, stdout = _run_domain(discover_ports_result)
