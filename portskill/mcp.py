@@ -37,6 +37,7 @@ from .domain import DomainError
 from .doctor import doctor_result
 from .settings import settings_get, settings_set
 from .status import status_result
+from .registry_mutations import activate_result, allocate_result, release_result
 
 # Named settings.mcp_tools profiles. Apply writes the existing enable map
 # (missing key = enabled). Default is full so existing installs stay unchanged
@@ -579,6 +580,20 @@ def _call_tool(name: str, arguments: dict) -> dict:
         }
     if name == "settings_set":
         body = settings_set(args)
+        return {
+            "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
+            "structuredContent": body,
+            "isError": False,
+        }
+    if name in ("allocate", "activate", "release"):
+        from .cli import REGISTRY_MUTATION_RUNTIME
+
+        operation = {
+            "allocate": allocate_result,
+            "activate": activate_result,
+            "release": release_result,
+        }[name]
+        body = operation(args, REGISTRY_MUTATION_RUNTIME)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,

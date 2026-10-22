@@ -677,6 +677,7 @@ class PasskeyBootstrapTests(unittest.TestCase):
 class FunnelListenRefuseTests(unittest.TestCase):
     def test_funnel_of_listen_port_refused_serve_allowed(self) -> None:
         from portskill import cli
+        from portskill.domain import DomainError
 
         with IsolatedConfig() as iso:
             iso.write_listen({
@@ -689,10 +690,11 @@ class FunnelListenRefuseTests(unittest.TestCase):
             })
             buf = StringIO()
             with patch("sys.stdout", buf):
-                with self.assertRaises(SystemExit) as ctx:
+                with self.assertRaises(DomainError) as ctx:
                     cli.run_tailnet("funnel", 20050, off=False)
-            self.assertEqual(ctx.exception.code, 2)
-            payload = json.loads(buf.getvalue())
+            self.assertEqual(ctx.exception.exit_code, 2)
+            self.assertEqual(buf.getvalue(), "")
+            payload = ctx.exception.as_dict()
             self.assertEqual(payload.get("reason"), "funnel_listen_refused")
             self.assertIn("listen", (payload.get("message") or "").lower())
 

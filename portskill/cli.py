@@ -85,6 +85,12 @@ from .registry_domain import (
     resolve_range_url,
     workspace_draft_is_modified,
 )
+from .registry_mutations import (
+    RegistryMutationRuntime,
+    activate_result,
+    allocate_result,
+    release_result,
+)
 from .service import launch_service, script_is_placeholder, service_launch
 from .status import (
     enrich_range as enrich_range_for_status,
@@ -138,7 +144,7 @@ def local_registry_path(project):
 def require_project_directory(project):
     project_dir = pathlib.Path(project)
     if not project_dir.exists() or not project_dir.is_dir():
-        fail("project_not_found", f"project path does not exist: {project}")
+        raise DomainError("project_not_found", f"project path does not exist: {project}")
 
 
 def fail(reason, message=None, exit_code=2, **extra):
@@ -351,7 +357,7 @@ def build_schedule_windows(registry, focus=None):
 
 def refuse_remote_process(registry, item, action="start"):
     mid = item.get("machine_id") or item.get("machine") or item.get("host_id") or "local"
-    fail(
+    raise DomainError(
         "remote_machine",
         f"Cannot {action} processes for remote machine {mid} from this Mac. "
         "Remotes are registry entries + links only.",
@@ -778,7 +784,9 @@ def locked_registry(mutator):
             after_write=write_local_project_files,
         )
     except CorruptRegistryError as exc:
-        fail("corrupt_registry", str(exc))
+        raise DomainError("corrupt_registry", str(exc)) from exc
+    except (OSError, UnicodeError) as exc:
+        raise DomainError("registry_unavailable", str(exc), exit_code=1) from exc
 
 
 def write_local_project_files(registry, changed_projects):
@@ -1154,7 +1162,7 @@ def find_free_range(registry, count):
     pool_start = pool["start"]
     pool_end = pool["end"]
     if count <= 0:
-        fail("invalid_args", "--count must be a positive integer")
+        raise DomainError("invalid_args", "--count must be a positive integer")
     if count > (pool_end - pool_start + 1):
         return None
     reserved = sorted((r["start"], r["end"]) for r in non_released_ranges(registry))
@@ -1234,7 +1242,9 @@ def run_tailnet(mode, port, off=False):
     if mode == "none":
         return
     if mode == "funnel" and not off and funnel_of_listen_port(port):
-        fail("funnel_listen_refused", refuse_funnel_listen_message(port))
+        raise DomainError(
+            "funnel_listen_refused", refuse_funnel_listen_message(port)
+        )
     command = tailscale_command(mode, port, off=off)
     try:
         result = subprocess.run(
@@ -1246,9 +1256,13 @@ def run_tailnet(mode, port, off=False):
             timeout=20,
         )
     except FileNotFoundError:
-        fail("tailscale_missing", "Tailscale is not installed", hint="Install Tailscale or set PORTSKILL_TAILSCALE_BIN")
+        raise DomainError(
+            "tailscale_missing",
+            "Tailscale is not installed",
+            hint="Install Tailscale or set PORTSKILL_TAILSCALE_BIN",
+        )
     if result.returncode != 0:
-        fail(
+        raise DomainError(
             "tailnet_command_failed",
             f"tailscale command exited with {result.returncode}",
             stdout=(result.stdout or "")[:500],
@@ -1262,14 +1276,14 @@ def ensure_tailscale_authenticated(mode):
         return probe_tailscale_status()
     status = probe_tailscale_status()
     if status.get("state") == "binary_missing":
-        fail(
+        raise DomainError(
             "tailscale_bin_missing",
             status.get("message") or "Tailscale binary not found",
             tailscale=status,
             hint="Install Tailscale or set PORTSKILL_TAILSCALE_BIN",
         )
     if not status.get("logged_in"):
-        fail(
+        raise DomainError(
             "tailscale_auth_required",
             "Tailscale Serve requires login. Use Browser Login in the UI, "
             "or run `portskill-cli tailscale login`.",
@@ -1437,8 +1451,9 @@ def activate_item(item, project, range_id, tailnet_arg):
     recorded_mode = item.get("tailnet", {}).get("mode")
     mode = tailnet_arg if tailnet_arg is not None else recorded_mode
     if mode is None:
-        emit(needs_tailnet(project, range_id))
-        raise SystemExit(3)
+        raise DomainError(
+            "needs_input", exit_code=3, payload=needs_tailnet(project, range_id)
+        )
     item.setdefault("tailnet", {"mode": None, "port": None, "configured_at": None})
     item["tailnet"]["mode"] = mode
     now = utc_now()
@@ -1482,11 +1497,11 @@ def _normalize_allocation_target(registry, machine_id="local", host=None, scheme
     if host is None or (isinstance(host, str) and not host.strip()):
         host = None
     elif not isinstance(host, str):
-        fail("invalid_host", "host must be a hostname or IP address")
+        raise DomainError("invalid_host", "host must be a hostname or IP address")
     else:
         host = host.strip()
         if any(char.isspace() for char in host) or any(char in host for char in "/?#@"):
-            fail(
+            raise DomainError(
                 "invalid_host",
                 "host must be a hostname or IP address without scheme, path, query, or fragment",
             )
@@ -1494,14 +1509,14 @@ def _normalize_allocation_target(registry, machine_id="local", host=None, scheme
     if scheme is None or (isinstance(scheme, str) and not scheme.strip()):
         scheme = None
     elif not isinstance(scheme, str) or scheme.strip().lower() not in ("http", "https"):
-        fail("invalid_scheme", "scheme must be http or https")
+        raise DomainError("invalid_scheme", "scheme must be http or https")
     else:
         scheme = scheme.strip().lower()
 
     machines = normalize_machines(registry.get("machines"))
     registry["machines"] = machines
     if machine_id not in machines:
-        fail(
+        raise DomainError(
             "machine_not_found",
             f"unknown machine id: {machine_id}",
             hint="machine add --id ID --host HOST [--label LABEL]",
@@ -1538,7 +1553,7 @@ def allocate_range(
             registry["pool"] = pool
         for other in non_released_ranges(registry):
             if overlaps(start, end, other["start"], other["end"]):
-                fail(
+                raise DomainError(
                     "port_in_use",
                     f"ports {start}-{end} overlap existing range {other.get('id')} "
                     f"({other['start']}-{other['end']})",
@@ -1546,7 +1561,7 @@ def allocate_range(
     else:
         available = find_free_range(registry, count)
         if available is None:
-            fail("pool_exhausted")
+            raise DomainError("pool_exhausted")
         start, end = available
 
     project_entry = ensure_project(registry, project)
@@ -1565,7 +1580,7 @@ def allocate_range(
     )
     settings = normalize_settings(registry.get("settings"))
     if preset_warnings and settings.get("require_compat"):
-        fail(
+        raise DomainError(
             "compat_conflict",
             "Ports collide with a saved environment/preset",
             conflicts=[
@@ -1585,49 +1600,11 @@ def allocate_range(
 
 
 def cmd_allocate(args):
-    project = project_path(args.project)
-    require_project_directory(project)
-    if args.tailnet is None:
-        emit(needs_tailnet(project, args.count))
-        raise SystemExit(3)
-
-    def mutate(registry):
-        hist_key = resolve_history_env_name(registry, getattr(args, "environment", None))
-        ensure_baseline(registry, hist_key)
-        item, preset_warnings = allocate_range(
-            registry,
-            project,
-            args.count,
-            args.note,
-            args.tailnet,
-            start_port=getattr(args, "start", None),
-            machine_id=getattr(args, "machine", None),
-            host=getattr(args, "host", None),
-            scheme=getattr(args, "scheme", None),
-        )
-        maybe_push_history(registry, "allocate", hist_key)
-        payload = {"status": "ok", "range": item}
-        if preset_warnings:
-            payload["warnings"] = preset_warnings
-        return payload, [project]
-
-    emit(locked_registry(mutate))
+    return allocate_result(vars(args), REGISTRY_MUTATION_RUNTIME)
 
 
 def cmd_activate(args):
-    project = project_path(args.project)
-    require_project_directory(project)
-
-    def mutate(registry):
-        item = find_project_range(registry, project, args.range_id)
-        if item is None:
-            fail("not_found", f"range id not found for project: {args.range_id}")
-        if is_remote_range(registry, item):
-            refuse_remote_process(registry, item, action="activate")
-        activate_item(item, project, args.range_id, args.tailnet)
-        return {"status": "ok", "range": item}, [project]
-
-    emit(locked_registry(mutate))
+    return activate_result(vars(args), REGISTRY_MUTATION_RUNTIME)
 
 
 def range_has_live_process(item):
@@ -1640,26 +1617,25 @@ def range_has_live_process(item):
     return any(pid_alive(pid) for pid in process_group_pids(pgid))
 
 
+REGISTRY_MUTATION_RUNTIME = RegistryMutationRuntime(
+    project_path=project_path,
+    require_project_directory=require_project_directory,
+    locked_registry=locked_registry,
+    resolve_history_env_name=resolve_history_env_name,
+    ensure_baseline=ensure_baseline,
+    maybe_push_history=maybe_push_history,
+    allocate_range=allocate_range,
+    find_project_range=find_project_range,
+    is_remote_range=is_remote_range,
+    refuse_remote_process=refuse_remote_process,
+    activate_item=activate_item,
+    range_has_live_process=range_has_live_process,
+    release_item=release_item,
+)
+
+
 def cmd_release(args):
-    project = project_path(args.project)
-    require_project_directory(project)
-
-    def mutate(registry):
-        hist_key = resolve_history_env_name(registry, getattr(args, "environment", None))
-        ensure_baseline(registry, hist_key)
-        item = find_project_range(registry, project, args.range_id)
-        if item is None:
-            fail("not_found", f"range id not found for project: {args.range_id}")
-        if range_has_live_process(item):
-            fail(
-                "process_still_running",
-                "range still has a live pid/pgid; use stop (not release) to terminate then free the ports",
-            )
-        release_item(item)
-        maybe_push_history(registry, "release", hist_key)
-        return {"status": "ok", "range": item}, [project]
-
-    emit(locked_registry(mutate))
+    return release_result(vars(args), REGISTRY_MUTATION_RUNTIME)
 
 
 def run_start_all(also_defaults_only=False):
@@ -2255,7 +2231,7 @@ def start_item_for_apply(item, project, registry=None):
         try:
             mode = (item.get("tailnet") or {}).get("mode") or "none"
             activate_item(item, project, item.get("id"), mode)
-        except SystemExit:
+        except DomainError:
             return False, {"reason": "activate_failed", "range_id": item.get("id")}
         return True, {"action": "already_live", "range": item}
     if life.get("pid") is not None:
@@ -2270,7 +2246,7 @@ def start_item_for_apply(item, project, registry=None):
         return False, detail
     try:
         activate_item(item, project, item.get("id"), mode)
-    except SystemExit:
+    except DomainError:
         return False, {"reason": "activate_failed", "range_id": item.get("id"), "range": item}
     return True, {"action": "started", "range": item}
 
@@ -2292,7 +2268,7 @@ def stop_item_for_apply(item, project):
         life["stopped_at"] = utc_now()
     try:
         release_item(item)
-    except SystemExit:
+    except DomainError:
         return False, {"reason": "release_failed", "range_id": item.get("id")}
     return True, {"action": "stopped", "range": item}
 
@@ -2429,7 +2405,7 @@ def park_item_for_exit(item, project, also_release=False):
     if also_release:
         try:
             release_item(item)
-        except SystemExit:
+        except DomainError:
             return False, {"reason": "release_failed", "range_id": item.get("id")}
         return True, {"action": "stopped_released", "range": item}
     # Tear down tailnet but keep allocation reserved
@@ -2439,7 +2415,7 @@ def park_item_for_exit(item, project, also_release=False):
         port = tailnet.get("port") or item["start"]
         try:
             run_tailnet(mode, port, off=True)
-        except SystemExit:
+        except DomainError:
             return False, {"reason": "tailnet_teardown_failed", "range_id": item.get("id")}
         tailnet["configured_at"] = None
     item["state"] = "reserved"
@@ -3051,7 +3027,7 @@ def cmd_set_tailnet(args):
                     prev_port = tailnet.get("port") or item["start"]
                     try:
                         run_tailnet(old_mode, prev_port, off=True)
-                    except SystemExit:
+                    except DomainError:
                         pass
                 run_tailnet(mode, port, off=False)
                 tailnet["port"] = port
@@ -3183,7 +3159,7 @@ def apply_portskill_tailscale_serve(enable: bool, *, persist: bool = True, port:
     else:
         try:
             run_tailnet("serve", int(port), off=True)
-        except SystemExit:
+        except DomainError:
             # Teardown best-effort if mapping already gone
             pass
     if persist:
@@ -3998,6 +3974,14 @@ def cmd_discover_import(args):
 
             result = locked_registry(mutate)
             imported.append(result)
+        except DomainError as exc:
+            if not all_missing:
+                raise
+            errors.append({
+                "port": port,
+                "reason": exc.reason,
+                "message": exc.message or str(exc),
+            })
         except SystemExit:
             # fail() already emitted; re-raise for single-port, collect for batch
             if not all_missing:

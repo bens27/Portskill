@@ -85,6 +85,7 @@ from .registry_domain import (
 )
 from .status import observed_range_status, service_statuses
 from .settings import settings_set
+from .registry_mutations import allocate_result
 from .tailscale import probe_tailscale_status
 from .webauthn import (
     authentication_options,
@@ -4595,21 +4596,29 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         except (TypeError, ValueError):
             count = 1
         project = body.get("project") or "."
-        argv = ["allocate", "--count", str(count), "--project", str(project), "--tailnet", str(body.get("tailnet") or "none")]
-        note = body.get("note")
-        if isinstance(note, str) and note:
-            argv += ["--note", note]
-        machine = body.get("machine") or body.get("machineId") or body.get("machine_id")
-        if isinstance(machine, str) and machine.strip():
-            argv += ["--machine", machine.strip()]
-        host = body.get("host")
-        if isinstance(host, str) and host.strip():
-            argv += ["--host", host.strip()]
-        scheme = body.get("scheme")
-        if isinstance(scheme, str) and scheme.strip():
-            argv += ["--scheme", scheme.strip()]
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+        from .cli import REGISTRY_MUTATION_RUNTIME
+
+        options = {
+            "count": count,
+            "project": str(project),
+            "tailnet": str(body.get("tailnet") or "none"),
+            "note": body.get("note"),
+            "machine": body.get("machine") or body.get("machineId") or body.get("machine_id"),
+            "host": body.get("host"),
+            "scheme": body.get("scheme"),
+        }
+        try:
+            return 0, {"ok": True, "result": allocate_result(options, REGISTRY_MUTATION_RUNTIME)}
+        except DomainError as exc:
+            payload = exc.as_dict()
+            return _cli_result(exc.exit_code, payload, json.dumps(payload, separators=(",", ":"), sort_keys=True))
+        except Exception as exc:
+            payload = {
+                "status": "error",
+                "reason": "registry_unavailable",
+                "message": str(exc) or exc.__class__.__name__,
+            }
+            return _cli_result(1, payload, json.dumps(payload, separators=(",", ":"), sort_keys=True))
     if action == "start-all":
         code, payload, stdout = run_cli(["start", "--all"])
         return _cli_result(code, payload, stdout)
