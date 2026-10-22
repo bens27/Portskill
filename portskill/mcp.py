@@ -34,6 +34,8 @@ from .registry import (
     read_settings,
 )
 from .domain import DomainError
+from .port_discovery import discover_import_result, discover_ports_result
+from .tailscale_commands import set_tailnet_result, tailscale_login_result, tailscale_status_result
 from .compatibility import compatibility_result
 from .apply_defaults import apply_defaults_result
 from .defaults import set_default_result
@@ -374,47 +376,6 @@ def tool_argv(name: str, arguments: dict) -> list[str]:
         if "stop_also_release" in args and args.get("stop_also_release") is not None:
             argv += ["--stop-also-release", "on" if args.get("stop_also_release") else "off"]
         return argv
-    if name == "set_tailnet":
-        argv = ["set-tailnet", "--range-id", str(args["range_id"]), "--mode", str(args["mode"])]
-        if args.get("project"):
-            argv += ["--project", str(args["project"])]
-        return argv
-    if name == "tailscale_status":
-        return ["tailscale", "status"]
-    if name == "tailscale_login":
-        argv = ["tailscale", "login"]
-        if args.get("no_open"):
-            argv.append("--no-open")
-        if args.get("wait") is not None:
-            argv += ["--wait", str(int(args["wait"]))]
-        return argv
-    if name == "ports_discover":
-        return ["discover", "ports"]
-    if name == "ports_import":
-        args = arguments or {}
-        if args.get("all_missing"):
-            argv = ["discover", "import", "--all-missing"]
-        elif args.get("port") is not None:
-            argv = ["discover", "import", "--port", str(int(args["port"]))]
-        elif isinstance(args.get("ports"), list) and len(args.get("ports") or []) == 1:
-            argv = ["discover", "import", "--port", str(int(args["ports"][0]))]
-        elif isinstance(args.get("ports"), list) and len(args.get("ports") or []) > 1:
-            # Multi handled in call_tool — return sentinel argv
-            return ["__ports_import_multi__"]
-        else:
-            raise ValueError("ports_import requires ports[], port, or all_missing")
-        if args.get("note"):
-            argv += ["--note", str(args["note"])]
-        if args.get("tailnet"):
-            mode = str(args["tailnet"])
-            if mode == "funnel":
-                mode = "none"
-            if mode not in ("serve", "none"):
-                mode = "none"
-            argv += ["--tailnet", mode]
-        if args.get("project"):
-            argv += ["--project", str(args["project"])]
-        return argv
     if name == "history_list":
         argv = ["history", "list"]
         if args.get("environment"):
@@ -552,6 +513,61 @@ def tool_error_result(exc: Exception) -> dict:
         "structuredContent": body,
         "isError": True,
     }
+
+
+def _import_tailnet_mode(value: Any) -> str | None:
+    """MCP never imports with Funnel: anything but serve becomes none."""
+    if not value:
+        return None
+    mode = str(value)
+    return mode if mode == "serve" else "none"
+
+
+def _tailscale_or_discovery_options(name: str, args: dict) -> dict:
+    """Normalize MCP arguments in the legacy tool_argv order.
+
+    Raises KeyError/TypeError/ValueError exactly where tool_argv did, so callers
+    keep the legacy ``{ok: false, message}`` argument-error envelope.
+    """
+    if name == "set_tailnet":
+        range_id = str(args["range_id"])
+        mode = str(args["mode"])
+        return {"range_id": range_id, "mode": mode, "project": str(args["project"]) if args.get("project") else None}
+    if name == "tailscale_login":
+        return {
+            "no_open": bool(args.get("no_open")),
+            "wait": int(args["wait"]) if args.get("wait") is not None else None,
+        }
+    if name != "ports_import":
+        return {}
+    if args.get("all_missing"):
+        port = None
+    elif args.get("port") is not None:
+        port = int(args["port"])
+    elif isinstance(args.get("ports"), list) and len(args.get("ports") or []) == 1:
+        port = int(args["ports"][0])
+    else:
+        raise ValueError("ports_import requires ports[], port, or all_missing")
+    return {
+        "port": port,
+        "all_missing": bool(args.get("all_missing")),
+        "note": str(args["note"]) if args.get("note") else None,
+        "tailnet": _import_tailnet_mode(args.get("tailnet")),
+        "project": str(args["project"]) if args.get("project") else None,
+    }
+
+
+def _tailscale_or_discovery_result(name: str, options: dict) -> dict:
+    """In-process Tailscale / discovery tools; DomainError maps via tool_error_result."""
+    if name == "set_tailnet":
+        return set_tailnet_result(options)
+    if name == "tailscale_status":
+        return tailscale_status_result()
+    if name == "tailscale_login":
+        return tailscale_login_result(options)
+    if name == "ports_discover":
+        return discover_ports_result()
+    return discover_import_result(options)
 
 
 def call_tool(name: str, arguments: dict) -> dict:
@@ -754,16 +770,25 @@ def _call_tool(name: str, arguments: dict) -> dict:
                 "structuredContent": body,
                 "isError": bool(errors) and not imported,
             }
+    if name in ("set_tailnet", "tailscale_status", "tailscale_login", "ports_discover", "ports_import"):
+        try:
+            options = _tailscale_or_discovery_options(name, args)
+        except (KeyError, TypeError, ValueError) as exc:
+            return {
+                "content": [{"type": "text", "text": json.dumps({"ok": False, "message": str(exc)})}],
+                "isError": True,
+            }
+        body = _tailscale_or_discovery_result(name, options)
+        return {
+            "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
+            "structuredContent": body,
+            "isError": False,
+        }
     try:
         argv = tool_argv(name, arguments or {})
     except (KeyError, TypeError, ValueError) as exc:
         return {
             "content": [{"type": "text", "text": json.dumps({"ok": False, "message": str(exc)})}],
-            "isError": True,
-        }
-    if argv == ["__ports_import_multi__"]:
-        return {
-            "content": [{"type": "text", "text": json.dumps({"ok": False, "message": "multi-port routing failed"})}],
             "isError": True,
         }
     code, payload, raw = run_cli(argv)

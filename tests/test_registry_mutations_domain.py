@@ -225,11 +225,13 @@ class RegistryMutationDomainTests(unittest.TestCase):
         from portskill import process_commands
 
         failed = type("Result", (), {"returncode": 1, "stdout": "", "stderr": "gone"})()
-        with mock.patch.object(cli, "tailscale_bin_available", return_value=(True, "tailscale")), mock.patch.object(
+        from portskill import tailscale_commands
+
+        with mock.patch.object(tailscale_commands, "tailscale_bin_available", return_value=(True, "tailscale")), mock.patch.object(
             lifecycle_module.subprocess,
             "run", return_value=failed
         ), mock.patch.object(
-            cli, "probe_tailscale_status", return_value={"Self": None}
+            tailscale_commands, "probe_tailscale_status", return_value={"Self": None}
         ):
             payload = cli.apply_portskill_tailscale_serve(
                 False, persist=False, port=21003
@@ -299,12 +301,12 @@ class RegistryMutationDomainTests(unittest.TestCase):
         args = argparse.Namespace(
             tailnet="none", note=None, project=None, all_missing=True, port=None
         )
-        stdout = io.StringIO()
+        from portskill import port_discovery
+
         with mock.patch.object(
-            cli, "locked_registry", side_effect=[discovery, DomainError("port_in_use", "busy"), second]
-        ), mock.patch("sys.stdout", stdout):
-            cli.cmd_discover_import(args)
-        payload = json.loads(stdout.getvalue())
+            port_discovery, "locked_registry", side_effect=[discovery, DomainError("port_in_use", "busy"), second]
+        ):
+            payload = cli.cmd_discover_import(args)
         self.assertEqual(payload["status"], "partial")
         self.assertEqual(payload["imported"], [second])
         self.assertEqual(payload["errors"][0]["reason"], "port_in_use")

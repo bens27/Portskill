@@ -76,9 +76,15 @@ from .mcp import (
     mcp_stdio_loop,
     run_cli,
 )
-from .cli import (
+from .port_discovery import discover_import_result, discover_ports_result
+from .tailscale_commands import (
     apply_portskill_tailscale_serve,
     probe_portskill_serve_status,
+    serve_portskill_result,
+    set_tailnet_result,
+    tailscale_login_result,
+    tailscale_logout_result,
+    tailscale_status_result,
 )
 from .registry_domain import (
     default_machines,
@@ -1635,7 +1641,7 @@ document.getElementById('use-bearer').addEventListener('click', async function()
 
 def probe_tailscale_for_ui() -> dict:
     """Best-effort Tailscale chip for the toolbar (Connected / Needs login / Binary missing)."""
-    code, payload, _stdout = run_cli(["tailscale", "status"])
+    code, payload, _stdout = _run_domain(tailscale_status_result)
     if isinstance(payload, dict):
         chip = payload.get("chip") or ("Connected" if payload.get("logged_in") else "Needs login")
         state = payload.get("state") or ("connected" if payload.get("logged_in") else "needs_login")
@@ -4077,6 +4083,18 @@ def _cli_result(code: int, payload, stdout: str) -> tuple[int, dict]:
     return code if code else 422, body
 
 
+def _run_domain(operation) -> tuple[int, object, str]:
+    """Call a domain operation in-process with run_cli's (code, payload, stdout) shape."""
+    try:
+        return 0, operation(), ""
+    except DomainError as exc:
+        payload = exc.as_dict()
+        # The CLI printed this compact JSON line; callers keep it as the diagnostic.
+        return exc.exit_code, payload, json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    except Exception as exc:  # noqa: BLE001 - mirror a crashed CLI: no payload, exit 1
+        return 1, None, str(exc) or exc.__class__.__name__
+
+
 def _domain_cli_result(operation) -> tuple[int, dict]:
     """Run an in-process domain action with the legacy HTTP result envelope."""
     try:
@@ -4239,7 +4257,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
     if action == "serve-portskill":
         enabled = parse_bool(body.get("enabled"))
         if enabled:
-            code, payload, stdout = run_cli(["tailscale", "status"])
+            code, payload, stdout = _run_domain(tailscale_status_result)
             logged = isinstance(payload, dict) and payload.get("logged_in")
             if isinstance(payload, dict) and payload.get("state") == "binary_missing":
                 return 400, {
@@ -4262,8 +4280,9 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
                     "auth_url": (payload or {}).get("AuthURL") if isinstance(payload, dict) else None,
                     "pendingPortskillServe": True,
                 }
-        argv = ["tailscale", "serve-portskill", "--state", "on" if enabled else "off"]
-        code, payload, stdout = run_cli(argv)
+        code, payload, stdout = _run_domain(
+            lambda: serve_portskill_result({"state": "on" if enabled else "off"})
+        )
         if code != 0:
             body_out = {"ok": False, "result": payload}
             if isinstance(payload, dict):
@@ -4460,7 +4479,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         if not isinstance(range_id, str) or mode not in ("serve", "none", "funnel"):
             return 400, {"ok": False, "message": "expected rangeId and mode serve|none|funnel"}
         if mode == "serve":
-            code, payload, stdout = run_cli(["tailscale", "status"])
+            code, payload, stdout = _run_domain(tailscale_status_result)
             logged = isinstance(payload, dict) and payload.get("logged_in")
             if not logged:
                 msg = "Tailscale Serve needs Browser Login first."
@@ -4475,13 +4494,14 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
                     "auth_url": (payload or {}).get("AuthURL") if isinstance(payload, dict) else None,
                     "pendingServe": {"project": project, "rangeId": range_id},
                 }
-        argv = ["set-tailnet", "--range-id", range_id, "--mode", mode]
-        if isinstance(project, str) and project:
-            argv += ["--project", project]
-        code, payload, stdout = run_cli(argv)
+        code, payload, stdout = _run_domain(lambda: set_tailnet_result({
+            "mode": mode,
+            "range_id": range_id,
+            "project": project if isinstance(project, str) and project else None,
+        }))
         return _cli_result(code, payload, stdout)
     if action == "tailscale-status":
-        code, payload, stdout = run_cli(["tailscale", "status"])
+        code, payload, stdout = _run_domain(tailscale_status_result)
         if isinstance(payload, dict):
             body_out = dict(payload)
             body_out["ok"] = True
@@ -4493,10 +4513,10 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             wait = int(wait)
         except (TypeError, ValueError):
             wait = 0
-        argv = ["tailscale", "login", "--wait", str(wait)]
-        # UI opens the URL itself; avoid double-open from CLI when wait=0
-        argv.append("--no-open")
-        code, payload, stdout = run_cli(argv)
+        # UI opens the URL itself; avoid a double-open from the domain flow.
+        code, payload, stdout = _run_domain(
+            lambda: tailscale_login_result({"wait": wait, "no_open": True})
+        )
         if isinstance(payload, dict):
             out = dict(payload)
             out["ok"] = code == 0 or bool(out.get("logged_in") or out.get("already_logged_in"))
@@ -4538,7 +4558,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         code, payload, stdout = run_cli(argv)
         return _cli_result(code, payload, stdout)
     if action == "discover-ports":
-        code, payload, stdout = run_cli(["discover", "ports"])
+        code, payload, stdout = _run_domain(discover_ports_result)
         if code == 0 and isinstance(payload, dict):
             out = dict(payload)
             out["ok"] = True
@@ -4567,27 +4587,26 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             except (TypeError, ValueError):
                 return 400, {"ok": False, "message": "invalid port"}
         elif body.get("all_missing"):
-            code, payload, stdout = run_cli(
-                ["discover", "import", "--all-missing"]
-                + (["--tailnet", str(tailnet)] if tailnet in ("serve", "none") else [])
-                + (["--project", str(project)] if isinstance(project, str) and project.strip() else [])
-            )
+            code, payload, stdout = _run_domain(lambda: discover_import_result({
+                "all_missing": True,
+                "tailnet": tailnet if tailnet in ("serve", "none") else None,
+                "project": str(project) if isinstance(project, str) and project.strip() else None,
+            }))
             return _cli_result(code, payload, stdout)
         else:
             return 400, {"ok": False, "message": "expected ports[] or port"}
         for p in port_list:
-            argv = ["discover", "import", "--port", str(p)]
             if isinstance(notes, dict):
                 note = notes.get(str(p)) or notes.get(p) or body.get("note")
             else:
                 note = body.get("note")
-            if isinstance(note, str) and note.strip():
-                argv += ["--note", note.strip()]
-            if tailnet in ("serve", "none"):
-                argv += ["--tailnet", str(tailnet)]
-            if isinstance(project, str) and project.strip():
-                argv += ["--project", project.strip()]
-            code, payload, stdout = run_cli(argv)
+            options = {
+                "port": p,
+                "note": note.strip() if isinstance(note, str) and note.strip() else None,
+                "tailnet": tailnet if tailnet in ("serve", "none") else None,
+                "project": project.strip() if isinstance(project, str) and project.strip() else None,
+            }
+            code, payload, stdout = _run_domain(lambda options=options: discover_import_result(options))
             if code == 0 and isinstance(payload, dict):
                 results_imported.extend(payload.get("imported") or [])
                 results_skipped.extend(payload.get("skipped") or [])
@@ -4639,7 +4658,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
     if action in ("set-defaults-from-current", "capture-defaults"):
         return _domain_cli_result(set_defaults_from_current_result)
     if action == "tailscale-logout":
-        code, payload, stdout = run_cli(["tailscale", "logout"])
+        code, payload, stdout = _run_domain(tailscale_logout_result)
         if isinstance(payload, dict):
             out = dict(payload)
             out["ok"] = code == 0
@@ -5450,7 +5469,7 @@ def serve_http(
                 flush=True,
             )
             apply_portskill_tailscale_serve(True, persist=True, port=bound_port)
-    except (Exception, SystemExit) as exc:  # CLI helpers exit on unavailable Tailscale.
+    except Exception as exc:
         # Sharing is optional: its failure must not abort the local HTTP server.
         print(f"serve_portskill_on_tailscale re-apply soft-failed: {exc}", flush=True)
 

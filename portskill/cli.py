@@ -2,7 +2,6 @@
 from __future__ import annotations
 import argparse
 from . import __version__
-from . import discover_ports as discover_ports_mod
 from .auth import (
     ensure_http_auth_token,
     http_auth_public_status,
@@ -53,7 +52,6 @@ from .environments import (
 )
 from .lifecycle import (
     activate_item,
-    ensure_tailscale_authenticated,
     funnel_of_listen_port,
     lifecycle,
     mark_item_active,
@@ -63,7 +61,6 @@ from .lifecycle import (
     park_item_for_exit,
     process_group_pids,
     range_has_live_process,
-    read_listen_port_from_disk,
     refuse_funnel_listen_message,
     refuse_remote_process,
     resolve_stop_also_release,
@@ -71,7 +68,6 @@ from .lifecycle import (
     resolve_project_relative,
     run_stop_script_if_ready,
     run_tailnet,
-    scaffold_lifecycle_scripts,
     should_use_sudo,
     tailscale_command,
     terminate_lifecycle_processes,
@@ -94,7 +90,6 @@ from .registry import (
     normalize_settings,
     parse_bool,
     read_listen,
-    read_settings,
     registry_path,
 )
 from .registry_domain import (
@@ -109,7 +104,6 @@ from .registry_domain import (
     default_sessions,
     default_lifecycle,
     default_machines,
-    extract_tailscale_advertise_host,
     get_machine,
     history_is_modified,
     is_remote_range,
@@ -155,7 +149,6 @@ from .registry_operations import (
     locked_registry,
     maybe_push_history,
     mutate_registry_meta as domain_mutate_registry_meta,
-    next_range_id,
     non_released_ranges,
     overlaps,
     pool_bounds,
@@ -165,7 +158,6 @@ from .registry_operations import (
     require_project_directory,
     resolve_history_env_name,
     snapshot_environment,
-    warnings_for_port_range,
     write_local_project_file,
     write_local_project_files,
 )
@@ -206,16 +198,21 @@ import pathlib
 import shlex
 import shutil
 import signal
-import subprocess
-import time
 import uuid
-import webbrowser
+from .port_discovery import discover_import_result, discover_ports_result
+from .tailscale_commands import (  # noqa: F401 - re-exported for server/tests
+    apply_portskill_tailscale_serve,
+    build_portskill_serve_url,
+    probe_portskill_serve_status,
+    serve_portskill_result,
+    set_tailnet_result,
+    tailscale_login_result,
+    tailscale_logout_result,
+    tailscale_status_result,
+)
 from .tailscale import (
-    extract_tailscale_auth_url,
-    probe_tailscale_status,
     resolve_tailscale_bin,
     tailscale_base_command,
-    tailscale_bin_available,
 )
 
 
@@ -781,465 +778,38 @@ def cmd_compat(args):
 
 
 def cmd_set_tailnet(args):
-    """Update recorded tailnet mode; apply/tear down Serve when range is active.
-
-    UI toggles Serve on/off (serve|none). Funnel remains available via --mode funnel.
-    """
-    mode = args.mode
-    if mode not in ("serve", "funnel", "none"):
-        fail("invalid_args", f"mode must be serve|funnel|none, got {mode!r}")
-    project = project_path(args.project) if args.project else None
-    if project is not None:
-        require_project_directory(project)
-
-    def mutate(registry):
-        hist_key = resolve_history_env_name(registry, getattr(args, "environment", None))
-        ensure_baseline(registry, hist_key)
-        found_project, item = find_range_anywhere(registry, args.range_id, project)
-        if item is None:
-            fail("not_found", f"range id not found: {args.range_id}")
-        normalize_range_record(item)
-        tailnet = item.setdefault("tailnet", {"mode": None, "port": None, "configured_at": None})
-        old_mode = tailnet.get("mode") or "none"
-        if old_mode not in ("serve", "funnel", "none"):
-            old_mode = "none"
-
-        if mode in ("serve", "funnel"):
-            ensure_tailscale_authenticated(mode)
-
-        tailnet["mode"] = mode
-        now = utc_now()
-        if item.get("state") == "active":
-            if mode in ("serve", "funnel"):
-                port = item["start"]
-                # If switching modes while live, turn off previous first
-                if old_mode in ("serve", "funnel") and old_mode != mode:
-                    prev_port = tailnet.get("port") or item["start"]
-                    try:
-                        run_tailnet(old_mode, prev_port, off=True)
-                    except DomainError:
-                        pass
-                run_tailnet(mode, port, off=False)
-                tailnet["port"] = port
-                tailnet["configured_at"] = now
-            elif mode == "none" and old_mode in ("serve", "funnel"):
-                port = tailnet.get("port") or item["start"]
-                run_tailnet(old_mode, port, off=True)
-                tailnet["port"] = None
-                tailnet["configured_at"] = None
-            else:
-                tailnet["port"] = None
-                tailnet["configured_at"] = None
-        else:
-            if mode == "none":
-                tailnet["port"] = None
-                tailnet["configured_at"] = None
-        normalize_range_record(item)
-        maybe_push_history(registry, "set-tailnet", hist_key)
-        return {
-            "status": "ok",
-            "range": item,
-            "project": found_project,
-            "tailnet": mode,
-            "previous_tailnet": old_mode,
-        }, [found_project]
-
-    emit(locked_registry(mutate))
-
-
-
-
-def build_portskill_serve_url(port, tailscale_self=None):
-    """HTTPS Serve URL for Portskill listen port (tailscale serve --https=PORT)."""
-    host = extract_tailscale_advertise_host(tailscale_self)
-    if not host:
-        status = probe_tailscale_status()
-        host = extract_tailscale_advertise_host(status.get("Self"))
-    if not host:
-        return None
-    return f"https://{host}:{int(port)}/"
-
-
-def probe_portskill_serve_status(port=None):
-    """Summarize whether Portskill listen port is Tailscale-Served (never Funnel)."""
-    if port is None:
-        port = read_listen_port_from_disk()
-    status = probe_tailscale_status()
-    pref = False
-    try:
-        pref = bool(read_settings().get("serve_portskill_on_tailscale"))
-    except (OSError, TypeError, ValueError):
-        pref = False
-    url = build_portskill_serve_url(port, status.get("Self")) if port else None
-    out = {
-        "ok": True,
-        "enabled_preference": pref,
-        "listen_port": port,
-        "serve_url": url,
-        "active": bool(pref and port and status.get("logged_in")),
-        "chip": "Off",
-        "state": "off",
-        "message": "Serve Portskill on Tailscale is off",
-        "tailscale": status,
-    }
-    if status.get("state") == "binary_missing":
-        out.update({
-            "ok": False,
-            "chip": "Binary missing",
-            "state": "binary_missing",
-            "message": status.get("message") or "Tailscale binary not found",
-            "active": False,
-        })
-        return out
-    if not port:
-        out.update({
-            "chip": "No listen port",
-            "state": "no_listen",
-            "message": "listen.json has no Portskill listen port yet",
-            "active": False,
-        })
-        return out
-    if pref:
-        if status.get("logged_in"):
-            out.update({
-                "chip": "Serving",
-                "state": "serving",
-                "message": f"Tailscale Serve → localhost:{port}",
-                "active": True,
-                "serve_url": url,
-            })
-        else:
-            out.update({
-                "chip": "Needs login",
-                "state": "needs_login",
-                "message": "Serve preferred on but Tailscale Needs login",
-                "active": False,
-            })
-    return out
-
-
-def apply_portskill_tailscale_serve(enable: bool, *, persist: bool = True, port: int | None = None):
-    """Configure or tear down Tailscale Serve for the Portskill listen port. Never Funnel."""
-    if port is None:
-        port = read_listen_port_from_disk()
-    if not port:
-        fail("no_listen_port", "Cannot Serve Portskill: listen.json port missing")
-    available, ts_bin = tailscale_bin_available()
-    if not available:
-        fail(
-            "tailscale_bin_missing",
-            f"Tailscale binary not found: {ts_bin}",
-            chip="Binary missing",
-            state="binary_missing",
-        )
-    if enable:
-        ensure_tailscale_authenticated("serve")
-        run_tailnet("serve", int(port), off=False)
-    else:
-        try:
-            run_tailnet("serve", int(port), off=True)
-        except DomainError:
-            # Teardown best-effort if mapping already gone
-            pass
-    if persist:
-        def mutate(registry):
-            settings = normalize_settings(registry.get("settings"))
-            settings["serve_portskill_on_tailscale"] = bool(enable)
-            registry["settings"] = normalize_settings(settings)
-            return {
-                "status": "ok",
-                "serve_portskill_on_tailscale": bool(enable),
-                "listen_port": int(port),
-            }, True, []
-
-        mutate_registry_meta(mutate)
-    status = probe_tailscale_status()
-    url = build_portskill_serve_url(port, status.get("Self")) if enable else None
-    return {
-        "status": "ok",
-        "enabled": bool(enable),
-        "listen_port": int(port),
-        "serve_url": url,
-        "mode": "serve" if enable else "none",
-        "funnel": False,
-        "chip": "Serving" if enable else "Off",
-        "state": "serving" if enable else "off",
-        "message": (
-            f"Tailscale Serve configured for localhost:{port}"
-            if enable
-            else f"Tailscale Serve torn down for localhost:{port}"
-        ),
-        "tailscale": status,
-    }
+    """Update recorded tailnet mode; apply/tear down Serve when range is active."""
+    return set_tailnet_result({
+        "mode": args.mode,
+        "range_id": args.range_id,
+        "project": args.project,
+        "environment": getattr(args, "environment", None),
+    })
 
 
 def cmd_tailscale_serve_portskill(args):
     """Serve (or stop serving) the Portskill listen port via Tailscale Serve — never Funnel."""
-    state = (getattr(args, "state", None) or "status").strip().lower()
-    persist = not bool(getattr(args, "no_persist", False))
-    if state == "status":
-        emit({"status": "ok", **probe_portskill_serve_status()})
-        return
-    if state not in ("on", "off"):
-        fail("invalid_args", "--state must be on|off|status")
-    payload = apply_portskill_tailscale_serve(state == "on", persist=persist)
-    emit(payload)
+    return serve_portskill_result({
+        "state": getattr(args, "state", None),
+        "no_persist": bool(getattr(args, "no_persist", False)),
+    })
 
 
 def cmd_tailscale_status(args):
-    status = probe_tailscale_status()
-    payload = {
-        "status": "ok" if status.get("logged_in") else "error",
-        "reason": status.get("reason"),
-        "chip": status.get("chip"),
-        "state": status.get("state"),
-        "message": status.get("message"),
-        "BackendState": status.get("BackendState"),
-        "Self": status.get("Self"),
-        "AuthURL": status.get("AuthURL"),
-        "binary": status.get("binary"),
-        "logged_in": bool(status.get("logged_in")),
-        "tailscale": status,
-    }
-    emit(payload)
-    if status.get("state") == "binary_missing":
-        raise SystemExit(2)
-    # NeedsLogin is a valid status shape — exit 0 so UI/MCP can read JSON cleanly
-    return
-
-
-def obtain_tailscale_auth_url(existing=None):
-    """Run `tailscale login` / `up` non-interactively to harvest a browser login URL."""
-    auth_url = existing
-    outputs = []
-    for sub in (["login"], ["up"]):
-        try:
-            result = subprocess.run(
-                tailscale_base_command() + sub,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                timeout=12,
-                stdin=subprocess.DEVNULL,
-            )
-            out = (result.stdout or "").strip()
-            outputs.append({"cmd": " ".join(sub), "exit": result.returncode, "output": out[:2000]})
-            found = extract_tailscale_auth_url(out)
-            if found:
-                auth_url = found
-                break
-        except subprocess.TimeoutExpired as exc:
-            partial = ""
-            if exc.stdout:
-                partial = exc.stdout if isinstance(exc.stdout, str) else exc.stdout.decode("utf-8", "replace")
-            outputs.append({
-                "cmd": " ".join(sub),
-                "exit": None,
-                "output": (partial or "")[:2000],
-                "timeout": True,
-            })
-            found = extract_tailscale_auth_url(partial)
-            if found:
-                auth_url = found
-                break
-        except OSError as exc:
-            outputs.append({"cmd": " ".join(sub), "exit": None, "output": str(exc)})
-    if not auth_url:
-        auth_url = extract_tailscale_auth_url('\n'.join(o.get("output") or "" for o in outputs))
-    return auth_url, outputs
-
-
-def poll_tailscale_running(timeout_sec=90, interval_sec=2.0):
-    """Poll status --json until BackendState Running / logged in, or timeout."""
-    deadline = time.time() + max(1, float(timeout_sec))
-    last = None
-    while time.time() < deadline:
-        last = probe_tailscale_status()
-        if last.get("logged_in") or last.get("BackendState") == "Running":
-            return True, last
-        time.sleep(max(0.5, float(interval_sec)))
-    return False, last or probe_tailscale_status()
+    return tailscale_status_result()
 
 
 def cmd_tailscale_login(args):
-    """Browser Login flow: extract auth URL, open system browser, poll until Connected.
-
-    Does not hang on interactive password/sudo prompts. Serve never needs sudo;
-    Funnel may require elevation separately (CLI --mode funnel only).
-    """
-    open_browser = not bool(getattr(args, "no_open", False))
-    wait = getattr(args, "wait", None)
-    if wait is None:
-        wait = 90
-    try:
-        wait = int(wait)
-    except (TypeError, ValueError):
-        wait = 90
-
-    status = probe_tailscale_status()
-    if status.get("state") == "binary_missing":
-        fail(
-            "tailscale_bin_missing",
-            status.get("message") or "Tailscale binary not found",
-            tailscale=status,
-        )
-    if status.get("logged_in"):
-        emit({
-            "status": "ok",
-            "already_logged_in": True,
-            "logged_in": True,
-            "chip": status.get("chip"),
-            "BackendState": status.get("BackendState"),
-            "Self": status.get("Self"),
-            "browser_opened": False,
-            "tailscale": status,
-        })
-        return
-
-    auth_url = status.get("AuthURL")
-    auth_url, outputs = obtain_tailscale_auth_url(auth_url)
-    after_attempt = probe_tailscale_status()
-    if after_attempt.get("logged_in"):
-        emit({
-            "status": "ok",
-            "logged_in": True,
-            "chip": after_attempt.get("chip"),
-            "BackendState": after_attempt.get("BackendState"),
-            "Self": after_attempt.get("Self"),
-            "attempts": outputs,
-            "browser_opened": False,
-            "tailscale": after_attempt,
-        })
-        return
-    if not auth_url:
-        auth_url = after_attempt.get("AuthURL")
-
-    browser_opened = False
-    browser_error = None
-    if auth_url and open_browser:
-        try:
-            browser_opened = bool(webbrowser.open(auth_url))
-        except Exception as exc:  # noqa: BLE001 — best-effort Browser Login
-            browser_error = str(exc)
-            browser_opened = False
-
-    if not auth_url:
-        emit({
-            "status": "needs_input",
-            "input": "tailscale_login",
-            "reason": "tailscale_auth_required",
-            "needs_input": True,
-            "prompt": (
-                "Could not get a Tailscale login URL. Open the Tailscale app, "
-                "sign in, then click Browser Login again."
-            ),
-            "options": ["retry_browser_login"],
-            "auth_url": None,
-            "browser_opened": False,
-            "message": (
-                "Browser Login could not find a login.tailscale.com URL. "
-                "Install/start Tailscale, then retry."
-            ),
-            "attempts": outputs,
-            "tailscale": after_attempt,
-            "resume_hint": "tailscale login",
-        })
-        raise SystemExit(3)
-
-    if wait <= 0:
-        emit({
-            "status": "needs_input",
-            "input": "tailscale_login",
-            "reason": "tailscale_auth_pending",
-            "needs_input": True,
-            "prompt": f"Complete Browser Login at {auth_url}, then retry status.",
-            "options": ["retry_browser_login", "poll_status"],
-            "auth_url": auth_url,
-            "browser_opened": browser_opened,
-            "browser_error": browser_error,
-            "polled": False,
-            "message": "Browser Login opened. Finish signing in, then Portskill will detect Connected.",
-            "attempts": outputs,
-            "tailscale": after_attempt,
-            "resume_hint": "tailscale login",
-        })
-        raise SystemExit(3)
-
-    ok_poll, final = poll_tailscale_running(timeout_sec=wait, interval_sec=2.0)
-    if ok_poll:
-        emit({
-            "status": "ok",
-            "logged_in": True,
-            "chip": final.get("chip"),
-            "BackendState": final.get("BackendState"),
-            "Self": final.get("Self"),
-            "auth_url": auth_url,
-            "browser_opened": browser_opened,
-            "browser_error": browser_error,
-            "polled": True,
-            "attempts": outputs,
-            "tailscale": final,
-            "message": "Tailscale Connected after Browser Login.",
-        })
-        return
-
-    emit({
-        "status": "needs_input",
-        "input": "tailscale_login",
-        "reason": "tailscale_auth_timeout",
-        "needs_input": True,
-        "prompt": (
-            f"Finish signing in at {auth_url}, then click Browser Login again "
-            "(or wait and retry status)."
-        ),
-        "options": ["retry_browser_login", "open_url"],
-        "auth_url": auth_url,
-        "browser_opened": browser_opened,
-        "browser_error": browser_error,
-        "polled": True,
-        "message": (
-            f"Still Needs login after waiting {wait}s. Complete Browser Login in your "
-            f"browser ({auth_url}), then retry."
-        ),
-        "attempts": outputs,
-        "tailscale": final,
-        "resume_hint": "tailscale login",
+    """Browser Login flow; exit 3 with a needs-input payload when login is incomplete."""
+    return tailscale_login_result({
+        "no_open": bool(getattr(args, "no_open", False)),
+        "wait": getattr(args, "wait", None),
     })
-    raise SystemExit(3)
 
 
 def cmd_tailscale_logout(args):
     """Log out of Tailscale (CLI wrapper around `tailscale logout`)."""
-    if not tailscale_bin_available():
-        fail("tailscale_missing", "Tailscale binary not found; install Tailscale first")
-    try:
-        result = subprocess.run(
-            tailscale_base_command() + ["logout"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=30,
-            stdin=subprocess.DEVNULL,
-        )
-        out = (result.stdout or "").strip()
-    except subprocess.TimeoutExpired:
-        fail("tailscale_logout_timeout", "tailscale logout timed out")
-    except OSError as exc:
-        fail("tailscale_logout_failed", str(exc))
-    status = probe_tailscale_status()
-    payload = {
-        "status": "ok" if result.returncode == 0 else "error",
-        "logout_exit": result.returncode,
-        "logout_output": out[:2000],
-        "chip": status.get("chip"),
-        "state": status.get("state"),
-        "logged_in": bool(status.get("logged_in")),
-        "message": status.get("message") or ("Logged out" if result.returncode == 0 else out[:400]),
-        "tailscale": status,
-    }
-    emit(payload)
-    if result.returncode != 0:
-        raise SystemExit(2)
+    return tailscale_logout_result()
 
 
 def _live_range_lifecycle_fields(item):
@@ -1584,179 +1154,17 @@ def cmd_status(args):
 
 def cmd_discover_ports(args):
     """Poll local listeners + Tailscale Serve; diff vs non-released registry ranges."""
-
-    def read(registry):
-        report = discover_ports_mod.build_ports_discovery(registry, tailscale_base_command)
-        return report, []
-
-    emit(locked_registry(read))
+    return discover_ports_result()
 
 
 def cmd_discover_import(args):
     """Claim exact listening/Serve ports into the workspace via allocate --start N."""
-    user_tailnet = getattr(args, "tailnet", None)
-    if user_tailnet == "funnel":
-        fail("invalid_args", "discover import never uses Funnel; use serve or none")
-    note_override = getattr(args, "note", None)
-    project_override = getattr(args, "project", None)
-    all_missing = bool(getattr(args, "all_missing", False))
-    port_arg = getattr(args, "port", None)
-
-    if all_missing and port_arg is not None:
-        fail("invalid_args", "use either --port N or --all-missing, not both")
-    if not all_missing and port_arg is None:
-        fail("invalid_args", "require --port N or --all-missing")
-
-    # Snapshot discovery once (read lock)
-    def read_disc(registry):
-        return discover_ports_mod.build_ports_discovery(registry, tailscale_base_command), []
-
-    discovery = locked_registry(read_disc)
-    serve_ports = {}
-    raw_serve = (discovery.get("serve") or {}).get("ports") or {}
-    for k, v in raw_serve.items():
-        try:
-            serve_ports[int(k)] = v
-        except (TypeError, ValueError):
-            continue
-    by_port = {int(d["port"]): d for d in discovery.get("discoveries") or [] if d.get("port") is not None}
-    missing_ports = [int(d["port"]) for d in discovery.get("missing") or []]
-
-    if all_missing:
-        targets = list(missing_ports)
-        if not targets:
-            emit({"status": "ok", "imported": [], "skipped": [], "message": "no missing ports to import"})
-            return
-    else:
-        targets = [int(port_arg)]
-
-    imported = []
-    skipped = []
-    errors = []
-
-    for port in targets:
-        entry = by_port.get(port) or {"port": port, "note": None, "project_guess": None, "serve": port in serve_ports}
-        if entry.get("claimed"):
-            skipped.append({"port": port, "reason": "already_claimed", "claim": entry.get("claim")})
-            continue
-        # Only auto-batch missing; single --port may claim even if not currently listening
-        if all_missing and not entry.get("missing"):
-            skipped.append({"port": port, "reason": "not_missing"})
-            continue
-
-        note = note_override
-        if not note:
-            note = entry.get("note") or f"discovered :{port}"
-        project = project_override or entry.get("project_guess") or "."
-        try:
-            project = project_path(project)
-        except Exception:
-            project = project_path(".")
-        require_project_directory(project)
-
-        mode = discover_ports_mod.default_tailnet_for_import(port, serve_ports, user_tailnet)
-        # Explicit allocate with --start so we never silently take a 20xxx pool slot
-        # Re-enter allocate logic via locked mutate (same as cmd_allocate with manual_start)
-        try:
-            def mutate(registry, _port=port, _note=note, _mode=mode, _project=project):
-                hist_key = resolve_history_env_name(registry, None)
-                ensure_baseline(registry, hist_key)
-                start = int(_port)
-                end = start
-                pool = registry["pool"]
-                if start < pool["start"] or end > pool["end"]:
-                    pool["start"] = min(int(pool["start"]), start)
-                    pool["end"] = max(int(pool["end"]), end)
-                    registry["pool"] = pool
-                for other in non_released_ranges(registry):
-                    if overlaps(start, end, other["start"], other["end"]):
-                        fail(
-                            "port_in_use",
-                            f"ports {start}-{end} overlap existing range {other.get('id')} "
-                            f"({other['start']}-{other['end']})",
-                        )
-                project_entry = ensure_project(registry, _project)
-                scaffold_lifecycle_scripts(_project)
-                item = range_record(
-                    next_range_id(project_entry),
-                    start,
-                    end,
-                    _note,
-                    _mode,
-                    machine_id="local",
-                    host=None,
-                    scheme=None,
-                )
-                # If already Serving, record configured_at without re-running serve when mode=serve
-                if _mode == "serve" and start in serve_ports:
-                    item["tailnet"]["port"] = start
-                    item["tailnet"]["configured_at"] = utc_now()
-                elif _mode == "serve":
-                    # User opted in — apply Serve (never Funnel)
-                    ensure_tailscale_authenticated("serve")
-                    run_tailnet("serve", start, off=False)
-                    item["tailnet"]["port"] = start
-                    item["tailnet"]["configured_at"] = utc_now()
-                preset_warnings = warnings_for_port_range(
-                    registry, start, end, exclude_range_id=item.get("id")
-                )
-                settings = normalize_settings(registry.get("settings"))
-                if preset_warnings and settings.get("require_compat"):
-                    fail(
-                        "compat_conflict",
-                        "Ports collide with a saved environment/preset",
-                        conflicts=[
-                            {
-                                "reason": "preset_port_overlap",
-                                "message": w["message"],
-                                "preset": w.get("preset"),
-                                "ports": w.get("ports"),
-                            }
-                            for w in preset_warnings
-                        ],
-                        conflict_count=len(preset_warnings),
-                        hint="Pick free ports, or: settings set --require-compat off",
-                    )
-                project_entry["ranges"].append(item)
-                maybe_push_history(registry, "discover-import", hist_key)
-                payload = {
-                    "status": "ok",
-                    "range": item,
-                    "port": start,
-                    "tailnet": _mode,
-                    "project": _project,
-                    "note": _note,
-                }
-                if preset_warnings:
-                    payload["warnings"] = preset_warnings
-                return payload, [_project]
-
-            result = locked_registry(mutate)
-            imported.append(result)
-        except DomainError as exc:
-            if not all_missing:
-                raise
-            errors.append({
-                "port": port,
-                "reason": exc.reason,
-                "message": exc.message or str(exc),
-            })
-        except SystemExit:
-            # fail() already emitted; re-raise for single-port, collect for batch
-            if not all_missing:
-                raise
-            errors.append({"port": port, "reason": "import_failed"})
-        except Exception as exc:  # noqa: BLE001
-            if not all_missing:
-                fail("discover_import_failed", str(exc), port=port)
-            errors.append({"port": port, "reason": "import_failed", "message": str(exc)})
-
-    emit({
-        "status": "ok" if not errors else "partial",
-        "imported": imported,
-        "skipped": skipped,
-        "errors": errors,
-        "count_imported": len(imported),
+    return discover_import_result({
+        "port": getattr(args, "port", None),
+        "all_missing": bool(getattr(args, "all_missing", False)),
+        "tailnet": getattr(args, "tailnet", None),
+        "note": getattr(args, "note", None),
+        "project": getattr(args, "project", None),
     })
 
 
