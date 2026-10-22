@@ -86,6 +86,8 @@ from .registry_domain import (
 from .status import observed_range_status, service_statuses
 from .settings import settings_set
 from .registry_mutations import allocate_result
+from .registry_mutations import release_result
+from .process_commands import start_result, stop_result
 from .tailscale import probe_tailscale_status
 from .webauthn import (
     authentication_options,
@@ -4011,10 +4013,22 @@ font-family:ui-monospace,Menlo,monospace">
 
 
 def run_cli_action(project: str, range_id: str, action: str) -> tuple[int, dict]:
-    argv = ["start" if action == "reclaim-start" else action, "--project", project, "--range-id", range_id]
+    options = {"project": project, "range_id": range_id}
+    operation = action
     if action == "reclaim-start":
-        argv.append("--reclaim")
-    code, payload, stdout = run_cli(argv)
+        operation = "start"
+        options["reclaim"] = True
+    try:
+        payload = {
+            "start": start_result,
+            "stop": stop_result,
+            "release": release_result,
+        }[operation](options)
+        code, stdout = 0, ""
+    except DomainError as exc:
+        payload, code, stdout = exc.as_dict(), exc.exit_code, ""
+    except Exception as exc:
+        payload, code, stdout = None, 1, str(exc)
     if code == 0:
         return 0, {"ok": True, "result": payload}
     if code == 3:
@@ -4054,6 +4068,17 @@ def _cli_result(code: int, payload, stdout: str) -> tuple[int, dict]:
     if isinstance(payload, dict):
         body["result"] = payload
     return code if code else 422, body
+
+
+def _domain_cli_result(operation) -> tuple[int, dict]:
+    """Run an in-process domain action with the legacy HTTP result envelope."""
+    try:
+        return _cli_result(0, operation(), "")
+    except DomainError as exc:
+        payload = exc.as_dict()
+        return _cli_result(exc.exit_code, payload, "")
+    except Exception as exc:
+        return _cli_result(1, None, str(exc) or exc.__class__.__name__)
 
 
 def dispatch_ui_action(body: dict) -> tuple[int, dict]:
@@ -4618,14 +4643,11 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             }
             return _cli_result(1, payload, json.dumps(payload, separators=(",", ":"), sort_keys=True))
     if action == "start-all":
-        code, payload, stdout = run_cli(["start", "--all"])
-        return _cli_result(code, payload, stdout)
+        return _domain_cli_result(lambda: start_result({"all": True}))
     if action == "stop-all":
-        code, payload, stdout = run_cli(["stop", "--all"])
-        return _cli_result(code, payload, stdout)
+        return _domain_cli_result(lambda: stop_result({"all": True}))
     if action == "stop-non-default":
-        code, payload, stdout = run_cli(["stop", "--non-default"])
-        return _cli_result(code, payload, stdout)
+        return _domain_cli_result(lambda: stop_result({"non_default": True}))
     if action in ("set-defaults-from-current", "capture-defaults"):
         code, payload, stdout = run_cli(["set-defaults-from-current"])
         return _cli_result(code, payload, stdout)

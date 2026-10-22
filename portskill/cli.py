@@ -34,11 +34,13 @@ from .lifecycle import (
     needs_tailnet,
     pid_alive,
     placeholder_content,
+    park_item_for_exit,
     process_group_pids,
     range_has_live_process,
     read_listen_port_from_disk,
     refuse_funnel_listen_message,
     refuse_remote_process,
+    resolve_stop_also_release,
     release_item,
     resolve_project_relative,
     run_stop_script_if_ready,
@@ -142,6 +144,15 @@ from .registry_operations import (
     write_local_project_file,
     write_local_project_files,
 )
+from .process_commands import (
+    iter_project_ranges,
+    reclaim_range,
+    run_start_all,
+    run_stop_bulk,
+    start_item_for_apply,
+    start_result,
+    stop_result,
+)
 from .service import launch_service, script_is_placeholder, service_launch
 from .status import (
     enrich_range as enrich_range_for_status,
@@ -203,32 +214,8 @@ def fail(reason, message=None, exit_code=2, **extra):
 
 
 
-def resolve_stop_also_release(registry_or_settings=None, override=None) -> bool:
-    """Whether stop should also release. override True/False wins; else the setting (default true)."""
-    if override is not None:
-        return bool(override)
-    raw = {}
-    if isinstance(registry_or_settings, dict):
-        if "projects" in registry_or_settings or "pool" in registry_or_settings:
-            inner = registry_or_settings.get("settings")
-            raw = inner if isinstance(inner, dict) else {}
-        else:
-            raw = registry_or_settings
-    return bool(normalize_settings(raw).get("stop_also_release", True))
 
 
-def _also_release_override_from_args(args):
-    raw = getattr(args, "also_release", None)
-    if raw is None:
-        return None
-    if isinstance(raw, bool):
-        return raw
-    token = str(raw).strip().lower()
-    if token in ("on", "true", "1", "yes"):
-        return True
-    if token in ("off", "false", "0", "no"):
-        return False
-    return None
 
 
 MCP_USER_COMMAND_TOOL_NAMES = None  # filled lazily from mcp.TOOL_DEFS when validating
@@ -959,245 +946,28 @@ def cmd_release(args):
     return release_result(vars(args))
 
 
-def run_start_all(also_defaults_only=False):
-    """Start all non-released local ranges (or only default_state=on)."""
-
-    def mutate(registry):
-        hist_key = resolve_history_env_name(registry, None)
-        ensure_baseline(registry, hist_key)
-        started = []
-        skipped = []
-        errors = []
-        changed = set()
-        for project, item in list(iter_project_ranges(registry, None)):
-            if item.get("state") == "released":
-                continue
-            if also_defaults_only and normalize_default_state(item.get("default_state")) != "on":
-                skipped.append({
-                    "project": project,
-                    "range_id": item.get("id"),
-                    "reason": "not_default_on",
-                })
-                continue
-            ok, detail = start_item_for_apply(item, project, registry=registry)
-            detail = dict(detail)
-            detail["project"] = project
-            detail["range_id"] = item.get("id")
-            if ok:
-                started.append(detail)
-                changed.add(project)
-            elif detail.get("skipped"):
-                skipped.append(detail)
-            else:
-                errors.append(detail)
-                if "range" in detail:
-                    changed.add(project)
-        maybe_push_history(registry, "start-all" if not also_defaults_only else "start-defaults", hist_key)
-        return {
-            "status": "ok",
-            "started": started,
-            "skipped": skipped,
-            "errors": errors,
-            "started_count": len(started),
-            "skipped_count": len(skipped),
-            "error_count": len(errors),
-            "mode": "defaults" if also_defaults_only else "all",
-        }, sorted(changed)
-
-    return locked_registry(mutate)
-
-
-def run_stop_bulk(mode="all", also_release=None):
-    """Stop running services. mode: all | non-default. Release follows settings.stop_also_release."""
-
-    def mutate(registry):
-        hist_key = resolve_history_env_name(registry, None)
-        ensure_baseline(registry, hist_key)
-        stopped = []
-        skipped = []
-        errors = []
-        changed = set()
-        also = resolve_stop_also_release(registry, override=also_release)
-        for project, item in list(iter_project_ranges(registry, None)):
-            if mode == "non-default" and normalize_default_state(item.get("default_state")) == "on":
-                skipped.append({
-                    "project": project,
-                    "range_id": item.get("id"),
-                    "reason": "default_on",
-                })
-                continue
-            live = range_has_live_process(item)
-            is_active = item.get("state") == "active"
-            if not live and not is_active:
-                skipped.append({
-                    "project": project,
-                    "range_id": item.get("id"),
-                    "reason": "not_running",
-                })
-                continue
-            ok, detail = park_item_for_exit(item, project, also_release=also)
-            detail = dict(detail)
-            detail["project"] = project
-            detail["range_id"] = item.get("id")
-            if ok:
-                stopped.append(detail)
-                changed.add(project)
-            else:
-                errors.append(detail)
-                if "range" in detail:
-                    changed.add(project)
-        label = "stop-all" if mode == "all" else "stop-non-default"
-        maybe_push_history(registry, label, hist_key)
-        return {
-            "status": "ok",
-            "stopped": stopped,
-            "skipped": skipped,
-            "errors": errors,
-            "stopped_count": len(stopped),
-            "skipped_count": len(skipped),
-            "error_count": len(errors),
-            "mode": mode,
-            "also_release": also,
-        }, sorted(changed)
-
-    return locked_registry(mutate)
-
-
 def cmd_start(args):
-    if bool(getattr(args, "all", False)):
-        emit(run_start_all(also_defaults_only=False))
-        return
-    if not getattr(args, "range_id", None):
-        fail("invalid_args", "start requires --range-id or --all")
-    project = project_path(args.project)
-    require_project_directory(project)
-
-    def mutate(registry):
-        hist_key = resolve_history_env_name(registry, getattr(args, "environment", None))
-        ensure_baseline(registry, hist_key)
-        item = find_project_range(registry, project, args.range_id)
-        if item is None:
-            fail("not_found", f"range id not found for project: {args.range_id}")
-        if is_remote_range(registry, item):
-            refuse_remote_process(registry, item, action="start")
-        if item.get("state") == "released":
-            if not getattr(args, "reclaim", False):
-                fail("range_released", "Stop released this service's ports. Reclaim them to start again.",
-                     hint=f"start --project {shlex.quote(project)} --range-id {shlex.quote(args.range_id)} --reclaim")
-            reclaim_range(registry, item)
-        life = lifecycle(item)
-        if pid_alive(life.get("pid")):
-            activate_item(item, project, args.range_id, args.tailnet)
-            maybe_push_history(registry, "start", hist_key)
-            return {"status": "ok", "range": item}, [project]
-        if life.get("pid") is not None:
-            life["pid"] = None
-            life["pgid"] = None
-        recorded_mode = item.get("tailnet", {}).get("mode")
-        if args.tailnet is None and recorded_mode is None:
-            emit(needs_tailnet(project, args.range_id))
-            raise SystemExit(3)
-        outcome = launch_service(item, project)
-        if not outcome.ok:
-            detail = outcome.error_detail()
-            fail(detail.pop("reason"), detail.pop("message", None), **detail)
-        activate_item(item, project, args.range_id, args.tailnet)
-        maybe_push_history(registry, "start", hist_key)
-        return {"status": "ok", "range": item}, [project]
-
-    emit(locked_registry(mutate))
-
-
-def reclaim_range(registry, item):
-    """Re-reserve the same ports under the registry lock, preserving service wiring."""
-    import socket
-
-    for other in non_released_ranges(registry):
-        if overlaps(item["start"], item["end"], other["start"], other["end"]):
-            fail("port_in_use", f"These ports are now reserved by {other.get('note') or other.get('id')}. "
-                 "Stop and release that service, then retry Reclaim ports & start.")
-    for port in range(item["start"], item["end"] + 1):
-        for host in ("127.0.0.1", "::1"):
-            try:
-                connection = socket.create_connection((host, port), timeout=0.15)
-            except OSError:
-                continue
-            connection.close()
-            fail("port_in_use", f"Port {port} is in use. Stop the service using it, then retry Reclaim ports & start.")
-        for family, host in ((socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")):
-            try:
-                with socket.socket(family, socket.SOCK_STREAM) as probe:
-                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                    if family == socket.AF_INET6:
-                        probe.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-                    probe.bind((host, port))
-            except OSError as exc:
-                import errno
-                if family == socket.AF_INET6 and exc.errno in (errno.EAFNOSUPPORT, errno.EADDRNOTAVAIL):
-                    continue
-                fail("port_in_use", f"Port {port} is in use. Stop the service using it, then retry Reclaim ports & start.")
-    item["state"] = "reserved"
-    item["reserved_at"] = utc_now()
-    item["released_at"] = None
-    life = lifecycle(item)
-    life["pid"] = None
-    life["pgid"] = None
+    return start_result(vars(args))
 
 
 def cmd_stop(args):
-    override = _also_release_override_from_args(args)
-    if bool(getattr(args, "all", False)):
-        emit(run_stop_bulk(mode="all", also_release=override))
-        return
-    if bool(getattr(args, "non_default", False)):
-        emit(run_stop_bulk(mode="non-default", also_release=override))
-        return
-    if not getattr(args, "range_id", None):
-        fail("invalid_args", "stop requires --range-id, --all, or --non-default")
-    project = project_path(args.project)
-    require_project_directory(project)
-
-    def mutate(registry):
-        hist_key = resolve_history_env_name(registry, getattr(args, "environment", None))
-        ensure_baseline(registry, hist_key)
-        item = find_project_range(registry, project, args.range_id)
-        if item is None:
-            fail("not_found", f"range id not found for project: {args.range_id}")
-        if item.get("state") == "released":
-            return {"status": "ok", "range": item, "also_release": resolve_stop_also_release(registry, override=override), "action": "already_released"}, []
-        also = resolve_stop_also_release(registry, override=override)
-        ok, detail = park_item_for_exit(item, project, also_release=also)
-        if not ok:
-            fail(
-                detail.get("reason") or "stop_failed",
-                detail.get("message") or "stop failed",
-                **{k: v for k, v in detail.items() if k not in ("reason", "message")},
-            )
-        maybe_push_history(registry, "stop", hist_key)
-        payload = {"status": "ok", "range": item, "also_release": also}
-        if isinstance(detail, dict) and detail.get("action"):
-            payload["action"] = detail["action"]
-        return payload, [project]
-
-    emit(locked_registry(mutate))
+    return stop_result(vars(args))
 
 
 
 
 
 
-def iter_project_ranges(registry, project_filter=None):
-    """Yield (project, item) for non-released ranges, optionally filtered by project path(s)."""
-    filters = None
-    if project_filter:
-        filters = {project_path(p) for p in project_filter}
-    for project, entry in registry["projects"].items():
-        if filters is not None and project not in filters:
-            continue
-        for item in entry.get("ranges", []):
-            if item.get("state") == "released":
-                continue
-            yield project, normalize_range_record(item)
+
+
+
+
+
+
+
+
+
+
 
 
 def build_environment_payload(registry, name, description="", project_filter=None):
@@ -1515,42 +1285,6 @@ def cmd_set_defaults_from_current(args):
     emit(locked_registry(mutate))
 
 
-def start_item_for_apply(item, project, registry=None):
-    """Start a range for apply-defaults. Returns (ok: bool, detail: dict). Does not emit/exit."""
-    if item.get("state") == "released":
-        return False, {"reason": "range_released", "range_id": item.get("id")}
-    if registry is not None and is_remote_range(registry, item):
-        return False, {
-            "reason": "remote_machine",
-            "range_id": item.get("id"),
-            "machine_id": item.get("machine_id") or item.get("machine") or item.get("host_id"),
-            "skipped": True,
-            "message": "Remote ranges are links only; not started from this Mac",
-        }
-    life = lifecycle(item)
-    if pid_alive(life.get("pid")) or range_has_live_process(item):
-        # Already live — ensure active with recorded/none tailnet; no new process
-        try:
-            mode = (item.get("tailnet") or {}).get("mode") or "none"
-            activate_item(item, project, item.get("id"), mode)
-        except DomainError:
-            return False, {"reason": "activate_failed", "range_id": item.get("id")}
-        return True, {"action": "already_live", "range": item}
-    if life.get("pid") is not None:
-        life["pid"] = None
-        life["pgid"] = None
-    mode = (item.get("tailnet") or {}).get("mode") or "none"
-    outcome = launch_service(item, project)
-    if not outcome.ok:
-        detail = outcome.error_detail(item.get("id"))
-        if detail.get("reason") == "start_script_placeholder":
-            detail["skipped"] = True
-        return False, detail
-    try:
-        activate_item(item, project, item.get("id"), mode)
-    except DomainError:
-        return False, {"reason": "activate_failed", "range_id": item.get("id"), "range": item}
-    return True, {"action": "started", "range": item}
 
 
 def stop_item_for_apply(item, project):
@@ -1686,42 +1420,6 @@ def item_matches_preset_service(project, item, service):
     return (item.get("note") or None) == (service.get("note") or None)
 
 
-def park_item_for_exit(item, project, also_release=False):
-    """Stop.sh + tracked pgid terminate + tailnet off.
-
-    When also_release is false, the range stays reserved (deactivate / Stop
-    without Release). When true, fully release via release_item.
-    """
-    if item.get("state") == "released":
-        return True, {"action": "already_released", "range": item}
-    life = lifecycle(item)
-    has_live = range_has_live_process(item)
-    if has_live:
-        run_stop_script_if_ready(item, project)
-        terminate_lifecycle_processes(item)
-    else:
-        life["pid"] = None
-        life["pgid"] = None
-        if not life.get("stopped_at"):
-            life["stopped_at"] = utc_now()
-    if also_release:
-        try:
-            release_item(item)
-        except DomainError:
-            return False, {"reason": "release_failed", "range_id": item.get("id")}
-        return True, {"action": "stopped_released", "range": item}
-    # Tear down tailnet but keep allocation reserved
-    tailnet = item.setdefault("tailnet", {"mode": None, "port": None, "configured_at": None})
-    mode = tailnet.get("mode")
-    if item.get("state") == "active" and mode in ("serve", "funnel"):
-        port = tailnet.get("port") or item["start"]
-        try:
-            run_tailnet(mode, port, off=True)
-        except DomainError:
-            return False, {"reason": "tailnet_teardown_failed", "range_id": item.get("id")}
-        tailnet["configured_at"] = None
-    item["state"] = "reserved"
-    return True, {"action": "stopped_reserved", "range": item}
 
 
 def run_exit_house(project_filter=None, preset_name=None, also_release=False, clear_session=True):
@@ -3107,7 +2805,7 @@ def cmd_path(args):
     """CLI mirror of MCP portskill. Implementation lives in .path."""
     from .path import cmd_path_from_args
 
-    cmd_path_from_args(args)
+    return cmd_path_from_args(args)
 
 
 def cmd_status(args):

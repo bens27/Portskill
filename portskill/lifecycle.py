@@ -9,7 +9,7 @@ import subprocess
 import time
 
 from .domain import DomainError, pid_alive as domain_pid_alive, utc_now
-from .registry import read_listen
+from .registry import normalize_settings, read_listen
 from .registry_domain import (
     DEFAULT_LIFECYCLE_DIR,
     normalize_range_record,
@@ -351,3 +351,53 @@ def read_listen_port_from_disk():
     except (TypeError, ValueError):
         return None
     return port if port > 0 else None
+def resolve_stop_also_release(registry_or_settings=None, override=None) -> bool:
+    """Whether stop should also release. override True/False wins; else the setting (default true)."""
+    if override is not None:
+        return bool(override)
+    raw = {}
+    if isinstance(registry_or_settings, dict):
+        if "projects" in registry_or_settings or "pool" in registry_or_settings:
+            inner = registry_or_settings.get("settings")
+            raw = inner if isinstance(inner, dict) else {}
+        else:
+            raw = registry_or_settings
+    return bool(normalize_settings(raw).get("stop_also_release", True))
+
+
+def park_item_for_exit(item, project, also_release=False):
+    """Stop.sh + tracked pgid terminate + tailnet off.
+
+    When also_release is false, the range stays reserved (deactivate / Stop
+    without Release). When true, fully release via release_item.
+    """
+    if item.get("state") == "released":
+        return True, {"action": "already_released", "range": item}
+    life = lifecycle(item)
+    has_live = range_has_live_process(item)
+    if has_live:
+        run_stop_script_if_ready(item, project)
+        terminate_lifecycle_processes(item)
+    else:
+        life["pid"] = None
+        life["pgid"] = None
+        if not life.get("stopped_at"):
+            life["stopped_at"] = utc_now()
+    if also_release:
+        try:
+            release_item(item)
+        except DomainError:
+            return False, {"reason": "release_failed", "range_id": item.get("id")}
+        return True, {"action": "stopped_released", "range": item}
+    # Tear down tailnet but keep allocation reserved
+    tailnet = item.setdefault("tailnet", {"mode": None, "port": None, "configured_at": None})
+    mode = tailnet.get("mode")
+    if item.get("state") == "active" and mode in ("serve", "funnel"):
+        port = tailnet.get("port") or item["start"]
+        try:
+            run_tailnet(mode, port, off=True)
+        except DomainError:
+            return False, {"reason": "tailnet_teardown_failed", "range_id": item.get("id")}
+        tailnet["configured_at"] = None
+    item["state"] = "reserved"
+    return True, {"action": "stopped_reserved", "range": item}

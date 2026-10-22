@@ -38,6 +38,8 @@ from .doctor import doctor_result
 from .settings import settings_get, settings_set
 from .status import status_result
 from .registry_mutations import activate_result, allocate_result, release_result
+from .process_commands import start_result, stop_result
+from .path import run_path
 
 # Named settings.mcp_tools profiles. Apply writes the existing enable map
 # (missing key = enabled). Default is full so existing installs stay unchanged
@@ -592,6 +594,34 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "release": release_result,
         }[name]
         body = operation(args)
+        return {
+            "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
+            "structuredContent": body,
+            "isError": False,
+        }
+    if name in ("start", "stop"):
+        body = (start_result if name == "start" else stop_result)(args)
+        return {
+            "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
+            "structuredContent": body,
+            "isError": False,
+        }
+    if name in (PORTSKILL_TOOL_NAME, *sorted(PORTSKILL_TOOL_ALIASES)):
+        body = run_path(
+            mode=args.get("mode"),
+            project=args.get("project") or ".",
+            count=int(args.get("count") or 1),
+            range_id=args.get("range_id"),
+            note=args.get("note"),
+            tailnet=args.get("tailnet"),
+            command=args.get("command"),
+            cwd=args.get("cwd"),
+            default_state=args.get("default_state"),
+            start=args.get("start"),
+            environment=args.get("environment"),
+        )
+        if body.get("status") == "needs_input":
+            raise DomainError("needs_input", exit_code=3, payload=body)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,

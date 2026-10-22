@@ -222,6 +222,7 @@ class RegistryMutationDomainTests(unittest.TestCase):
     def test_portskill_serve_disable_tolerates_domain_teardown_error(self) -> None:
         from portskill import cli
         from portskill import lifecycle as lifecycle_module
+        from portskill import process_commands
 
         failed = type("Result", (), {"returncode": 1, "stdout": "", "stderr": "gone"})()
         with mock.patch.object(cli, "tailscale_bin_available", return_value=(True, "tailscale")), mock.patch.object(
@@ -240,6 +241,7 @@ class RegistryMutationDomainTests(unittest.TestCase):
     def test_post_launch_activation_failure_keeps_lifecycle_metadata(self) -> None:
         from portskill import cli
         from portskill import lifecycle as lifecycle_module
+        from portskill import process_commands
         from portskill.domain import DomainError
         from portskill.service import ServiceLaunchOutcome
 
@@ -247,7 +249,7 @@ class RegistryMutationDomainTests(unittest.TestCase):
         def launched(target, _project):
             target["lifecycle"].update({"pid": 4321, "pgid": 4321, "started_at": "now"})
             return ServiceLaunchOutcome(True, source="command", pid=4321, pgid=4321, started_at="now")
-        with mock.patch.object(cli, "launch_service", side_effect=launched), mock.patch.object(
+        with mock.patch.object(process_commands, "launch_service", side_effect=launched), mock.patch.object(
             lifecycle_module,
             "ensure_tailscale_authenticated",
             side_effect=DomainError("tailscale_bin_missing", "missing"),
@@ -260,6 +262,7 @@ class RegistryMutationDomainTests(unittest.TestCase):
 
     def test_exit_house_continues_for_reserved_and_release_policies(self) -> None:
         from portskill import cli
+        from portskill import lifecycle as lifecycle_module
         from portskill.domain import DomainError
 
         for also_release, helper in ((False, "run_tailnet"), (True, "release_item")):
@@ -274,7 +277,7 @@ class RegistryMutationDomainTests(unittest.TestCase):
                     ranges.append(item)
                 iso.write_registry({"projects": {project: {"ranges": ranges}}})
                 with mock.patch.object(
-                    cli, helper, side_effect=[DomainError("tailnet_command_failed", "failed"), None]
+                    lifecycle_module, helper, side_effect=[DomainError("tailnet_command_failed", "failed"), None]
                 ):
                     payload = cli.run_exit_house(also_release=also_release, clear_session=False)
                 self.assertEqual(payload["error_count"], 1)

@@ -14,6 +14,17 @@ import pathlib
 from dataclasses import dataclass
 from typing import Any
 
+from .domain import DomainError
+from .lifecycle import (
+    activate_item,
+    park_item_for_exit,
+    range_has_live_process,
+    read_listen_port_from_disk,
+    refuse_remote_process,
+    release_item,
+    resolve_stop_also_release,
+    scaffold_lifecycle_scripts,
+)
 from .registry import normalize_settings
 from .registry_domain import (
     DEFAULT_START_SCRIPT,
@@ -27,6 +38,16 @@ from .registry_domain import (
 from .service import script_is_placeholder
 from .status import enrich_range as enrich_range_for_status, project_from_context
 from .tailscale import probe_tailscale_status
+from .registry_operations import (
+    allocate_range,
+    ensure_baseline,
+    find_matching_unreleased,
+    find_project_range,
+    locked_registry,
+    maybe_push_history,
+    require_project_directory,
+    resolve_history_env_name,
+)
 
 PATH_MODES = ("start", "stop", "release", "restart", "status")
 
@@ -178,8 +199,6 @@ def _wire_pending(item: dict | None, command: str | None, cwd: str | None, defau
 
 
 def _select_item(registry: dict, project: str, range_id: str | None, note: str | None):
-    from .cli import find_matching_unreleased, find_project_range
-
     if range_id:
         item = find_project_range(registry, project, range_id)
         if item is not None and item.get("state") != "released":
@@ -197,8 +216,6 @@ def _select_item(registry: dict, project: str, range_id: str | None, note: str |
 
 
 def _listen_port() -> int | None:
-    from .cli import read_listen_port_from_disk
-
     return read_listen_port_from_disk()
 
 
@@ -213,8 +230,6 @@ def _facts_from_state(
     logged_in: bool,
     listen_port: int | None,
 ) -> PathSkipFacts:
-    from .cli import range_has_live_process
-
     state = item.get("state") if isinstance(item, dict) else None
     has = bool(item is not None and state != "released")
     live = bool(item is not None and range_has_live_process(item))
@@ -245,8 +260,6 @@ def _facts_from_state(
 
 
 def _apply_wire(item, project, command, cwd, default_state):
-    from .cli import scaffold_lifecycle_scripts
-
     scaffold_lifecycle_scripts(project)
     changed = []
     if command is not None:
@@ -262,13 +275,12 @@ def _apply_wire(item, project, command, cwd, default_state):
 
 
 def _launch_start(item, project):
-    from .cli import fail
     from .service import launch_service
 
     outcome = launch_service(item, project)
     if not outcome.ok:
         detail = outcome.error_detail()
-        fail(detail.pop("reason"), detail.pop("message", None), **detail)
+        raise DomainError(detail.pop("reason"), detail.pop("message", None), **detail)
     return {
         "source": outcome.source,
         "pid": outcome.pid,
@@ -291,26 +303,11 @@ def run_path(
     environment: str | None = None,
 ) -> dict:
     """Execute path mode. Returns payload; caller emits / maps exit codes."""
-    from .cli import (
-        activate_item,
-        allocate_range,
-        fail,
-        locked_registry,
-        mark_item_active,
-        maybe_push_history,
-        park_item_for_exit,
-        range_has_live_process,
-        refuse_remote_process,
-        release_item,
-        require_project_directory,
-        resolve_history_env_name,
-        resolve_stop_also_release,
-        ensure_baseline,
-    )
+    from .lifecycle import mark_item_active
 
     mode = (mode or "").strip().lower()
     if mode not in PATH_MODES:
-        fail("invalid_args", f"path mode must be one of {', '.join(PATH_MODES)}")
+        raise DomainError("invalid_args", f"path mode must be one of {', '.join(PATH_MODES)}")
 
     project = project_path(project or ".")
     if mode != "status":
@@ -408,21 +405,21 @@ def run_path(
                 ran.append(_phase_entry(phase, detail=detail))
             elif phase == "wire":
                 if item is None:
-                    fail("not_found", "path wire needs an allocated range")
+                    raise DomainError("not_found", "path wire needs an allocated range")
                 applied = _apply_wire(item, project, command, cwd, default_state)
                 changed.append(project)
                 ran.append(_phase_entry(phase, detail={"applied": applied}))
             elif phase == "activate":
                 if item is None:
-                    fail("not_found", "path activate needs an allocated range")
+                    raise DomainError("not_found", "path activate needs an allocated range")
                 mark_item_active(item)
                 changed.append(project)
                 ran.append(_phase_entry(phase, detail={"range_id": item.get("id")}))
             elif phase == "start":
                 if item is None:
-                    fail("not_found", "path start needs an allocated range")
+                    raise DomainError("not_found", "path start needs an allocated range")
                 if item.get("state") == "released":
-                    fail("range_released", "released ranges cannot be started; allocate a fresh range")
+                    raise DomainError("range_released", "released ranges cannot be started; allocate a fresh range")
                 launched = _launch_start(item, project)
                 if item.get("state") != "active":
                     mark_item_active(item)
@@ -430,7 +427,7 @@ def run_path(
                 ran.append(_phase_entry(phase, detail=launched))
             elif phase == "tailnet":
                 if item is None:
-                    fail("not_found", "path tailnet needs an allocated range")
+                    raise DomainError("not_found", "path tailnet needs an allocated range")
                 applied = requested or "none"
                 activate_item(item, project, item.get("id"), applied)
                 changed.append(project)
@@ -444,7 +441,7 @@ def run_path(
                 also = False if mode == "restart" else resolve_stop_also_release(registry)
                 ok, detail = park_item_for_exit(item, project, also_release=also)
                 if not ok:
-                    fail(detail.get("reason") or "stop_failed", detail.get("message"), **{
+                    raise DomainError(detail.get("reason") or "stop_failed", detail.get("message"), **{
                         k: v for k, v in detail.items() if k not in ("reason", "message")
                     })
                 changed.append(project)
@@ -454,7 +451,7 @@ def run_path(
                     skipped.append(_phase_entry(phase, skipped=SKIP_RELEASE_ALREADY))
                     continue
                 if range_has_live_process(item):
-                    fail(
+                    raise DomainError(
                         "process_still_running",
                         "range still has a live pid/pgid; use path --mode stop (not release)",
                     )
@@ -466,8 +463,6 @@ def run_path(
             maybe_push_history(registry, f"path-{mode}", hist_key)
         rid = range_id or (item.get("id") if isinstance(item, dict) else None)
         if rid:
-            from .cli import find_project_range
-
             found = find_project_range(registry, project, rid)
             if found is not None:
                 item = found
@@ -488,9 +483,7 @@ def run_path(
     return locked_registry(mutate)
 
 
-def cmd_path_from_args(args) -> None:
-    from .cli import emit
-
+def cmd_path_from_args(args) -> dict:
     payload = run_path(
         mode=getattr(args, "mode", None),
         project=getattr(args, "project", None) or ".",
@@ -504,6 +497,6 @@ def cmd_path_from_args(args) -> None:
         start=getattr(args, "start", None),
         environment=getattr(args, "environment", None),
     )
-    emit(payload)
     if payload.get("needs_input") or payload.get("status") == "needs_input":
-        raise SystemExit(3)
+        raise DomainError("needs_input", exit_code=3, payload=payload)
+    return payload
