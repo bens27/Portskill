@@ -273,6 +273,62 @@ ACTIVATE_COMMAND = CommandSpec(
 )
 
 
+START_COMMAND = CommandSpec(
+    id="start",
+    handler=HandlerRef("portskill.process_commands", "start_result"),
+    params=(
+        ParamSpec(key="range_id", cli=CLIParamBinding(flags=("--range-id",), default=None), mcp=MCPParamBinding(required=True, order=0), ui=UIParamBinding(("rangeId",), required=True)),
+        ParamSpec(key="reclaim", kind="boolean", cli=CLIParamBinding(flags=("--reclaim",), action="store_true", help="Re-reserve a released service's ports if free, then start it")),
+        ParamSpec(key="all", kind="boolean", cli=CLIParamBinding(flags=("--all",), action="store_true", help="Start all non-released services")),
+        ParamSpec(key="project", cli=CLIParamBinding(flags=("--project",), default="."), mcp=MCPParamBinding(order=1), ui=UIParamBinding(("project",), required=True)),
+        ParamSpec(key="tailnet", cli=CLIParamBinding(flags=("--tailnet",), choices=("serve", "funnel", "none"), default=None), mcp=MCPParamBinding(enum=("serve", "funnel", "none"), order=2)),
+        ParamSpec(key="environment", cli=CLIParamBinding(flags=("--environment",), default=None, help="History env scope")),
+    ),
+    cli=CLICommandBinding(path=("start",)),
+    mcp=MCPCommandBinding(
+        name="start",
+        description="Low-level: run start.sh for an already-reserved range_id. To register and serve a new project, use portskill mode=start instead.",
+        catalog_position=2,
+    ),
+    ui=UICommandBinding(
+        actions=("start", "reclaim-start", "start-all"),
+        binder="range_action",
+        action_binders=(("reclaim-start", "reclaim_start"), ("start-all", "start_all")),
+    ),
+)
+
+
+STOP_COMMAND = CommandSpec(
+    id="stop",
+    handler=HandlerRef("portskill.process_commands", "stop_result"),
+    params=(
+        ParamSpec(key="range_id", cli=CLIParamBinding(flags=("--range-id",), default=None), mcp=MCPParamBinding(required=True, order=0), ui=UIParamBinding(("rangeId",), required=True)),
+        ParamSpec(key="all", kind="boolean", cli=CLIParamBinding(flags=("--all",), action="store_true", help="Stop all active/running services")),
+        ParamSpec(key="non_default", kind="boolean", cli=CLIParamBinding(flags=("--non-default",), action="store_true", help="Stop running services whose default_state is off")),
+        ParamSpec(key="project", cli=CLIParamBinding(flags=("--project",), default="."), mcp=MCPParamBinding(order=1), ui=UIParamBinding(("project",), required=True)),
+        ParamSpec(key="environment", cli=CLIParamBinding(flags=("--environment",), default=None, help="History env scope")),
+        ParamSpec(
+            key="also_release",
+            kind="boolean",
+            cli=CLIParamBinding(flags=("--also-release",), choices=("on", "off"), default=None, help="Override settings.stop_also_release for this call. on releases the range; off keeps it reserved."),
+            mcp=MCPParamBinding(description="Override settings.stop_also_release for this call", order=2),
+        ),
+    ),
+    cli=CLICommandBinding(path=("stop",)),
+    mcp=MCPCommandBinding(
+        name="stop",
+        description="Stop the tracked process group (stop.sh / pgid). Whether the range is released follows settings.stop_also_release (default true). When false, the range stays reserved and release is the explicit free. Optional also_release overrides the setting for this call.",
+        catalog_position=3,
+        lean=True,
+    ),
+    ui=UICommandBinding(
+        actions=("stop", "stop-all", "stop-non-default"),
+        binder="range_action",
+        action_binders=(("stop-all", "stop_all"), ("stop-non-default", "stop_non_default")),
+    ),
+)
+
+
 RELEASE_COMMAND = CommandSpec(
     id="release",
     handler=HandlerRef("portskill.registry_mutations", "release_result"),
@@ -330,6 +386,44 @@ STATUS_COMMAND = CommandSpec(
 )
 
 
+PORTSKILL_TOOL_PITCH = "One MCP tool for your agent to handle all port management functions."
+PORTSKILL_TOOL_DESCRIPTION = PORTSKILL_TOOL_PITCH + (
+    " Use it whenever the user says register a port, register, add, host, serve, run, launch, expose, "
+    "put on or get onto Portskill (or the port registry), or needs a dev server, app "
+    "or project to get a port, a URL, or a Tailscale/tailnet link. "
+    "mode=start does the whole job in one call: reserves a free port, wires start.sh "
+    "to command, starts the service and, with tailnet=serve, publishes it over Tailscale Serve. "
+    "Already-done steps are skipped, so it is safe to repeat. "
+    "mode=stop, release or restart to take a service down, free its port or bounce it; "
+    "mode=status to see what is registered and running."
+)
+
+
+PATH_COMMAND = CommandSpec(
+    id="path",
+    handler=HandlerRef("portskill.path", "run_path", "path"),
+    params=(
+        ParamSpec(key="mode", cli=CLIParamBinding(flags=("--mode",), required=True, choices=("start", "stop", "release", "restart", "status")), mcp=MCPParamBinding(required=True, enum=("start", "stop", "release", "restart", "status"), description="start = register and serve (allocate, wire, activate, start, tailnet); stop, release, restart, or status", order=0)),
+        ParamSpec(key="project", cli=CLIParamBinding(flags=("--project",), default="."), mcp=MCPParamBinding(description="Project directory (default .)", order=1)),
+        ParamSpec(key="count", kind="integer", cli=CLIParamBinding(flags=("--count",), type_name="integer", default=1, help="Ports to allocate when needed (default 1)"), mcp=MCPParamBinding(minimum=1, description="Ports to allocate when start/restart needs a new range (default 1)", order=2)),
+        ParamSpec(key="range_id", cli=CLIParamBinding(flags=("--range-id",), default=None), mcp=MCPParamBinding(order=3)),
+        ParamSpec(key="note", cli=CLIParamBinding(flags=("--note",), default=None), mcp=MCPParamBinding(order=4)),
+        ParamSpec(key="tailnet", cli=CLIParamBinding(flags=("--tailnet",), choices=("serve", "funnel", "none"), default=None), mcp=MCPParamBinding(enum=("serve", "funnel", "none"), description="Optional user-service Tailnet. Omitted follows settings.default_tailnet (none unless set to serve); none skips Serve. serve requires login (needs_input to resume). Never Funnels Portskill listen.", order=5)),
+        ParamSpec(key="command", cli=CLIParamBinding(flags=("--command",), default=None, help="Optional start command to wire onto the range"), mcp=MCPParamBinding(description="Shell command that launches the service, e.g. npm run dev -- --port $PORT. Needed for start when start.sh is still a placeholder", order=6)),
+        ParamSpec(key="cwd", cli=CLIParamBinding(flags=("--cwd",), default=None), mcp=MCPParamBinding(order=7)),
+        ParamSpec(key="default_state", cli=CLIParamBinding(flags=("--default-state",), choices=("on", "off"), default=None), mcp=MCPParamBinding(enum=("on", "off"), order=8)),
+        ParamSpec(key="start", kind="integer", cli=CLIParamBinding(flags=("--start",), type_name="integer", default=None, help="Optional explicit start port when allocate runs"), mcp=MCPParamBinding(description="Optional explicit start port when allocating", order=9)),
+        ParamSpec(key="environment", cli=CLIParamBinding(flags=("--environment",), default=None, help="History env scope")),
+    ),
+    cli=CLICommandBinding(
+        path=("path",),
+        aliases=("portskill-path", "portskill_path"),
+        help="One MCP tool for your agent to handle all port management functions (MCP portskill). Modes start|stop|release|restart|status with inspectable skips.",
+    ),
+    mcp=MCPCommandBinding(name="portskill", description=PORTSKILL_TOOL_DESCRIPTION, catalog_position=6, aliases=("portskill_path",), lean=True),
+)
+
+
 DOCTOR_COMMAND = CommandSpec(
     id="doctor",
     handler=HandlerRef("portskill.doctor", "doctor_result", "project"),
@@ -349,6 +443,71 @@ DOCTOR_COMMAND = CommandSpec(
         ),
         catalog_position=7,
     ),
+)
+
+
+SET_DEFAULT_COMMAND = CommandSpec(
+    id="set_default",
+    handler=HandlerRef("portskill.defaults", "set_default_result"),
+    params=(
+        ParamSpec(key="range_id", cli=CLIParamBinding(flags=("--range-id",), required=True), mcp=MCPParamBinding(required=True, order=0), ui=UIParamBinding(("rangeId",), required=True)),
+        ParamSpec(key="state", cli=CLIParamBinding(flags=("--state",), required=True, choices=("on", "off")), mcp=MCPParamBinding(required=True, enum=("on", "off"), order=1), ui=UIParamBinding(("state",), required=True)),
+        ParamSpec(key="project", cli=CLIParamBinding(flags=("--project",), default=None), mcp=MCPParamBinding(order=2), ui=UIParamBinding(("project",), coercion="nonempty_string_or_none")),
+        ParamSpec(key="environment", cli=CLIParamBinding(flags=("--environment",), default=None, help="History env scope")),
+    ),
+    cli=CLICommandBinding(path=("set-default",)),
+    mcp=MCPCommandBinding(name="set_default", description="Set default_state on|off for a range (portskill set-default).", catalog_position=10),
+    ui=UICommandBinding(actions=("set-default",), binder="set_default"),
+)
+
+
+SET_DEFAULTS_FROM_CURRENT_COMMAND = CommandSpec(
+    id="set_defaults_from_current",
+    handler=HandlerRef("portskill.defaults", "set_defaults_from_current_result"),
+    params=(
+        ParamSpec(key="environment", cli=CLIParamBinding(flags=("--environment",), default=None, help="History env scope")),
+    ),
+    cli=CLICommandBinding(path=("set-defaults-from-current",), help="Set default_state on/off from each local range's current active/inactive state"),
+    ui=UICommandBinding(actions=("set-defaults-from-current", "capture-defaults"), binder="none"),
+)
+
+
+APPLY_DEFAULTS_COMMAND = CommandSpec(
+    id="apply_defaults",
+    handler=HandlerRef("portskill.apply_defaults", "apply_defaults_result", "apply_defaults"),
+    params=(
+        ParamSpec(key="project", kind="array", cli=CLIParamBinding(flags=("--project",), action="append", default=None), mcp=MCPParamBinding(items_type="string", description="Optional project path filters", order=0)),
+        ParamSpec(key="also_stop_off", kind="boolean", cli=CLIParamBinding(flags=("--also-stop-off",), action="store_true", help="Also stop running services whose default_state is off"), mcp=MCPParamBinding(order=1)),
+    ),
+    cli=CLICommandBinding(path=("apply-defaults",)),
+    mcp=MCPCommandBinding(name="apply_defaults", description="Start Default Services: start services marked default_state=on. Optional also_stop_off stops Off services that are running.", catalog_position=11),
+    ui=UICommandBinding(actions=("apply-defaults",), binder="none"),
+)
+
+
+DEACTIVATE_COMMAND = CommandSpec(
+    id="deactivate",
+    handler=HandlerRef("portskill.deactivate", "deactivate_result"),
+    params=(
+        ParamSpec(key="project", kind="array", cli=CLIParamBinding(flags=("--project",), action="append", default=None), mcp=MCPParamBinding(items_type="string", description="Optional project path filters", order=0)),
+        ParamSpec(key="preset", cli=CLIParamBinding(flags=("--preset",), default=None, help="Limit teardown to services in this named preset (instead of default_state=on)"), mcp=MCPParamBinding(description="Limit to services in this named preset instead of default_state=on", order=1), ui=UIParamBinding(("preset",), coercion="stripped_or_none")),
+        ParamSpec(key="also_release", kind="boolean", cli=CLIParamBinding(flags=("--also-release",), action="store_true", help="Also release ranges after stop (default keeps them reserved)"), mcp=MCPParamBinding(description="If true, release ranges after stop (default keeps reserved)", order=2), ui=UIParamBinding(("alsoRelease", "also_release"), coercion="boolean")),
+    ),
+    cli=CLICommandBinding(path=("deactivate",), aliases=("exit-house", "leave"), help="Deactivate environment: stop Default On services (keep reserved unless --also-release)"),
+    mcp=MCPCommandBinding(name="deactivate", description="Deactivate environment: stop running default_state=on services (or --preset cohort) via stop.sh + tracked pgid; keep ranges reserved unless also_release. Symmetric to apply_defaults.", catalog_position=12),
+    ui=UICommandBinding(actions=("deactivate", "exit-house"), binder="deactivate"),
+)
+
+
+EXIT_HOUSE_COMMAND = CommandSpec(
+    id="exit_house",
+    handler=HandlerRef("portskill.deactivate", "deactivate_result"),
+    params=(
+        ParamSpec(key="project", kind="array", mcp=MCPParamBinding(items_type="string", order=0)),
+        ParamSpec(key="preset", mcp=MCPParamBinding(order=1)),
+        ParamSpec(key="also_release", kind="boolean", mcp=MCPParamBinding(order=2)),
+    ),
+    mcp=MCPCommandBinding(name="exit_house", description="Alias of deactivate (compat).", catalog_position=13),
 )
 
 
@@ -745,9 +904,17 @@ SETTINGS_SET_COMMAND = CommandSpec(
 COMMAND_SPECS = (
     ALLOCATE_COMMAND,
     ACTIVATE_COMMAND,
+    START_COMMAND,
+    STOP_COMMAND,
     RELEASE_COMMAND,
     STATUS_COMMAND,
+    PATH_COMMAND,
     DOCTOR_COMMAND,
+    SET_DEFAULT_COMMAND,
+    SET_DEFAULTS_FROM_CURRENT_COMMAND,
+    APPLY_DEFAULTS_COMMAND,
+    DEACTIVATE_COMMAND,
+    EXIT_HOUSE_COMMAND,
     SETTINGS_GET_COMMAND,
     SETTINGS_SET_COMMAND,
 )

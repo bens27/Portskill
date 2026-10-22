@@ -33,10 +33,49 @@ def _bind_project(handler: Callable[..., dict], options: dict[str, Any]) -> dict
     return handler(options.get("project"))
 
 
+def _bind_path(handler: Callable[..., dict], options: dict[str, Any]) -> dict:
+    payload = handler(
+        mode=options.get("mode"),
+        project=options.get("project") or ".",
+        count=int(options.get("count") or 1),
+        range_id=options.get("range_id"),
+        note=options.get("note"),
+        tailnet=options.get("tailnet"),
+        command=options.get("command"),
+        cwd=options.get("cwd"),
+        default_state=options.get("default_state"),
+        start=options.get("start"),
+        environment=options.get("environment"),
+    )
+    if payload.get("needs_input") or payload.get("status") == "needs_input":
+        from .domain import DomainError
+
+        raise DomainError("needs_input", exit_code=3, payload=payload)
+    return payload
+
+
+def _bind_apply_defaults(
+    handler: Callable[..., dict], options: dict[str, Any]
+) -> dict:
+    project_filter = options.get("project")
+    if project_filter and not isinstance(project_filter, list):
+        project_filter = [project_filter]
+    return handler(
+        project_filter=project_filter,
+        also_stop_off=bool(options.get("also_stop_off")),
+        session_preset=None,
+        session_source="apply_defaults",
+        record_session=True,
+        enforce_overlap=True,
+    )
+
+
 _BINDERS = {
     "options": _bind_options,
     "none": _bind_none,
     "project": _bind_project,
+    "path": _bind_path,
+    "apply_defaults": _bind_apply_defaults,
 }
 
 

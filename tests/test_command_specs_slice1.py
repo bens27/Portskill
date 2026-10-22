@@ -343,6 +343,8 @@ class CommandSpecStructureTests(unittest.TestCase):
         self.assertEqual(len(mcp_names), len(set(mcp_names)))
         self.assertEqual(len(ui_actions), len(set(ui_actions)))
         for spec in COMMAND_SPECS:
+            if spec.mcp is None:
+                continue
             self.assertEqual(
                 TOOL_DEFS[spec.mcp.catalog_position], _mcp_tool_definition(spec)
             )

@@ -15,8 +15,13 @@ from tests.helpers import ROOT
 class CommandRuntimeTests(unittest.TestCase):
     def test_catalog_and_runtime_import_no_domain_handlers(self) -> None:
         modules = (
+            "portskill.apply_defaults",
+            "portskill.defaults",
+            "portskill.deactivate",
             "portskill.settings",
             "portskill.registry_mutations",
+            "portskill.process_commands",
+            "portskill.path",
             "portskill.status",
             "portskill.doctor",
         )

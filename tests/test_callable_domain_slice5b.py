@@ -146,28 +146,27 @@ class CallableDomainSlice5BTests(unittest.TestCase):
         from portskill import server
 
         cases = (
-            ("history_restore_result", {"action": "history-restore", "index": 0}),
-            ("history_reset_result", {"action": "history-reset"}),
-            ("history_clear_result", {"action": "history-clear"}),
-            ("set_default_result", {
+            ("portskill.server.history_restore_result", {"action": "history-restore", "index": 0}),
+            ("portskill.server.history_reset_result", {"action": "history-reset"}),
+            ("portskill.server.history_clear_result", {"action": "history-clear"}),
+            ("portskill.defaults.set_default_result", {
                 "action": "set-default",
                 "rangeId": "r1",
                 "state": "on",
             }),
-            ("apply_defaults_result", {"action": "apply-defaults"}),
-            ("deactivate_result", {"action": "deactivate"}),
-            ("deactivate_result", {"action": "exit-house"}),
-            ("set_defaults_from_current_result", {
+            ("portskill.apply_defaults.apply_defaults_result", {"action": "apply-defaults"}),
+            ("portskill.deactivate.deactivate_result", {"action": "deactivate"}),
+            ("portskill.deactivate.deactivate_result", {"action": "exit-house"}),
+            ("portskill.defaults.set_defaults_from_current_result", {
                 "action": "set-defaults-from-current",
             }),
-            ("set_defaults_from_current_result", {"action": "capture-defaults"}),
+            ("portskill.defaults.set_defaults_from_current_result", {"action": "capture-defaults"}),
         )
-        for operation_name, body in cases:
+        for operation_path, body in cases:
             with self.subTest(action=body["action"]), mock.patch.object(
                 server, "run_cli", side_effect=AssertionError("subprocess used")
-            ), mock.patch.object(
-                server,
-                operation_name,
+            ), mock.patch(
+                operation_path,
                 side_effect=[RuntimeError("boom"), {"status": "ok"}],
             ):
                 failed_code, failed = server.dispatch_ui_action(body)

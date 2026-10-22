@@ -37,9 +37,9 @@ from .command_runtime import execute_command
 from .command_specs import ALLOCATE_COMMAND, COMMAND_SPECS, CommandSpec
 from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
 from .domain import DomainError
-from .apply_defaults import apply_defaults_result
+from .apply_defaults import apply_defaults_result  # noqa: F401 - compatibility reexport
 from .compatibility import compatibility_result
-from .defaults import set_default_result, set_defaults_from_current_result
+from .defaults import set_default_result, set_defaults_from_current_result  # noqa: F401 - compatibility reexports
 from .deactivate import deactivate_result
 from .environments import environment_export_result, environment_import_result
 from .history import history_clear_result, history_reset_result, history_restore_result
@@ -104,7 +104,7 @@ from .registry_mutations import (  # noqa: F401 - compatibility reexports
     allocate_result,
     release_result,
 )
-from .process_commands import start_result, stop_result
+from .process_commands import start_result, stop_result  # noqa: F401 - compatibility reexports
 from .presets import preset_apply_result, preset_delete_result, preset_save_result
 from .tailscale import probe_tailscale_status
 from .webauthn import (
@@ -174,11 +174,26 @@ def _coerce_ui_tailnet_mode_or_none(value):
     return str(value or "none")
 
 
+def _coerce_ui_stripped_or_none(value):
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _coerce_ui_boolean(value):
+    return bool(value)
+
+
+def _coerce_ui_nonempty_string_or_none(value):
+    return value if isinstance(value, str) and value else None
+
+
 _UI_VALUE_COERCERS = {
     "identity": _coerce_ui_identity,
     "integer_or_one": _coerce_ui_integer_or_one,
     "string_or_dot": _coerce_ui_string_or_dot,
     "tailnet_mode_or_none": _coerce_ui_tailnet_mode_or_none,
+    "stripped_or_none": _coerce_ui_stripped_or_none,
+    "boolean": _coerce_ui_boolean,
+    "nonempty_string_or_none": _coerce_ui_nonempty_string_or_none,
 }
 
 
@@ -211,6 +226,22 @@ def _bind_ui_settings_save(spec: CommandSpec, payload: dict) -> dict:
     if payload.get("defaultTailnet") in ("serve", "none"):
         options["default_tailnet"] = payload["defaultTailnet"]
     options["require_compat"] = True
+    return options
+
+
+def _bind_ui_none(spec: CommandSpec, payload: dict) -> dict:
+    del spec, payload
+    return {}
+
+
+def _bind_ui_fixed(spec: CommandSpec, payload: dict, **fixed) -> dict:
+    del spec, payload
+    return fixed
+
+
+def _bind_ui_reclaim_start(spec: CommandSpec, payload: dict) -> dict:
+    options = _bind_ui_declared_params(spec, payload)
+    options["reclaim"] = True
     return options
 
 
@@ -270,6 +301,13 @@ def _bind_ui_close_environment_tab(spec: CommandSpec, payload: dict) -> dict:
 _UI_PAYLOAD_BINDERS = {
     "allocate_body": _bind_ui_declared_params,
     "range_action": _bind_ui_declared_params,
+    "none": _bind_ui_none,
+    "reclaim_start": _bind_ui_reclaim_start,
+    "start_all": lambda spec, payload: _bind_ui_fixed(spec, payload, all=True),
+    "stop_all": lambda spec, payload: _bind_ui_fixed(spec, payload, all=True),
+    "stop_non_default": lambda spec, payload: _bind_ui_fixed(spec, payload, non_default=True),
+    "set_default": _bind_ui_declared_params,
+    "deactivate": _bind_ui_declared_params,
     "settings_save": _bind_ui_settings_save,
     "mcp_user_command_save": _bind_ui_mcp_user_command_save,
     "mcp_user_command_delete": _bind_ui_mcp_user_command_delete,
@@ -4196,20 +4234,10 @@ font-family:ui-monospace,Menlo,monospace">
 
 
 def run_cli_action(project: str, range_id: str, action: str) -> tuple[int, dict]:
-    options = {"project": project, "range_id": range_id}
-    operation = action
-    if action == "reclaim-start":
-        operation = "start"
-        options["reclaim"] = True
     try:
-        if operation == "release":
-            payload = _execute_ui_command(
-                "release", {"project": project, "rangeId": range_id}
-            )
-        else:
-            payload = {"start": start_result, "stop": stop_result}[operation](
-                options
-            )
+        payload = _execute_ui_command(
+            action, {"project": project, "rangeId": range_id}
+        )
         code, stdout = 0, ""
     except DomainError as exc:
         payload, code, stdout = exc.as_dict(), exc.exit_code, ""
@@ -4346,24 +4374,15 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             "environment": env.strip() if isinstance(env, str) and env.strip() else None,
         }))
     if action == "set-default":
-        project = body.get("project")
         range_id = body.get("rangeId")
         state = body.get("state")
         if not isinstance(range_id, str) or state not in ("on", "off"):
             return 400, {"ok": False, "message": "expected rangeId and state on|off"}
-        return _domain_cli_result(lambda: set_default_result({
-            "range_id": range_id,
-            "state": state,
-            "project": project if isinstance(project, str) and project else None,
-        }))
+        return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action == "apply-defaults":
-        return _domain_cli_result(lambda: apply_defaults_result())
+        return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action in ("exit-house", "deactivate"):
-        preset = body.get("preset")
-        return _domain_cli_result(lambda: deactivate_result({
-            "preset": preset.strip() if isinstance(preset, str) and preset.strip() else None,
-            "also_release": bool(body.get("alsoRelease") or body.get("also_release")),
-        }))
+        return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action == "compat-check":
         presets = body.get("presets") or body.get("names") or []
         if isinstance(presets, str) and presets.strip():
@@ -4837,13 +4856,13 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             }
             return _cli_result(1, payload, json.dumps(payload, separators=(",", ":"), sort_keys=True))
     if action == "start-all":
-        return _domain_cli_result(lambda: start_result({"all": True}))
+        return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action == "stop-all":
-        return _domain_cli_result(lambda: stop_result({"all": True}))
+        return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action == "stop-non-default":
-        return _domain_cli_result(lambda: stop_result({"non_default": True}))
+        return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action in ("set-defaults-from-current", "capture-defaults"):
-        return _domain_cli_result(set_defaults_from_current_result)
+        return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action == "tailscale-logout":
         code, payload, stdout = _run_domain(tailscale_logout_result)
         if isinstance(payload, dict):

@@ -19,17 +19,24 @@ from .compatibility import (
 from .command_specs import (
     ACTIVATE_COMMAND,
     ALLOCATE_COMMAND,
+    APPLY_DEFAULTS_COMMAND,
     CLIParamBinding,
     CommandSpec,
+    DEACTIVATE_COMMAND,
     DOCTOR_COMMAND,
     MISSING,
+    PATH_COMMAND,
     RELEASE_COMMAND,
+    SET_DEFAULT_COMMAND,
+    SET_DEFAULTS_FROM_CURRENT_COMMAND,
     SETTINGS_GET_COMMAND,
     SETTINGS_SET_COMMAND,
+    START_COMMAND,
     STATUS_COMMAND,
+    STOP_COMMAND,
 )
 from .command_runtime import execute_command
-from .defaults import set_default_result, set_defaults_from_current_result
+from .defaults import set_default_result, set_defaults_from_current_result  # noqa: F401 - compatibility reexports
 from .deactivate import deactivate_result, item_matches_preset_service
 from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
 from .history import (
@@ -500,11 +507,11 @@ def cmd_release(args):
 
 
 def cmd_start(args):
-    return start_result(vars(args))
+    return execute_command(START_COMMAND, vars(args))
 
 
 def cmd_stop(args):
-    return stop_result(vars(args))
+    return execute_command(STOP_COMMAND, vars(args))
 
 
 
@@ -567,18 +574,11 @@ def cmd_environment_import(args):
 
 
 def cmd_set_default(args):
-    emit(set_default_result({
-        "range_id": args.range_id,
-        "state": args.state,
-        "project": args.project,
-        "environment": getattr(args, "environment", None),
-    }))
+    emit(execute_command(SET_DEFAULT_COMMAND, vars(args)))
 
 
 def cmd_set_defaults_from_current(args):
-    emit(set_defaults_from_current_result({
-        "environment": getattr(args, "environment", None),
-    }))
+    emit(execute_command(SET_DEFAULTS_FROM_CURRENT_COMMAND, vars(args)))
 
 
 
@@ -609,17 +609,7 @@ def run_apply_defaults(
 
 
 def cmd_apply_defaults(args):
-    project_filter = list(args.project) if args.project else None
-    also_stop_off = bool(getattr(args, "also_stop_off", False))
-    payload = run_apply_defaults(
-        project_filter=project_filter,
-        also_stop_off=also_stop_off,
-        session_preset=None,
-        session_source="apply_defaults",
-        record_session=True,
-        enforce_overlap=True,
-    )
-    emit(payload)
+    emit(execute_command(APPLY_DEFAULTS_COMMAND, vars(args)))
 
 
 def run_exit_house(project_filter=None, preset_name=None, also_release=False, clear_session=True):
@@ -632,16 +622,7 @@ def run_exit_house(project_filter=None, preset_name=None, also_release=False, cl
 
 
 def cmd_deactivate(args):
-    project_filter = list(args.project) if getattr(args, "project", None) else None
-    preset_name = getattr(args, "preset", None)
-    also_release = bool(getattr(args, "also_release", False))
-    payload = run_exit_house(
-        project_filter=project_filter,
-        preset_name=preset_name,
-        also_release=also_release,
-        clear_session=True,
-    )
-    emit(payload)
+    emit(execute_command(DEACTIVATE_COMMAND, vars(args)))
 
 
 # Compat alias
@@ -932,10 +913,8 @@ def status_project_from_context(args):
 
 
 def cmd_path(args):
-    """CLI mirror of MCP portskill. Implementation lives in .path."""
-    from .path import cmd_path_from_args
-
-    return cmd_path_from_args(args)
+    """CLI mirror of MCP portskill."""
+    return execute_command(PATH_COMMAND, vars(args))
 
 
 def cmd_status(args):
@@ -1043,67 +1022,12 @@ def parser():
     _add_spec_cli_parser(subparsers, ACTIVATE_COMMAND, handler=cmd_activate)
     _add_spec_cli_parser(subparsers, RELEASE_COMMAND, handler=cmd_release)
 
-    start = subparsers.add_parser("start")
-    start.add_argument("--range-id", default=None)
-    start.add_argument("--reclaim", action="store_true", help="Re-reserve a released service's ports if free, then start it")
-    start.add_argument("--all", action="store_true", help="Start all non-released services")
-    start.add_argument("--project", default=".")
-    start.add_argument("--tailnet", choices=["serve", "funnel", "none"], default=None)
-    start.add_argument("--environment", default=None, help="History env scope")
-    start.set_defaults(func=cmd_start)
-
-    stop = subparsers.add_parser("stop")
-    stop.add_argument("--range-id", default=None)
-    stop.add_argument("--all", action="store_true", help="Stop all active/running services")
-    stop.add_argument(
-        "--non-default",
-        action="store_true",
-        help="Stop running services whose default_state is off",
-    )
-    stop.add_argument("--project", default=".")
-    stop.add_argument("--environment", default=None, help="History env scope")
-    stop.add_argument(
-        "--also-release",
-        choices=["on", "off"],
-        default=None,
-        help=(
-            "Override settings.stop_also_release for this call. "
-            "on releases the range; off keeps it reserved."
-        ),
-    )
-    stop.set_defaults(func=cmd_stop)
+    _add_spec_cli_parser(subparsers, START_COMMAND, handler=cmd_start)
+    _add_spec_cli_parser(subparsers, STOP_COMMAND, handler=cmd_stop)
 
     _add_spec_cli_parser(subparsers, STATUS_COMMAND, handler=cmd_status)
 
-    path_cmd = subparsers.add_parser(
-        "path",
-        aliases=["portskill-path", "portskill_path"],
-        help=(
-            "One MCP tool for your agent to handle all port management functions "
-            "(MCP portskill). Modes start|stop|release|restart|status with inspectable skips."
-        ),
-    )
-    path_cmd.add_argument(
-        "--mode",
-        required=True,
-        choices=["start", "stop", "release", "restart", "status"],
-    )
-    path_cmd.add_argument("--project", default=".")
-    path_cmd.add_argument("--count", type=int, default=1, help="Ports to allocate when needed (default 1)")
-    path_cmd.add_argument("--range-id", default=None)
-    path_cmd.add_argument("--note", default=None)
-    path_cmd.add_argument("--tailnet", choices=["serve", "funnel", "none"], default=None)
-    path_cmd.add_argument("--command", default=None, help="Optional start command to wire onto the range")
-    path_cmd.add_argument("--cwd", default=None)
-    path_cmd.add_argument("--default-state", choices=["on", "off"], default=None)
-    path_cmd.add_argument(
-        "--start",
-        type=int,
-        default=None,
-        help="Optional explicit start port when allocate runs",
-    )
-    path_cmd.add_argument("--environment", default=None, help="History env scope")
-    path_cmd.set_defaults(func=cmd_path)
+    _add_spec_cli_parser(subparsers, PATH_COMMAND, handler=cmd_path)
 
     _add_spec_cli_parser(subparsers, DOCTOR_COMMAND, handler=cmd_doctor)
 
@@ -1155,46 +1079,10 @@ def parser():
     http_auth_keys.add_argument("--id", dest="credential_id", default=None)
     http_auth_keys.set_defaults(func=cmd_http_auth)
 
-    set_default = subparsers.add_parser("set-default")
-    set_default.add_argument("--range-id", required=True)
-    set_default.add_argument("--state", required=True, choices=["on", "off"])
-    set_default.add_argument("--project", default=None)
-    set_default.add_argument("--environment", default=None, help="History env scope")
-    set_default.set_defaults(func=cmd_set_default)
-
-    set_defaults_cur = subparsers.add_parser(
-        "set-defaults-from-current",
-        help="Set default_state on/off from each local range's current active/inactive state",
-    )
-    set_defaults_cur.add_argument("--environment", default=None, help="History env scope")
-    set_defaults_cur.set_defaults(func=cmd_set_defaults_from_current)
-
-    apply_defaults = subparsers.add_parser("apply-defaults")
-    apply_defaults.add_argument("--project", action="append", default=None)
-    apply_defaults.add_argument(
-        "--also-stop-off",
-        action="store_true",
-        help="Also stop running services whose default_state is off",
-    )
-    apply_defaults.set_defaults(func=cmd_apply_defaults)
-
-    deactivate = subparsers.add_parser(
-        "deactivate",
-        aliases=["exit-house", "leave"],
-        help="Deactivate environment: stop Default On services (keep reserved unless --also-release)",
-    )
-    deactivate.add_argument("--project", action="append", default=None)
-    deactivate.add_argument(
-        "--preset",
-        default=None,
-        help="Limit teardown to services in this named preset (instead of default_state=on)",
-    )
-    deactivate.add_argument(
-        "--also-release",
-        action="store_true",
-        help="Also release ranges after stop (default keeps them reserved)",
-    )
-    deactivate.set_defaults(func=cmd_deactivate)
+    _add_spec_cli_parser(subparsers, SET_DEFAULT_COMMAND, handler=cmd_set_default)
+    _add_spec_cli_parser(subparsers, SET_DEFAULTS_FROM_CURRENT_COMMAND, handler=cmd_set_defaults_from_current)
+    _add_spec_cli_parser(subparsers, APPLY_DEFAULTS_COMMAND, handler=cmd_apply_defaults)
+    _add_spec_cli_parser(subparsers, DEACTIVATE_COMMAND, handler=cmd_deactivate)
 
     schedule = subparsers.add_parser(
         "schedule",

@@ -4,13 +4,22 @@ from __future__ import annotations
 from .command_specs import (
     ACTIVATE_COMMAND,
     ALLOCATE_COMMAND,
+    APPLY_DEFAULTS_COMMAND,
     COMMAND_SPECS,
+    DEACTIVATE_COMMAND,
     DOCTOR_COMMAND,
+    EXIT_HOUSE_COMMAND,
     MISSING,
+    PATH_COMMAND,
+    PORTSKILL_TOOL_DESCRIPTION,
+    PORTSKILL_TOOL_PITCH,
     RELEASE_COMMAND,
+    SET_DEFAULT_COMMAND,
     SETTINGS_GET_COMMAND,
     SETTINGS_SET_COMMAND,
+    START_COMMAND,
     STATUS_COMMAND,
+    STOP_COMMAND,
     CommandSpec,
 )
 from .handoff import HANDOFF_TOOL_DEFS
@@ -20,21 +29,6 @@ PORTSKILL_TOOL_NAME = "portskill"
 
 
 PORTSKILL_TOOL_ALIASES = frozenset({"portskill_path"})
-
-
-PORTSKILL_TOOL_PITCH = "One MCP tool for your agent to handle all port management functions."
-
-
-PORTSKILL_TOOL_DESCRIPTION = PORTSKILL_TOOL_PITCH + (
-    " Use it whenever the user says register a port, register, add, host, serve, run, launch, expose, "
-    "put on or get onto Portskill (or the port registry), or needs a dev server, app "
-    "or project to get a port, a URL, or a Tailscale/tailnet link. "
-    "mode=start does the whole job in one call: reserves a free port, wires start.sh "
-    "to command, starts the service and, with tailnet=serve, publishes it over Tailscale Serve. "
-    "Already-done steps are skipped, so it is safe to repeat. "
-    "mode=stop, release or restart to take a service down, free its port or bounce it; "
-    "mode=status to see what is registered and running."
-)
 
 
 def _mcp_tool_definition(spec: CommandSpec) -> dict:
@@ -107,81 +101,11 @@ LEAN_MCP_TOOLS_ENABLED = frozenset(
 TOOL_DEFS = [
     _mcp_tool_definition(ALLOCATE_COMMAND),
     _mcp_tool_definition(ACTIVATE_COMMAND),
-    {
-        "name": "start",
-        "description": "Low-level: run start.sh for an already-reserved range_id. To register and serve a new project, use portskill mode=start instead.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "range_id": {"type": "string"},
-                "project": {"type": "string"},
-                "tailnet": {"type": "string", "enum": ["serve", "funnel", "none"]},
-            },
-            "required": ["range_id"],
-        },
-    },
-    {
-        "name": "stop",
-        "description": (
-            "Stop the tracked process group (stop.sh / pgid). "
-            "Whether the range is released follows settings.stop_also_release (default true). "
-            "When false, the range stays reserved and release is the explicit free. "
-            "Optional also_release overrides the setting for this call."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "range_id": {"type": "string"},
-                "project": {"type": "string"},
-                "also_release": {
-                    "type": "boolean",
-                    "description": "Override settings.stop_also_release for this call",
-                },
-            },
-            "required": ["range_id"],
-        },
-    },
+    _mcp_tool_definition(START_COMMAND),
+    _mcp_tool_definition(STOP_COMMAND),
     _mcp_tool_definition(RELEASE_COMMAND),
     _mcp_tool_definition(STATUS_COMMAND),
-    {
-        "name": "portskill",
-        "description": PORTSKILL_TOOL_DESCRIPTION,
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "mode": {
-                    "type": "string",
-                    "enum": ["start", "stop", "release", "restart", "status"],
-                    "description": (
-                        "start = register and serve (allocate, wire, activate, start, tailnet); "
-                        "stop, release, restart, or status"
-                    ),
-                },
-                "project": {"type": "string", "description": "Project directory (default .)"},
-                "count": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Ports to allocate when start/restart needs a new range (default 1)",
-                },
-                "range_id": {"type": "string"},
-                "note": {"type": "string"},
-                "tailnet": {
-                    "type": "string",
-                    "enum": ["serve", "funnel", "none"],
-                    "description": (
-                        "Optional user-service Tailnet. Omitted follows settings.default_tailnet (none unless set to serve); none skips Serve. "
-                        "serve requires login (needs_input to resume). "
-                        "Never Funnels Portskill listen."
-                    ),
-                },
-                "command": {"type": "string", "description": "Shell command that launches the service, e.g. npm run dev -- --port $PORT. Needed for start when start.sh is still a placeholder"},
-                "cwd": {"type": "string"},
-                "default_state": {"type": "string", "enum": ["on", "off"]},
-                "start": {"type": "integer", "description": "Optional explicit start port when allocating"},
-            },
-            "required": ["mode"],
-        },
-    },
+    _mcp_tool_definition(PATH_COMMAND),
     _mcp_tool_definition(DOCTOR_COMMAND),
     {
         "name": "environment_export",
@@ -216,68 +140,10 @@ TOOL_DEFS = [
             "required": ["file"],
         },
     },
-    {
-        "name": "set_default",
-        "description": "Set default_state on|off for a range (portskill set-default).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "range_id": {"type": "string"},
-                "state": {"type": "string", "enum": ["on", "off"]},
-                "project": {"type": "string"},
-            },
-            "required": ["range_id", "state"],
-        },
-    },
-    {
-        "name": "apply_defaults",
-        "description": "Start Default Services: start services marked default_state=on. Optional also_stop_off stops Off services that are running.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "project": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional project path filters",
-                },
-                "also_stop_off": {"type": "boolean"},
-            },
-        },
-    },
-    {
-        "name": "deactivate",
-        "description": "Deactivate environment: stop running default_state=on services (or --preset cohort) via stop.sh + tracked pgid; keep ranges reserved unless also_release. Symmetric to apply_defaults.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "project": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional project path filters",
-                },
-                "preset": {
-                    "type": "string",
-                    "description": "Limit to services in this named preset instead of default_state=on",
-                },
-                "also_release": {
-                    "type": "boolean",
-                    "description": "If true, release ranges after stop (default keeps reserved)",
-                },
-            },
-        },
-    },
-    {
-        "name": "exit_house",
-        "description": "Alias of deactivate (compat).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "project": {"type": "array", "items": {"type": "string"}},
-                "preset": {"type": "string"},
-                "also_release": {"type": "boolean"},
-            },
-        },
-    },
+    _mcp_tool_definition(SET_DEFAULT_COMMAND),
+    _mcp_tool_definition(APPLY_DEFAULTS_COMMAND),
+    _mcp_tool_definition(DEACTIVATE_COMMAND),
+    _mcp_tool_definition(EXIT_HOUSE_COMMAND),
     {
         "name": "compat_check",
         "description": "Check whether selected presets/environments can share ports safely. Returns conflicts JSON; non-compatible is an error when used as a gate.",

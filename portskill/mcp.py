@@ -14,11 +14,18 @@ from .command_runtime import execute_command
 from .command_specs import (
     ACTIVATE_COMMAND,
     ALLOCATE_COMMAND,
+    APPLY_DEFAULTS_COMMAND,
+    DEACTIVATE_COMMAND,
     DOCTOR_COMMAND,
+    EXIT_HOUSE_COMMAND,
+    PATH_COMMAND,
     RELEASE_COMMAND,
+    SET_DEFAULT_COMMAND,
     SETTINGS_GET_COMMAND,
     SETTINGS_SET_COMMAND,
+    START_COMMAND,
     STATUS_COMMAND,
+    STOP_COMMAND,
 )
 from .handoff import HANDOFF_TOOL_NAMES, call_handoff_tool, handoff_enabled
 from .mcp_catalog import (
@@ -47,9 +54,9 @@ from .domain import DomainError
 from .port_discovery import discover_import_result, discover_ports_result
 from .tailscale_commands import set_tailnet_result, tailscale_login_result, tailscale_status_result
 from .compatibility import compatibility_result
-from .apply_defaults import apply_defaults_result
-from .defaults import set_default_result
-from .deactivate import deactivate_result
+from .apply_defaults import apply_defaults_result  # noqa: F401 - compatibility reexport
+from .defaults import set_default_result  # noqa: F401 - compatibility reexport
+from .deactivate import deactivate_result  # noqa: F401 - compatibility reexport
 from .doctor import doctor_result  # noqa: F401 - compatibility reexport
 from .environments import environment_export_result, environment_import_result
 from .history import history_list_result, history_reset_result, history_restore_result
@@ -66,8 +73,8 @@ from .registry_mutations import (  # noqa: F401 - compatibility reexports
     allocate_result,
     release_result,
 )
-from .process_commands import start_result, stop_result
-from .path import run_path
+from .process_commands import start_result, stop_result  # noqa: F401 - compatibility reexports
+from .path import run_path  # noqa: F401 - compatibility reexport
 
 # Named settings.mcp_tools profiles. Apply writes the existing enable map
 # (missing key = enabled). Default is full so existing installs stay unchanged
@@ -624,24 +631,22 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "isError": False,
         }
     if name == "set_default":
-        body = set_default_result(args)
+        body = execute_command(SET_DEFAULT_COMMAND, args)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,
             "isError": False,
         }
     if name == "apply_defaults":
-        body = apply_defaults_result(
-            project_filter=args.get("project"),
-            also_stop_off=bool(args.get("also_stop_off")),
-        )
+        body = execute_command(APPLY_DEFAULTS_COMMAND, args)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,
             "isError": False,
         }
     if name in ("deactivate", "exit_house"):
-        body = deactivate_result(args)
+        spec = DEACTIVATE_COMMAND if name == "deactivate" else EXIT_HOUSE_COMMAND
+        body = execute_command(spec, args)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,
@@ -717,28 +722,15 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "isError": False,
         }
     if name in ("start", "stop"):
-        body = (start_result if name == "start" else stop_result)(args)
+        spec = START_COMMAND if name == "start" else STOP_COMMAND
+        body = execute_command(spec, args)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,
             "isError": False,
         }
     if name in (PORTSKILL_TOOL_NAME, *sorted(PORTSKILL_TOOL_ALIASES)):
-        body = run_path(
-            mode=args.get("mode"),
-            project=args.get("project") or ".",
-            count=int(args.get("count") or 1),
-            range_id=args.get("range_id"),
-            note=args.get("note"),
-            tailnet=args.get("tailnet"),
-            command=args.get("command"),
-            cwd=args.get("cwd"),
-            default_state=args.get("default_state"),
-            start=args.get("start"),
-            environment=args.get("environment"),
-        )
-        if body.get("status") == "needs_input":
-            raise DomainError("needs_input", exit_code=3, payload=body)
+        body = execute_command(PATH_COMMAND, args)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,
