@@ -65,7 +65,6 @@ from .cli import (
     ensure_http_auth_token,
     extract_tailscale_advertise_host,
     get_machine,
-    observed_range_status,
     http_auth_public_status,
     http_auth_token,
     http_bearer_matches,
@@ -79,6 +78,7 @@ from .cli import (
     resolve_range_scheme,
     resolve_range_url,
 )
+from .status import observed_range_status, service_statuses
 from .webauthn import (
     authentication_options,
     clear_bearer_cookie_header,
@@ -849,6 +849,11 @@ def build_view(raw: dict) -> dict:
             "presetCount": len(presets_out),
         },
     }
+
+
+def api_service_status_payload(raw: dict) -> dict:
+    """Build the service-status response through the shared status domain."""
+    return {"services": service_statuses(raw)}
 
 
 def esc(value) -> str:
@@ -5016,12 +5021,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/service-status":
             raw = load_registry()
-            services = []
-            for project, entry in raw.get("projects", {}).items():
-                for item in entry.get("ranges", []):
-                    services.append({"id": item.get("id"), "project": project,
-                                     **observed_range_status(raw, item)})
-            self._send_json(200, {"services": services})
+            self._send_json(200, api_service_status_payload(raw))
             return
         if path == "/iterate/state":
             self._send_json(200, iterate_state_payload())

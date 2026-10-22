@@ -19,6 +19,8 @@ from .registry import (
     read_listen,
     read_settings,
 )
+from .domain import DomainError
+from .status import status_result
 
 # Named settings.mcp_tools profiles. Apply writes the existing enable map
 # (missing key = enabled). Default is full so existing installs stay unchanged
@@ -1091,7 +1093,29 @@ def call_user_command(name: str, cmd: dict) -> dict:
     }
 
 
+def tool_error_result(exc: Exception) -> dict:
+    """Map an in-process tool failure onto the existing MCP error contract."""
+    if isinstance(exc, DomainError):
+        body = exc.as_dict()
+    else:
+        body = {"status": "error", "message": str(exc) or exc.__class__.__name__}
+    body.setdefault("ok", False)
+    return {
+        "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
+        "structuredContent": body,
+        "isError": True,
+    }
+
+
 def call_tool(name: str, arguments: dict) -> dict:
+    """Call a tool without allowing one request failure to escape its transport."""
+    try:
+        return _call_tool(name, arguments)
+    except Exception as exc:
+        return tool_error_result(exc)
+
+
+def _call_tool(name: str, arguments: dict) -> dict:
     """Return MCP tools/call result payload (result object, not full JSON-RPC)."""
     args = arguments or {}
     if name in HANDOFF_TOOL_NAMES:
@@ -1100,6 +1124,16 @@ def call_tool(name: str, arguments: dict) -> dict:
             body = {"ok": False, "error": "tool_disabled", "message": "Session Handoff is disabled. Enable it under Experimental (Beta)."}
             return {"content": [{"type": "text", "text": json.dumps(body)}], "structuredContent": body, "isError": True}
         return call_handoff_tool(name, args, settings)
+    if name == "status":
+        try:
+            body = status_result(args.get("project"))
+        except DomainError as exc:
+            return tool_error_result(exc)
+        return {
+            "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
+            "structuredContent": body,
+            "isError": False,
+        }
     # Multi-port import: invoke discover import once per port with optional per-port notes
     if name == "ports_import":
         ports = args.get("ports")

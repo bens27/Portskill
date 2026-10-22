@@ -25,6 +25,17 @@ from .registry import (
     registry_path,
 )
 from .service import launch_service, service_launch
+from .domain import (
+    DomainError,
+    pid_alive as domain_pid_alive,
+    pool_bounds_from_environment,
+)
+from .status import (
+    enrich_range as enrich_range_for_status,
+    observed_range_status,
+    project_from_context,
+    status_result,
+)
 import copy
 import datetime
 import hashlib
@@ -74,8 +85,7 @@ PLACEHOLDER_SENTINEL = "portskill: edit .portskill/"
 
 class JsonArgumentParser(argparse.ArgumentParser):
     def error(self, message):
-        emit({"status": "error", "reason": "invalid_args", "message": message})
-        raise SystemExit(2)
+        raise DomainError("invalid_args", message)
 
 
 def utc_now():
@@ -228,14 +238,7 @@ def http_bearer_matches(provided):
 
 
 def pool_bounds():
-    try:
-        start = int(os.environ.get("PORTSKILL_POOL_START", str(DEFAULT_POOL_START)))
-        end = int(os.environ.get("PORTSKILL_POOL_END", str(DEFAULT_POOL_END)))
-    except ValueError:
-        fail("invalid_config", "pool bounds must be integers")
-    if start > end:
-        fail("invalid_config", "pool start must be less than or equal to pool end")
-    return start, end
+    return pool_bounds_from_environment()
 
 
 def project_path(value):
@@ -2188,21 +2191,7 @@ def validate_start_script(path):
 
 
 def pid_alive(pid):
-    if pid is None:
-        return False
-    try:
-        pid = int(pid)
-    except (TypeError, ValueError):
-        return False
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
+    return domain_pid_alive(pid)
 
 
 def process_group_pids(pgid):
@@ -5326,69 +5315,7 @@ def cmd_machine(args):
 
 
 def status_project_from_context(args):
-    if args.project is not None:
-        return project_path(args.project)
-    local_path = pathlib.Path.cwd() / ".portskill.json"
-    if local_path.exists():
-        try:
-            data = json.loads(local_path.read_text(encoding="utf-8"))
-            local_project = data.get("project_path")
-            if local_project:
-                return project_path(local_project)
-        except (OSError, json.JSONDecodeError):
-            return project_path(".")
-    return None
-
-
-def enrich_range_for_status(registry, item, tailscale_self=None):
-    """Return a shallow copy of range with resolved machine/host/url fields."""
-    if not isinstance(item, dict):
-        return item
-    out = dict(item)
-    normalize_range_machine_fields(out)
-    mid = out.get("machine_id") or "local"
-    machine = get_machine(registry, mid) or default_machines()["local"]
-    out["machine"] = {
-        "id": machine.get("id") or mid,
-        "label": machine.get("label") or mid,
-        "host": machine.get("host"),
-        "kind": machine.get("kind") or "local",
-    }
-    host = resolve_range_host(registry, out, tailscale_self=tailscale_self)
-    out["resolved_host"] = host
-    url = resolve_range_url(registry, out, tailscale_self=tailscale_self)
-    if url:
-        out["url"] = url
-    out.update(observed_range_status(registry, item))
-    return out
-
-
-def observed_range_status(registry, item):
-    """Keep saved allocation state separate from a current local TCP observation."""
-    import socket
-
-    saved = item.get("state") or "reserved"
-    result = {"allocation_state": saved, "state": saved, "reachable": None}
-    if saved == "released":
-        return result
-    if is_remote_range(registry, item):
-        result["state"] = "unknown"
-        return result
-    port = item.get("start")
-    reachable = False
-    if isinstance(port, int) and 0 < port < 65536:
-        for host in ("127.0.0.1", "::1"):
-            try:
-                with socket.create_connection((host, port), timeout=0.15):
-                    reachable = True
-                    break
-            except OSError:
-                pass
-    result["reachable"] = reachable
-    pid = (item.get("lifecycle") or {}).get("pid")
-    result["process_alive"] = pid_alive(pid) if pid else None
-    result["state"] = "active" if reachable and result["process_alive"] is not False else "inactive"
-    return result
+    return project_from_context(args.project)
 
 
 def cmd_path(args):
@@ -5399,46 +5326,7 @@ def cmd_path(args):
 
 
 def cmd_status(args):
-    selected_project = status_project_from_context(args)
-
-    def read(registry):
-        try:
-            ts_self = (probe_tailscale_status() or {}).get("Self")
-        except Exception:
-            ts_self = None
-        if selected_project is None:
-            ranges = []
-            for project_entry in registry["projects"].values():
-                ranges.extend(project_entry.get("ranges", []))
-            projects = registry["projects"]
-        else:
-            ranges = registry["projects"].get(selected_project, {}).get("ranges", [])
-            projects = (
-                {selected_project: {"ranges": ranges}}
-                if selected_project in registry["projects"]
-                else {}
-            )
-        enriched = [enrich_range_for_status(registry, r, tailscale_self=ts_self) for r in ranges]
-        # Also enrich nested project ranges for consumers that walk projects
-        projects_out = {}
-        for proj, entry in (projects or {}).items():
-            if not isinstance(entry, dict):
-                projects_out[proj] = entry
-                continue
-            pranges = [
-                enrich_range_for_status(registry, r, tailscale_self=ts_self)
-                for r in (entry.get("ranges") or [])
-            ]
-            projects_out[proj] = {**entry, "ranges": pranges}
-        return {
-            "status": "ok",
-            "ranges": enriched,
-            "pool": registry["pool"],
-            "projects": projects_out,
-            "machines": normalize_machines(registry.get("machines")),
-        }, []
-
-    emit(locked_registry(read))
+    return status_result(args.project)
 
 
 
@@ -6234,10 +6122,16 @@ def parser():
 def main(argv=None):
     try:
         args = parser().parse_args(argv)
+        result = args.func(args)
+        if isinstance(result, dict):
+            emit(result)
+        return 0
     except argparse.ArgumentError as exc:
-        fail("invalid_args", str(exc))
-    args.func(args)
-    return 0
+        error = DomainError("invalid_args", str(exc))
+    except DomainError as exc:
+        error = exc
+    emit(error.as_dict())
+    return error.exit_code
 
 
 if __name__ == "__main__":
