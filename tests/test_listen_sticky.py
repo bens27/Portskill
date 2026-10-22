@@ -21,7 +21,8 @@ class ListenStickyTests(unittest.TestCase):
         with IsolatedConfig() as iso:
             self.assertEqual(listen_path(), iso.listen_path)
             self.assertEqual(server_listen_path(), iso.listen_path)
-            self.assertEqual(os.environ.get("PORTSKILL_LISTEN_PATH"), str(iso.listen_path))
+            self.assertEqual(os.environ.get("PORTSKILL_CONFIG_DIR"), str(iso.root))
+            self.assertIsNone(os.environ.get("PORTSKILL_LISTEN_PATH"))
             self.assertTrue(str(listen_path()).startswith(str(iso.root)))
 
     def test_write_read_listen_stays_in_temp(self) -> None:

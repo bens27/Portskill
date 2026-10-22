@@ -27,6 +27,15 @@ from urllib.parse import urlparse, unquote
 
 from . import __version__
 from .request_origin import http_host_name
+from .registry import (
+    config_dir,
+    listen_path,
+    parse_bool,
+    read_listen as read_listen_file,
+    read_registry,
+    registry_path,
+    write_listen as write_listen_file,
+)
 from .handoff import (
     HANDOFF_TOOL_NAMES,
     handoff_enabled,
@@ -53,7 +62,6 @@ from .cli import (
     apply_portskill_tailscale_serve,
     bind_host_warning,
     default_machines,
-    default_settings,
     ensure_http_auth_token,
     extract_tailscale_advertise_host,
     get_machine,
@@ -62,10 +70,8 @@ from .cli import (
     http_auth_token,
     http_bearer_matches,
     is_loopback_host,
-    listen_path as cli_listen_path,
     non_loopback_refuse_message,
     normalize_machines,
-    normalize_mcp_user_commands,
     probe_portskill_serve_status,
     probe_tailscale_status,
     regenerate_http_auth_token,
@@ -89,10 +95,8 @@ from .webauthn import (
     set_http_passkey_gate,
 )
 
-DEFAULT_REGISTRY_PATH = "~/.config/portskill/registry.json"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765  # historical default only; launch prefers sticky/allocate
-LISTEN_FILENAME = "listen.json"
 PORTSKILL_NOTE = "Portskill UI+MCP"
 PORTSKILL_PROJECT_ID = "portskill-app"
 BIND_RETRIES = 5
@@ -123,19 +127,6 @@ _ITERATE_WORKING_SET: dict = {
 }
 
 
-def _config_dir() -> pathlib.Path:
-    return pathlib.Path(os.path.expanduser("~/.config/portskill"))
-
-
-def listen_path() -> pathlib.Path:
-    """Broadcast file beside registry.json (never wipes registry).
-
-    Honors PORTSKILL_LISTEN_PATH or the directory of PORTSKILL_REGISTRY_PATH so
-    tests can use temp dirs without touching ~/.config/portskill/.
-    """
-    return cli_listen_path()
-
-
 def utc_now_iso() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -156,35 +147,6 @@ def port_bindable(host: str, port: int) -> bool:
             sock.close()
         except OSError:
             pass
-
-
-def read_listen_file() -> dict | None:
-    path = listen_path()
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def write_listen_file(payload: dict) -> pathlib.Path:
-    """Atomic write of listen.json under ~/.config/portskill/."""
-    path = listen_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    raw = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
-    try:
-        tmp.write_text(raw, encoding="utf-8")
-        os.replace(tmp, path)
-    finally:
-        try:
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
-    return path
 
 
 def mark_listen_stopped() -> None:
@@ -425,7 +387,7 @@ def resolve_explicit_port(args_port: int | None) -> int | None:
 
 def collab_inbox_path() -> pathlib.Path:
     """Prefer ~/.config/portskill/collab/inbox.jsonl; else package .portskill-collab/."""
-    preferred = _config_dir() / "collab" / "inbox.jsonl"
+    preferred = config_dir() / "collab" / "inbox.jsonl"
     try:
         preferred.parent.mkdir(parents=True, exist_ok=True)
         return preferred
@@ -594,122 +556,8 @@ def serve_static_file(handler: "Handler", rel: str) -> bool:
     return True
 
 
-def registry_path() -> pathlib.Path:
-    configured = os.environ.get("PORTSKILL_REGISTRY_PATH", DEFAULT_REGISTRY_PATH)
-    return pathlib.Path(configured).expanduser()
-
-
 def load_registry() -> dict:
-    path = registry_path()
-    empty = {
-        "version": 1,
-        "pool": {"start": 20000, "end": 29999},
-        "projects": {},
-        "presets": {},
-        "settings": default_settings(),
-        "machines": default_machines(),
-    }
-    if not path.exists():
-        return empty
-    with path.open("r", encoding="utf-8") as handle:
-        data = json.load(handle)
-    if not isinstance(data, dict):
-        return empty
-    data.setdefault("version", 1)
-    data.setdefault("pool", {"start": 20000, "end": 29999})
-    data.setdefault("projects", {})
-    if not isinstance(data.get("presets"), dict):
-        data["presets"] = {}
-    settings = data.get("settings")
-    if not isinstance(settings, dict):
-        settings = {}
-    preset = settings.get("auto_apply_preset")
-    if preset is None or (isinstance(preset, str) and preset.strip().lower() in ("", "none", "off", "null")):
-        preset = None
-    elif isinstance(preset, str):
-        preset = preset.strip()
-    else:
-        preset = None
-    flag = settings.get("auto_apply_on_launch", False)
-    if isinstance(flag, str):
-        flag = flag.strip().lower() in ("1", "true", "yes", "on")
-    else:
-        flag = bool(flag)
-    stop_also = settings.get("stop_also_release", True)
-    if isinstance(stop_also, str):
-        stop_also = stop_also.strip().lower() in ("1", "true", "yes", "on")
-    else:
-        stop_also = True if stop_also is None else bool(stop_also)
-    exit_flag = settings.get("auto_exit_on_shutdown", False)
-    if isinstance(exit_flag, str):
-        exit_flag = exit_flag.strip().lower() in ("1", "true", "yes", "on")
-    else:
-        exit_flag = bool(exit_flag)
-    # Always on (product rule)
-    req = True
-    tabs = settings.get("open_environment_tabs", [])
-    if not isinstance(tabs, list):
-        tabs = []
-    focused = settings.get("focused_environment")
-    if isinstance(focused, str) and focused.strip():
-        focused = focused.strip()
-    else:
-        focused = None
-    raw_mcp = settings.get("mcp_tools", {})
-    mcp_tools = {}
-    if isinstance(raw_mcp, dict):
-        for key, val in raw_mcp.items():
-            if not isinstance(key, str) or not key.strip():
-                continue
-            name = key.strip()
-            if isinstance(val, bool):
-                mcp_tools[name] = val
-            elif isinstance(val, str):
-                mcp_tools[name] = val.strip().lower() in ("1", "true", "yes", "on")
-            else:
-                mcp_tools[name] = bool(val)
-    raw_profile = settings.get("mcp_tools_profile", "full")
-    if isinstance(raw_profile, str) and raw_profile.strip().lower() in ("full", "lean"):
-        mcp_tools_profile = raw_profile.strip().lower()
-    else:
-        mcp_tools_profile = "full"
-    serve_ps = settings.get("serve_portskill_on_tailscale", False)
-    if isinstance(serve_ps, str):
-        serve_ps = serve_ps.strip().lower() in ("1", "true", "yes", "on")
-    else:
-        serve_ps = bool(serve_ps)
-    mcp_user_commands = normalize_mcp_user_commands(settings.get("mcp_user_commands", {}))
-    handoff_enabled = settings.get("handoff_enabled", False)
-    if isinstance(handoff_enabled, str):
-        handoff_enabled = handoff_enabled.strip().lower() in ("1", "true", "yes", "on")
-    else:
-        handoff_enabled = bool(handoff_enabled)
-    handoff_kit = settings.get("handoff_kit")
-    if isinstance(handoff_kit, str) and handoff_kit.strip():
-        handoff_kit = handoff_kit.strip()
-    else:
-        handoff_kit = None
-    handoff_skill = settings.get("handoff_skill")
-    if isinstance(handoff_skill, str) and handoff_skill.strip():
-        handoff_skill = handoff_skill.strip()
-    else:
-        handoff_skill = None
-    data["settings"] = {
-        "auto_apply_preset": preset,
-        "auto_apply_on_launch": flag,
-        "auto_exit_on_shutdown": exit_flag,
-        "stop_also_release": stop_also,
-        "require_compat": req,
-        "open_environment_tabs": [t for t in tabs if isinstance(t, str) and t.strip()],
-        "focused_environment": focused,
-        "mcp_tools": mcp_tools,
-        "mcp_tools_profile": mcp_tools_profile,
-        "mcp_user_commands": mcp_user_commands,
-        "serve_portskill_on_tailscale": serve_ps,
-        "handoff_enabled": handoff_enabled,
-        "handoff_kit": handoff_kit,
-        "handoff_skill": handoff_skill,
-    }
+    data = read_registry()
     data["machines"] = normalize_machines(data.get("machines"))
     return data
 
@@ -4362,11 +4210,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         return _cli_result(code, payload, stdout)
 
     if action == "serve-portskill":
-        enabled = body.get("enabled")
-        if isinstance(enabled, str):
-            enabled = enabled.strip().lower() in ("1", "true", "yes", "on")
-        else:
-            enabled = bool(enabled)
+        enabled = parse_bool(body.get("enabled"))
         if enabled:
             code, payload, stdout = run_cli(["tailscale", "status"])
             logged = isinstance(payload, dict) and payload.get("logged_in")
@@ -4486,12 +4330,9 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
         enabled = body.get("enabled")
-        if isinstance(enabled, str):
-            enabled = enabled.strip().lower() in ("1", "true", "yes", "on")
-        elif enabled is None:
+        if enabled is None:
             return 400, {"ok": False, "message": "expected enabled bool"}
-        else:
-            enabled = bool(enabled)
+        enabled = parse_bool(enabled)
         argv = [
             "settings",
             "set",
@@ -4503,12 +4344,9 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
 
     if action == "handoff-set-enabled":
         enabled = body.get("enabled")
-        if isinstance(enabled, str):
-            enabled = enabled.strip().lower() in ("1", "true", "yes", "on")
-        elif enabled is None:
+        if enabled is None:
             return 400, {"ok": False, "message": "expected enabled bool"}
-        else:
-            enabled = bool(enabled)
+        enabled = parse_bool(enabled)
         argv = ["settings", "set", "--handoff-enabled", "on" if enabled else "off"]
         code, payload, stdout = run_cli(argv)
         return _cli_result(code, payload, stdout)

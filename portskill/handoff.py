@@ -17,6 +17,8 @@ import subprocess
 import sys
 from typing import Any
 
+from .registry import atomic_write_text, config_dir, handoff_skill_path, parse_bool
+
 PACKAGE_ROOT = pathlib.Path(__file__).resolve().parent.parent
 KIT_REPO = "bens27/session-handoff-kit"
 KIT_DEFAULT_REF = "v0.14.0"
@@ -55,18 +57,11 @@ TEMPLATE_REL = SKILL_DIR_REL / "handoff-template.md"
 LEDGER_REL = SKILL_DIR_REL / "hooks" / "handoff_ledger.py"
 INSTALL_REL = SKILL_DIR_REL / "install.py"
 PACKAGE_SH_REL = pathlib.Path("scripts") / "package.sh"
-HANDOFF_SKILL_FILENAME = "handoff-skill.md"
 HANDOFF_SKILL_MAX_BYTES = 256 * 1024
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in ("1", "true", "yes", "on")
-    return bool(value)
+    return parse_bool(value, default)
 
 
 def handoff_enabled(settings: dict | None = None) -> bool:
@@ -95,7 +90,7 @@ def configured_kit_override(settings: dict | None = None) -> str:
 
 
 def fetched_kits_dir() -> pathlib.Path:
-    return _registry_parent() / "handoff-kit"
+    return config_dir() / "handoff-kit"
 
 
 def fetched_kit_current() -> pathlib.Path:
@@ -235,14 +230,8 @@ def kit_version(root: pathlib.Path | None = None, settings: dict | None = None) 
         return ""
 
 
-def _registry_parent() -> pathlib.Path:
-    """Directory of registry.json (same convention as listen.json / http_auth.json)."""
-    configured = os.environ.get("PORTSKILL_REGISTRY_PATH", "~/.config/portskill/registry.json")
-    return pathlib.Path(configured).expanduser().parent
-
-
 def default_custom_skill_path() -> pathlib.Path:
-    return _registry_parent() / HANDOFF_SKILL_FILENAME
+    return handoff_skill_path()
 
 
 def configured_skill_override(settings: dict | None = None) -> str:
@@ -278,20 +267,6 @@ def skill_source(settings: dict | None = None) -> str:
     return "kit"
 
 
-def _atomic_write_text(path: pathlib.Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
-    try:
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, path)
-    finally:
-        try:
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
-
-
 def persist_custom_skill(text: str) -> dict:
     """Write a replacement Write-a-Handoff skill beside the registry."""
     if not isinstance(text, str):
@@ -308,7 +283,7 @@ def persist_custom_skill(text: str) -> dict:
         }
     path = default_custom_skill_path()
     try:
-        _atomic_write_text(path, payload if payload.endswith("\n") else payload + "\n")
+        atomic_write_text(path, payload if payload.endswith("\n") else payload + "\n")
     except OSError as exc:
         return {"ok": False, "error": "skill_write_failed", "message": str(exc)}
     return {"ok": True, "path": str(path), "source": "custom"}

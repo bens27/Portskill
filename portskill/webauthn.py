@@ -8,20 +8,22 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
-import pathlib
 import secrets
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from . import cbor_lite
 from . import p256
-from .cli import registry_path, utc_now
+from .cli import utc_now
+from .registry import (
+    atomic_write_json,
+    http_passkey_path as passkey_path,
+    http_sessions_path as sessions_path,
+)
 from .request_origin import origin_and_rpid
 
-HTTP_PASSKEY_FILENAME = "http_passkey.json"
-HTTP_SESSIONS_FILENAME = "http_sessions.json"
 HTTP_SESSION_COOKIE_NAME = "portskill_session"
 SESSION_TTL_SEC = 12 * 60 * 60
 CHALLENGE_TTL_SEC = 5 * 60
@@ -34,45 +36,7 @@ _CHALLENGE_LOCK = threading.Lock()
 _FILE_LOCK = threading.Lock()
 
 
-def passkey_path() -> pathlib.Path:
-    configured = os.environ.get("PORTSKILL_HTTP_PASSKEY_PATH")
-    if configured and str(configured).strip():
-        return pathlib.Path(configured).expanduser()
-    return registry_path().parent / HTTP_PASSKEY_FILENAME
-
-
-def sessions_path() -> pathlib.Path:
-    configured = os.environ.get("PORTSKILL_HTTP_SESSIONS_PATH")
-    if configured and str(configured).strip():
-        return pathlib.Path(configured).expanduser()
-    return registry_path().parent / HTTP_SESSIONS_FILENAME
-
-
-def _atomic_secret_json(path: pathlib.Path, payload: dict) -> dict:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    raw = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
-    try:
-        tmp.write_text(raw, encoding="utf-8")
-        try:
-            os.chmod(tmp, 0o600)
-        except OSError:
-            pass
-        os.replace(tmp, path)
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
-    finally:
-        try:
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
-    return payload
-
-
-def _read_json(path: pathlib.Path) -> dict | None:
+def _read_json(path: Path) -> dict | None:
     if not path.is_file():
         return None
     try:
@@ -139,7 +103,8 @@ def write_passkey_doc(doc: dict) -> dict:
         "updated_at": utc_now(),
     }
     with _FILE_LOCK:
-        return _atomic_secret_json(passkey_path(), payload)
+        atomic_write_json(passkey_path(), payload, mode=0o600)
+        return payload
 
 
 def http_passkey_gate_enabled() -> bool:
@@ -598,7 +563,8 @@ def _write_sessions(doc: dict) -> dict:
         clean[token] = rec
     payload = {"version": 1, "sessions": clean, "updated_at": utc_now()}
     with _FILE_LOCK:
-        return _atomic_secret_json(sessions_path(), payload)
+        atomic_write_json(sessions_path(), payload, mode=0o600)
+        return payload
 
 
 def mint_http_session(*, ttl_sec: int = SESSION_TTL_SEC) -> dict:

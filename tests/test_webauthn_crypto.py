@@ -1,6 +1,7 @@
 """Stdlib P-256 / CBOR vectors for the opt-in WebAuthn verifier."""
 from __future__ import annotations
 
+import stat
 import unittest
 
 from tests.helpers import IsolatedConfig
@@ -45,7 +46,9 @@ class CborLiteTests(unittest.TestCase):
 class PasskeyStoreIsolationTests(unittest.TestCase):
     def test_credentials_stay_out_of_registry_json(self) -> None:
         from portskill.webauthn import (
+            mint_http_session,
             passkey_path,
+            sessions_path,
             set_http_passkey_gate,
             write_passkey_doc,
             read_passkey_doc,
@@ -71,6 +74,11 @@ class PasskeyStoreIsolationTests(unittest.TestCase):
             self.assertNotIn("abc", registry)
             self.assertTrue(passkey_path().is_file())
             self.assertIn("http_passkey.json", str(passkey_path()))
+            self.assertEqual(stat.S_IMODE(passkey_path().stat().st_mode), 0o600)
+
+            mint_http_session()
+            self.assertEqual(sessions_path(), iso.root / "http_sessions.json")
+            self.assertEqual(stat.S_IMODE(sessions_path().stat().st_mode), 0o600)
 
 
 if __name__ == "__main__":

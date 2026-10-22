@@ -15,13 +15,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 HOME_LISTEN = pathlib.Path.home() / ".config" / "portskill" / "listen.json"
 
 _ISOLATE_KEYS = (
+    "PORTSKILL_CONFIG_DIR",
     "PORTSKILL_REGISTRY_PATH",
     "PORTSKILL_LISTEN_PATH",
     "PORTSKILL_HTTP_AUTH_PATH",
     "PORTSKILL_HTTP_PASSKEY_PATH",
     "PORTSKILL_HTTP_SESSIONS_PATH",
-    "HOME",
-    "XDG_CONFIG_HOME",
     "PORTSKILL_HANDOFF_KIT",
     "PORTSKILL_TAILSCALE_BIN",
 )
@@ -30,10 +29,9 @@ _ISOLATE_KEYS = (
 class IsolatedConfig:
     """Temp registry + listen dir. Pins env so tests never touch user home.
 
-    Sets PORTSKILL_REGISTRY_PATH, PORTSKILL_LISTEN_PATH, HOME, and XDG_CONFIG_HOME.
+    Sets the canonical PORTSKILL_CONFIG_DIR and clears legacy per-file overrides.
     Clears PORTSKILL_HANDOFF_KIT (pass extra= to restore an override for one call).
-    Restores the previous values on close. Subprocess helpers copy this env so
-    a leaked PORTSKILL_LISTEN_PATH / leftover home listen.json cannot flake CI.
+    Restores the previous values on close. Subprocess helpers copy this env.
     """
 
     def __init__(self) -> None:
@@ -41,21 +39,15 @@ class IsolatedConfig:
         self.root = pathlib.Path(self._tmp.name)
         self.registry_path = self.root / "registry.json"
         self.listen_path = self.root / "listen.json"
-        self.home_dir = self.root / "home"
-        self.xdg_config = self.home_dir / ".config"
-        # Snapshot the real home listen path before we rewrite HOME.
         self.real_home_listen = HOME_LISTEN
         self._prev: dict[str, str | None] = {}
 
     def __enter__(self) -> IsolatedConfig:
         for key in _ISOLATE_KEYS:
             self._prev[key] = os.environ.get(key)
-        self.home_dir.mkdir(parents=True, exist_ok=True)
-        self.xdg_config.mkdir(parents=True, exist_ok=True)
-        os.environ["PORTSKILL_REGISTRY_PATH"] = str(self.registry_path)
-        os.environ["PORTSKILL_LISTEN_PATH"] = str(self.listen_path)
-        os.environ["HOME"] = str(self.home_dir)
-        os.environ["XDG_CONFIG_HOME"] = str(self.xdg_config)
+        os.environ["PORTSKILL_CONFIG_DIR"] = str(self.root)
+        os.environ.pop("PORTSKILL_REGISTRY_PATH", None)
+        os.environ.pop("PORTSKILL_LISTEN_PATH", None)
         os.environ.pop("PORTSKILL_HANDOFF_KIT", None)
         os.environ["PORTSKILL_TAILSCALE_BIN"] = str(self.root / "tailscale-not-installed")
         os.environ.pop("PORTSKILL_HTTP_AUTH_PATH", None)
@@ -74,10 +66,9 @@ class IsolatedConfig:
     def subprocess_env(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         """Env for CLI/script subprocesses: isolated paths + PYTHONPATH."""
         env = os.environ.copy()
-        env["PORTSKILL_REGISTRY_PATH"] = str(self.registry_path)
-        env["PORTSKILL_LISTEN_PATH"] = str(self.listen_path)
-        env["HOME"] = str(self.home_dir)
-        env["XDG_CONFIG_HOME"] = str(self.xdg_config)
+        env["PORTSKILL_CONFIG_DIR"] = str(self.root)
+        env.pop("PORTSKILL_REGISTRY_PATH", None)
+        env.pop("PORTSKILL_LISTEN_PATH", None)
         env["PYTHONPATH"] = str(ROOT) + (
             os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
         )

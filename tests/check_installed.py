@@ -18,13 +18,17 @@ def main() -> None:
         env = os.environ.copy()
         env.pop("PYTHONPATH", None)
         env.pop("PORTSKILL_HANDOFF_KIT", None)
+        for key in (
+            "PORTSKILL_REGISTRY_PATH",
+            "PORTSKILL_LISTEN_PATH",
+            "PORTSKILL_HTTP_AUTH_PATH",
+            "PORTSKILL_HTTP_PASSKEY_PATH",
+            "PORTSKILL_HTTP_SESSIONS_PATH",
+        ):
+            env.pop(key, None)
         env.update({
             "PORTSKILL_TAILSCALE_BIN": str(root / "tailscale-not-installed"),
-            "PORTSKILL_REGISTRY_PATH": str(root / "registry.json"),
-            "PORTSKILL_LISTEN_PATH": str(root / "listen.json"),
-            "PORTSKILL_HTTP_AUTH_PATH": str(root / "http_auth.json"),
-            "PORTSKILL_HTTP_PASSKEY_PATH": str(root / "http_passkey.json"),
-            "PORTSKILL_HTTP_SESSIONS_PATH": str(root / "http_sessions.json"),
+            "PORTSKILL_CONFIG_DIR": str(root),
         })
         def run(args: list[str], input: str | None = None) -> subprocess.CompletedProcess:
             result = subprocess.run([sys.executable, *args], cwd=root, env=env,

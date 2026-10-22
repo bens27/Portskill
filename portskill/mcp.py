@@ -11,11 +11,18 @@ from typing import Any
 
 from . import __version__
 from .handoff import HANDOFF_TOOL_DEFS, HANDOFF_TOOL_NAMES, call_handoff_tool, handoff_enabled
+from .registry import (
+    MCP_TOOLS_PROFILES,
+    listen_path,
+    normalize_profile,
+    parse_bool,
+    read_listen,
+    read_settings,
+)
 
 # Named settings.mcp_tools profiles. Apply writes the existing enable map
 # (missing key = enabled). Default is full so existing installs stay unchanged
 # until the user or agent opts into lean.
-MCP_TOOLS_PROFILES = ("full", "lean")
 PORTSKILL_TOOL_NAME = "portskill"
 PORTSKILL_TOOL_ALIASES = frozenset({"portskill_path"})
 PORTSKILL_TOOL_PITCH = "One MCP tool for your agent to handle all port management functions."
@@ -548,24 +555,9 @@ TOOL_DEFS = [
 
 
 
-def _registry_path() -> pathlib.Path:
-    configured = os.environ.get("PORTSKILL_REGISTRY_PATH", "~/.config/portskill/registry.json")
-    return pathlib.Path(configured).expanduser()
-
-
 def _load_settings_from_registry() -> dict:
     """Read settings from the same registry.json path the CLI uses."""
-    path = _registry_path()
-    if not path.is_file():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    settings = data.get("settings")
-    return settings if isinstance(settings, dict) else {}
+    return read_settings()
 
 
 def _mcp_tools_prefs(registry_or_settings=None) -> dict:
@@ -583,12 +575,7 @@ def _mcp_tools_prefs(registry_or_settings=None) -> dict:
         if not isinstance(key, str) or not key.strip():
             continue
         name = key.strip()
-        if isinstance(val, bool):
-            out[name] = val
-        elif isinstance(val, str):
-            out[name] = val.strip().lower() in ("1", "true", "yes", "on")
-        else:
-            out[name] = bool(val)
+        out[name] = parse_bool(val)
     if not handoff_enabled(settings):
         out.update({name: False for name in HANDOFF_TOOL_NAMES})
     return out
@@ -627,9 +614,7 @@ def _system_tool_names() -> set[str]:
 
 def normalize_mcp_tools_profile(value) -> str:
     """Return full|lean. Missing or unknown values default to full (opt-in lean)."""
-    if isinstance(value, str) and value.strip().lower() in MCP_TOOLS_PROFILES:
-        return value.strip().lower()
-    return "full"
+    return normalize_profile(value)
 
 
 def mcp_tools_map_for_profile(profile: str, existing: dict | None = None) -> dict[str, bool]:
@@ -1344,16 +1329,7 @@ def _listen_enrichment() -> dict:
     info = _LISTEN_RUNTIME
     if not isinstance(info, dict) or not info.get("mcp_url"):
         # Fall back to on-disk listen.json (agents / menubar / post-restart)
-        from .cli import listen_path as _listen_path
-
-        path = _listen_path()
-        if path.is_file():
-            try:
-                disk = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-                disk = None
-            if isinstance(disk, dict):
-                info = disk
+        info = read_listen()
     if not isinstance(info, dict):
         return {}
     out = {}
@@ -1373,9 +1349,7 @@ def _listen_enrichment() -> dict:
         if key in info and info[key] is not None:
             out[key] = info[key]
     if "listen_path" not in out:
-        from .cli import listen_path as _listen_path
-
-        out["listen_path"] = str(_listen_path())
+        out["listen_path"] = str(listen_path())
     if "setup" not in out:
         out["setup"] = {
             "cursor_mcp_stdio_hint": (

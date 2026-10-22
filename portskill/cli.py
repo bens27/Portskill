@@ -4,10 +4,29 @@ import argparse
 from . import __version__
 from . import discover_ports as discover_ports_mod
 from .handoff import doctor_handoff
+from .registry import (
+    CorruptRegistryError,
+    MCP_USER_COMMAND_MAX_STEPS,
+    atomic_write_json,
+    backups_dir,
+    default_registry as initial_registry,
+    default_settings,
+    http_auth_path,
+    listen_path,
+    mutate_registry,
+    normalize_mcp_user_command_step,
+    normalize_mcp_user_commands,
+    normalize_overlap_policy,
+    normalize_registry_schema,
+    normalize_settings,
+    parse_bool,
+    read_listen,
+    read_settings,
+    registry_path,
+)
 from .service import launch_service, service_launch
 import copy
 import datetime
-import fcntl
 import hashlib
 import hmac
 import json
@@ -26,9 +45,6 @@ import webbrowser
 
 
 VERSION = 1
-DEFAULT_REGISTRY_PATH = "~/.config/portskill/registry.json"
-LISTEN_FILENAME = "listen.json"
-HTTP_AUTH_FILENAME = "http_auth.json"
 HTTP_AUTH_COOKIE_NAME = "portskill_http"
 HTTP_SESSION_COOKIE_NAME = "portskill_session"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
@@ -68,24 +84,6 @@ def utc_now():
 
 def emit(payload):
     print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
-
-
-def registry_path():
-    configured = os.environ.get("PORTSKILL_REGISTRY_PATH", DEFAULT_REGISTRY_PATH)
-    return pathlib.Path(configured).expanduser()
-
-
-def listen_path():
-    """Sticky listen.json beside the registry, or PORTSKILL_LISTEN_PATH.
-
-    Default (~/.config/portskill/registry.json) keeps listen.json in the
-    same directory as today. Tests set PORTSKILL_REGISTRY_PATH to a temp file so
-    listen.json never touches the user's home config.
-    """
-    configured = os.environ.get("PORTSKILL_LISTEN_PATH")
-    if configured and str(configured).strip():
-        return pathlib.Path(configured).expanduser()
-    return registry_path().parent / LISTEN_FILENAME
 
 
 def is_loopback_host(host):
@@ -140,14 +138,6 @@ def listen_allows_non_loopback(listen_payload):
     return bool(listen_payload.get("allow_non_loopback"))
 
 
-def http_auth_path():
-    """http_auth.json beside the registry, or PORTSKILL_HTTP_AUTH_PATH."""
-    configured = os.environ.get("PORTSKILL_HTTP_AUTH_PATH")
-    if configured and str(configured).strip():
-        return pathlib.Path(configured).expanduser()
-    return registry_path().parent / HTTP_AUTH_FILENAME
-
-
 def mint_http_auth_secret():
     return secrets.token_urlsafe(32)
 
@@ -198,7 +188,6 @@ def http_auth_public_status():
 
 def write_http_auth_file(token, *, created_at=None):
     path = http_auth_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
     now = utc_now()
     payload = {
         "version": 1,
@@ -206,25 +195,7 @@ def write_http_auth_file(token, *, created_at=None):
         "created_at": created_at or now,
         "updated_at": now,
     }
-    raw = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
-    try:
-        tmp.write_text(raw, encoding="utf-8")
-        try:
-            os.chmod(tmp, 0o600)
-        except OSError:
-            pass
-        os.replace(tmp, path)
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
-    finally:
-        try:
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
+    atomic_write_json(path, payload, mode=0o600)
     return payload
 
 
@@ -311,174 +282,8 @@ def needs_tailnet(project, count_or_range):
     }
 
 
-def initial_registry(start, end):
-    return {
-        "version": VERSION,
-        "pool": {"start": start, "end": end},
-        "projects": {},
-        "presets": {},
-        "settings": default_settings(),
-        "sessions": default_sessions(),
-        "machines": default_machines(),
-        "environment_history": {},
-    }
-
-
-def default_settings():
-    return {
-        "auto_apply_preset": None,
-        "auto_apply_on_launch": False,
-        "auto_exit_on_shutdown": False,
-        "overlap_policy": "allow",  # legacy/inert; prefer require_compat
-        "require_compat": True,  # always on (UI locked)
-        "open_environment_tabs": [],
-        "focused_environment": None,
-        "mcp_tools": {},  # tool_name -> bool; missing key = enabled
-        "mcp_tools_profile": "full",  # named preset: full|lean; apply writes mcp_tools
-        "stop_also_release": True,  # stop also frees the range; false keeps reserved
-        "default_tailnet": "none",  # portskill start/restart without tailnet: none|serve (never funnel)
-        "mcp_user_commands": {},  # name -> {name, description, steps[{tool,arguments,mode}]}
-        "serve_portskill_on_tailscale": False,  # new installs OFF; existing true is preserved by normalize
-        "handoff_enabled": False,  # Session Handoff section opt-in
-        "handoff_kit": None,  # optional override; default is the fetched kit
-        "handoff_skill": None,  # optional custom Write-a-Handoff SKILL.md path
-    }
-
-
 SESSION_HISTORY_CAP = 50
 SESSION_SOURCES = ("preset_apply", "apply_defaults", "enter_house")
-
-
-def normalize_overlap_policy(value):
-    if isinstance(value, str) and value.strip().lower() in ("allow", "deny"):
-        return value.strip().lower()
-    return "allow"
-
-
-def normalize_settings(settings):
-    normalized = default_settings()
-    if not isinstance(settings, dict):
-        return normalized
-    preset = settings.get("auto_apply_preset", None)
-    if preset is None or preset == "" or (isinstance(preset, str) and preset.strip().lower() in ("none", "off", "null")):
-        normalized["auto_apply_preset"] = None
-    elif isinstance(preset, str) and preset.strip():
-        normalized["auto_apply_preset"] = preset.strip()
-    else:
-        normalized["auto_apply_preset"] = None
-    flag = settings.get("auto_apply_on_launch", False)
-    if isinstance(flag, bool):
-        normalized["auto_apply_on_launch"] = flag
-    elif isinstance(flag, str):
-        normalized["auto_apply_on_launch"] = flag.strip().lower() in ("1", "true", "yes", "on")
-    else:
-        normalized["auto_apply_on_launch"] = bool(flag)
-    exit_flag = settings.get("auto_exit_on_shutdown", False)
-    if isinstance(exit_flag, bool):
-        normalized["auto_exit_on_shutdown"] = exit_flag
-    elif isinstance(exit_flag, str):
-        normalized["auto_exit_on_shutdown"] = exit_flag.strip().lower() in ("1", "true", "yes", "on")
-    else:
-        normalized["auto_exit_on_shutdown"] = bool(exit_flag)
-    normalized["overlap_policy"] = normalize_overlap_policy(settings.get("overlap_policy", "allow"))
-    # Product rule: require_compat is always on (cannot deselect)
-    normalized["require_compat"] = True
-    # Legacy: overlap_policy=deny without explicit require_compat ⇒ require_compat
-    if normalized["overlap_policy"] == "deny" and "require_compat" not in (settings or {}):
-        normalized["require_compat"] = True
-    # UI session: open environment tabs + focused environment (additive)
-    tabs = settings.get("open_environment_tabs", [])
-    clean_tabs = []
-    if isinstance(tabs, list):
-        for name in tabs:
-            if isinstance(name, str) and name.strip() and name.strip() not in clean_tabs:
-                clean_tabs.append(name.strip())
-    normalized["open_environment_tabs"] = clean_tabs
-    focused = settings.get("focused_environment", None)
-    if isinstance(focused, str) and focused.strip():
-        focused = focused.strip()
-        if focused not in clean_tabs and clean_tabs:
-            # Keep focus if tab list empty of it — still allow; UI may open it
-            pass
-        normalized["focused_environment"] = focused
-    else:
-        normalized["focused_environment"] = None
-    # Per-tool MCP enable/disable (missing key = enabled). Unknown names kept; MCP ignores them.
-    raw_mcp = settings.get("mcp_tools", {})
-    mcp_tools = {}
-    if isinstance(raw_mcp, dict):
-        for key, val in raw_mcp.items():
-            if not isinstance(key, str) or not key.strip():
-                continue
-            name = key.strip()
-            if isinstance(val, bool):
-                mcp_tools[name] = val
-            elif isinstance(val, str):
-                mcp_tools[name] = val.strip().lower() in ("1", "true", "yes", "on")
-            else:
-                mcp_tools[name] = bool(val)
-    normalized["mcp_tools"] = mcp_tools
-    # Named mcp_tools profile (full|lean). Default full; lean is opt-in apply only.
-    raw_profile = settings.get("mcp_tools_profile", "full")
-    if isinstance(raw_profile, str) and raw_profile.strip().lower() in ("full", "lean"):
-        normalized["mcp_tools_profile"] = raw_profile.strip().lower()
-    else:
-        normalized["mcp_tools_profile"] = "full"
-    # Stop also Release (default true — preserves historic cmd_stop → release_item).
-    stop_rel = settings.get("stop_also_release", True)
-    if isinstance(stop_rel, bool):
-        normalized["stop_also_release"] = stop_rel
-    elif isinstance(stop_rel, str):
-        normalized["stop_also_release"] = stop_rel.strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        )
-    else:
-        normalized["stop_also_release"] = bool(stop_rel)
-    dt = settings.get("default_tailnet", "none")
-    normalized["default_tailnet"] = "serve" if isinstance(dt, str) and dt.strip().lower() == "serve" else "none"
-    # Optional preference: Tailscale Serve the Portskill UI/MCP listen port (not Funnel).
-    # Missing key follows the new-install default (false). An explicit true stays true.
-    serve_ps = settings.get("serve_portskill_on_tailscale", False)
-    if isinstance(serve_ps, bool):
-        normalized["serve_portskill_on_tailscale"] = serve_ps
-    elif isinstance(serve_ps, str):
-        normalized["serve_portskill_on_tailscale"] = serve_ps.strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        )
-    else:
-        normalized["serve_portskill_on_tailscale"] = bool(serve_ps)
-    normalized["mcp_user_commands"] = normalize_mcp_user_commands(
-        settings.get("mcp_user_commands", {})
-    )
-    handoff_flag = settings.get("handoff_enabled", False)
-    if isinstance(handoff_flag, bool):
-        normalized["handoff_enabled"] = handoff_flag
-    elif isinstance(handoff_flag, str):
-        normalized["handoff_enabled"] = handoff_flag.strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        )
-    else:
-        normalized["handoff_enabled"] = bool(handoff_flag)
-    kit = settings.get("handoff_kit")
-    if isinstance(kit, str) and kit.strip():
-        normalized["handoff_kit"] = kit.strip()
-    else:
-        normalized["handoff_kit"] = None
-    skill = settings.get("handoff_skill")
-    if isinstance(skill, str) and skill.strip():
-        normalized["handoff_skill"] = skill.strip()
-    else:
-        normalized["handoff_skill"] = None
-    return normalized
 
 
 def resolve_stop_also_release(registry_or_settings=None, override=None) -> bool:
@@ -510,64 +315,7 @@ def _also_release_override_from_args(args):
 
 
 
-MCP_USER_COMMAND_MAX_STEPS = 12
 MCP_USER_COMMAND_TOOL_NAMES = None  # filled lazily from mcp.TOOL_DEFS when validating
-
-
-def normalize_mcp_user_command_step(step):
-    if not isinstance(step, dict):
-        return None
-    tool = step.get("tool")
-    if not isinstance(tool, str) or not tool.strip():
-        return None
-    mode = step.get("mode") or "series"
-    if not isinstance(mode, str):
-        mode = "series"
-    mode = mode.strip().lower()
-    if mode not in ("series", "parallel"):
-        mode = "series"
-    arguments = step.get("arguments")
-    if not isinstance(arguments, dict):
-        arguments = {}
-    return {"tool": tool.strip(), "arguments": arguments, "mode": mode}
-
-
-def normalize_mcp_user_commands(raw):
-    """Validate/normalize settings.mcp_user_commands map.
-
-    Limits (v1):
-    - max MCP_USER_COMMAND_MAX_STEPS steps per command
-    - steps.tool must be an existing system TOOL_DEFS name (checked at call time too)
-    - no nested chains (user-command cannot invoke another user-command)
-    - mode is series|parallel only
-    """
-    out = {}
-    if not isinstance(raw, dict):
-        return out
-    for key, val in raw.items():
-        if not isinstance(key, str) or not key.strip():
-            continue
-        name = key.strip()
-        if not isinstance(val, dict):
-            continue
-        cmd_name = val.get("name") if isinstance(val.get("name"), str) and val.get("name").strip() else name
-        cmd_name = cmd_name.strip()
-        desc = val.get("description") if isinstance(val.get("description"), str) else ""
-        steps_in = val.get("steps")
-        steps = []
-        if isinstance(steps_in, list):
-            for raw_step in steps_in[:MCP_USER_COMMAND_MAX_STEPS]:
-                norm = normalize_mcp_user_command_step(raw_step)
-                if norm is not None:
-                    steps.append(norm)
-        if not steps:
-            continue
-        out[cmd_name] = {
-            "name": cmd_name,
-            "description": desc.strip(),
-            "steps": steps,
-        }
-    return out
 
 
 def default_sessions():
@@ -1111,14 +859,8 @@ def normalize_range_machine_fields(item):
 
 
 def normalize_registry(data, start, end):
-    if not isinstance(data, dict):
-        data = {}
-    data["version"] = VERSION
-    data["pool"] = {"start": start, "end": end}
-    projects = data.get("projects")
-    if not isinstance(projects, dict):
-        projects = {}
-    data["projects"] = projects
+    data = normalize_registry_schema(data, start, end)
+    projects = data["projects"]
     for project_key, project_entry in projects.items():
         if isinstance(project_key, str) and project_key.startswith("/"):
             migrate_legacy_project_files(project_key)
@@ -1694,21 +1436,13 @@ def normalize_workspace_draft(draft):
         if "extra" in fields:
             entry["extra"] = normalize_range_extra(fields.get("extra"))
         clean[rid.strip()] = entry
-    edit_mode = draft.get("edit_mode", False)
-    if isinstance(edit_mode, str):
-        edit_mode = edit_mode.strip().lower() in ("1", "true", "yes", "on")
-    else:
-        edit_mode = bool(edit_mode)
+    edit_mode = parse_bool(draft.get("edit_mode"), False)
     return {"ranges": clean, "edit_mode": edit_mode}
 
 
 def workspace_draft_is_modified(draft):
     draft = normalize_workspace_draft(draft)
     return bool(draft.get("ranges"))
-
-
-def backups_dir():
-    return registry_path().parent / "backups"
 
 
 def export_workspace_backup(registry, label="workspace"):
@@ -1732,41 +1466,28 @@ def export_workspace_backup(registry, label="workspace"):
 
 
 def locked_registry(mutator):
-    path = registry_path()
     start, end = pool_bounds()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        handle.seek(0)
-        raw = handle.read()
-        raw_obj = None
-        if raw.strip():
-            try:
-                registry = json.loads(raw)
-                raw_obj = registry if isinstance(registry, dict) else None
-            except json.JSONDecodeError as exc:
-                fail(
-                    "corrupt_registry",
-                    f"registry JSON is corrupt at {path}: {exc.msg} (line {exc.lineno} col {exc.colno}); "
-                    "fix or restore the file — refusing to wipe",
-                )
-        else:
-            registry = initial_registry(start, end)
-        needs_schema_persist = raw_obj is None or not isinstance(raw_obj.get("presets"), dict) or not isinstance(raw_obj.get("settings"), dict) or not isinstance(raw_obj.get("sessions"), dict) or not isinstance(raw_obj.get("environment_history"), dict) or not isinstance(raw_obj.get("machines"), dict) or not isinstance(raw_obj.get("environment_history"), dict)
-        registry = normalize_registry(registry, start, end)
+
+    def adapt(registry):
         result, changed_projects = mutator(registry)
-        if changed_projects or needs_schema_persist:
-            handle.seek(0)
-            handle.truncate()
-            json.dump(registry, handle, separators=(",", ":"), sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-            for project in changed_projects or []:
-                if project and not str(project).startswith("__"):
-                    write_local_project_file(project, registry)
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        return result
+        return result, bool(changed_projects), changed_projects
+
+    try:
+        return mutate_registry(
+            adapt,
+            start=start,
+            end=end,
+            normalizer=normalize_registry,
+            after_write=write_local_project_files,
+        )
+    except CorruptRegistryError as exc:
+        fail("corrupt_registry", str(exc))
+
+
+def write_local_project_files(registry, changed_projects):
+    for project in changed_projects or []:
+        if project and not str(project).startswith("__"):
+            write_local_project_file(project, registry)
 
 
 def write_local_project_file(project, registry):
@@ -1777,9 +1498,7 @@ def write_local_project_file(project, registry):
         "ranges": registry["projects"].get(project, {}).get("ranges", []),
     }
     path = local_registry_path(project)
-    with path.open("w", encoding="utf-8") as handle:
-        json.dump(data, handle, separators=(",", ":"), sort_keys=True)
-        handle.write("\n")
+    atomic_write_json(path, data, compact=True)
 
 
 def range_record(range_id, start, end, note, tailnet_mode, default_state="off", machine_id="local", host=None, scheme=None):
@@ -3659,41 +3378,17 @@ def services_from_environment_file(path):
 
 def mutate_registry_meta(mutator):
     """Like locked_registry but can write meta-only (presets/settings) without local mirrors."""
-    path = registry_path()
     start, end = pool_bounds()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        handle.seek(0)
-        raw = handle.read()
-        raw_obj = None
-        if raw.strip():
-            try:
-                registry = json.loads(raw)
-                raw_obj = registry if isinstance(registry, dict) else None
-            except json.JSONDecodeError as exc:
-                fail(
-                    "corrupt_registry",
-                    f"registry JSON is corrupt at {path}: {exc.msg} (line {exc.lineno} col {exc.colno}); "
-                    "fix or restore the file — refusing to wipe",
-                )
-        else:
-            registry = initial_registry(start, end)
-        needs_schema_persist = raw_obj is None or not isinstance(raw_obj.get("presets"), dict) or not isinstance(raw_obj.get("settings"), dict) or not isinstance(raw_obj.get("sessions"), dict)
-        registry = normalize_registry(registry, start, end)
-        result, should_write, changed_projects = mutator(registry)
-        if should_write or needs_schema_persist:
-            handle.seek(0)
-            handle.truncate()
-            json.dump(registry, handle, separators=(",", ":"), sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-            for project in changed_projects or []:
-                if project and not str(project).startswith("__"):
-                    write_local_project_file(project, registry)
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        return result
+    try:
+        return mutate_registry(
+            mutator,
+            start=start,
+            end=end,
+            normalizer=normalize_registry,
+            after_write=write_local_project_files,
+        )
+    except CorruptRegistryError as exc:
+        fail("corrupt_registry", str(exc))
 
 
 def cmd_preset_save(args):
@@ -4384,7 +4079,7 @@ def cmd_compat(args):
 
 
 def package_root():
-    """Distribution root containing portskill/, ui/, skill/, etc."""
+    """Distribution root containing portskill/, skill/, scripts/, and docs/."""
     return pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -4467,14 +4162,8 @@ def cmd_set_tailnet(args):
 
 def read_listen_port_from_disk():
     """Return Portskill listen port from sticky listen.json, or None."""
-    path = listen_path()
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    if not isinstance(data, dict):
+    data = read_listen()
+    if data is None:
         return None
     port = data.get("port")
     try:
@@ -4502,14 +4191,8 @@ def probe_portskill_serve_status(port=None):
     status = probe_tailscale_status()
     pref = False
     try:
-        # Best-effort preference read without locking
-        path = pathlib.Path(os.environ.get("PORTSKILL_REGISTRY_PATH", "~/.config/portskill/registry.json")).expanduser()
-        if path.is_file():
-            data = json.loads(path.read_text(encoding="utf-8"))
-            settings = data.get("settings") if isinstance(data, dict) else {}
-            if isinstance(settings, dict):
-                pref = bool(normalize_settings(settings).get("serve_portskill_on_tailscale"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        pref = bool(read_settings().get("serve_portskill_on_tailscale"))
+    except (OSError, TypeError, ValueError):
         pref = False
     url = build_portskill_serve_url(port, status.get("Self")) if port else None
     out = {
