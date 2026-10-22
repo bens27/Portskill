@@ -5,6 +5,7 @@ from . import __version__
 from .auth import (
     ensure_http_auth_token,
     http_auth_public_status,
+    http_auth_result,
     http_auth_token,
     http_bearer_matches,
     regenerate_http_auth_token,
@@ -28,6 +29,7 @@ from .history import (
     reset_history,
     restore_history,
 )
+from .handoff import fetch_kit_result
 from .doctor import DOCTOR_FAIL_CLOSED_EXIT, DOCTOR_HARD_CHECKS
 from .domain import (
     DomainError,
@@ -80,7 +82,6 @@ from .registry import (
     atomic_write_json,
     default_registry as initial_registry,
     default_settings,
-    http_auth_path,
     listen_path,
     mutate_registry,
     normalize_mcp_user_command_step,
@@ -992,83 +993,12 @@ def cmd_workspace(args):
 
 
 def cmd_http_auth(args):
-    """Show/regenerate optional bearer, or toggle the opt-in passkey gate."""
-    from .webauthn import (
-        delete_passkey_credential,
-        http_passkey_gate_enabled,
-        list_passkey_credentials,
-        passkey_path,
-        passkey_public_status,
-        set_http_passkey_gate,
-    )
-
-    sub = getattr(args, "http_auth_command", None)
-    path = str(http_auth_path())
-    if sub == "show":
-        payload, minted = ensure_http_auth_token()
-        emit({
-            "status": "ok",
-            "configured": True,
-            "present": True,
-            "path": path,
-            "token": payload.get("token"),
-            "minted": bool(minted),
-            "created_at": payload.get("created_at"),
-            "updated_at": payload.get("updated_at"),
-            "passkey_gate": http_passkey_gate_enabled(),
-            "passkey_credentials": len(list_passkey_credentials()),
-        })
-        return
-    if sub == "regenerate":
-        payload = regenerate_http_auth_token()
-        emit({
-            "status": "ok",
-            "configured": True,
-            "present": True,
-            "path": path,
-            "token": payload.get("token"),
-            "regenerated": True,
-            "created_at": payload.get("created_at"),
-            "updated_at": payload.get("updated_at"),
-            "passkey_gate": http_passkey_gate_enabled(),
-            "message": "Previous HTTP bearer token is invalidated.",
-        })
-        return
-    if sub == "gate":
-        mode = getattr(args, "gate_mode", None)
-        if mode in ("on", "off"):
-            set_http_passkey_gate(mode == "on")
-        pk = passkey_public_status()
-        emit({
-            "status": "ok",
-            "passkey_gate": bool(pk.get("gate")),
-            "passkey_credentials": int(pk.get("count") or 0),
-            "path": str(passkey_path()),
-            "default": "off",
-            "message": (
-                "Passkey HTTP gate is ON — UI/mutating APIs need a passkey session or bearer."
-                if pk.get("gate")
-                else "Passkey HTTP gate is OFF — personal listen UI/API stay open (post-#14)."
-            ),
-        })
-        return
-    if sub == "passkeys":
-        action = getattr(args, "passkeys_action", None) or "list"
-        if action == "delete":
-            cred_id = getattr(args, "credential_id", None)
-            if not isinstance(cred_id, str) or not cred_id.strip():
-                fail("invalid_args", "http-auth passkeys delete requires --id")
-            deleted = delete_passkey_credential(cred_id.strip())
-            emit({
-                "status": "ok",
-                "deleted": bool(deleted),
-                "id": cred_id.strip(),
-                **passkey_public_status(),
-            })
-            return
-        emit({"status": "ok", **passkey_public_status()})
-        return
-    fail("invalid_args", "http-auth requires show|regenerate|gate|passkeys")
+    emit(http_auth_result({
+        "command": getattr(args, "http_auth_command", None),
+        "gate_mode": getattr(args, "gate_mode", None),
+        "passkeys_action": getattr(args, "passkeys_action", None),
+        "credential_id": getattr(args, "credential_id", None),
+    }))
 
 
 def cmd_tailscale(args):
@@ -1091,12 +1021,7 @@ def cmd_doctor(args):
 
 
 def cmd_handoff_fetch(args):
-    from portskill.handoff import fetch_kit
-
-    result = fetch_kit(getattr(args, "ref", None))
-    if not result.get("ok"):
-        fail(result.get("error") or "fetch_failed", result.get("message"))
-    emit(result)
+    emit(fetch_kit_result({"ref": getattr(args, "ref", None)}))
 
 
 def cmd_history_list(args):

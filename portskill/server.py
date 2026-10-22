@@ -28,10 +28,10 @@ from urllib.parse import urlparse, unquote
 from . import __version__
 from .auth import (
     ensure_http_auth_token,
+    http_auth_result,
     http_auth_public_status,
     http_auth_token,
     http_bearer_matches,
-    regenerate_http_auth_token,
 )
 from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
 from .domain import DomainError
@@ -59,6 +59,7 @@ from .registry import (
 )
 from .handoff import (
     HANDOFF_TOOL_NAMES,
+    fetch_kit_result,
     handoff_enabled,
     bundled_skill_text,
     install_help_text,
@@ -107,7 +108,6 @@ from .webauthn import (
     clear_bearer_cookie_header,
     complete_authentication,
     complete_registration,
-    delete_passkey_credential,
     http_passkey_gate_enabled,
     http_session_valid,
     mint_http_session,
@@ -115,7 +115,6 @@ from .webauthn import (
     registration_options,
     revoke_http_session,
     session_cookie_header,
-    set_http_passkey_gate,
 )
 
 DEFAULT_HOST = "127.0.0.1"
@@ -4393,9 +4392,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         if enabled is None:
             return 400, {"ok": False, "message": "expected enabled bool"}
         enabled = parse_bool(enabled)
-        argv = ["settings", "set", "--handoff-enabled", "on" if enabled else "off"]
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+        return _domain_cli_result(lambda: settings_set({"handoff_enabled": enabled}))
 
     if action == "handoff-set-kit":
         path = body.get("path")
@@ -4404,15 +4401,13 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         if not isinstance(path, str):
             return 400, {"ok": False, "message": "expected path"}
         token = path.strip() or "none"
-        argv = ["settings", "set", "--handoff-kit", token]
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+        return _domain_cli_result(lambda: settings_set({"handoff_kit": token}))
 
     if action == "handoff-fetch":
         ref = body.get("ref")
-        argv = ["handoff", "fetch"] + (["--ref", str(ref)] if isinstance(ref, str) and ref.strip() else [])
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+        return _domain_cli_result(lambda: fetch_kit_result({
+            "ref": str(ref) if isinstance(ref, str) and ref.strip() else None,
+        }))
 
     if action == "handoff-skill-download":
         settings = load_registry().get("settings") or {}
@@ -4436,10 +4431,10 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         if not written.get("ok"):
             return 422, written
         path = written.get("path") or ""
-        argv = ["settings", "set", "--handoff-skill", path]
-        code, payload, stdout = run_cli(argv)
-        if code != 0:
-            return _cli_result(code, payload, stdout)
+        try:
+            payload = settings_set({"handoff_skill": path})
+        except Exception as exc:
+            return _domain_exception_result(exc)
         out = dict(payload) if isinstance(payload, dict) else {}
         out["ok"] = True
         out["handoff_skill"] = path
@@ -4447,9 +4442,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         return 0, out
 
     if action == "handoff-skill-clear":
-        argv = ["settings", "set", "--handoff-skill", "none"]
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+        return _domain_cli_result(lambda: settings_set({"handoff_skill": "none"}))
 
     if action in ("handoff-package", "handoff-codex-install") and not handoff_enabled(load_registry().get("settings")):
         return 409, {"ok": False, "error": "handoff_disabled", "message": "Enable Session Handoff under Experimental (Beta) before installing or packaging the kit."}
@@ -5138,7 +5131,17 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(cred_id, str) or not cred_id.strip():
                 self._send_json(400, {"ok": False, "message": "id required"})
                 return
-            deleted = delete_passkey_credential(cred_id.strip())
+            try:
+                result = http_auth_result({
+                    "command": "passkeys",
+                    "passkeys_action": "delete",
+                    "credential_id": cred_id.strip(),
+                })
+            except Exception as exc:
+                _code, payload = _domain_exception_result(exc)
+                self._send_json(422, payload)
+                return
+            deleted = bool(result.get("deleted"))
             self._send_json(200, {"ok": True, "deleted": deleted, **passkey_public_status()})
             return
         if path == "/api/http-auth/gate":
@@ -5157,7 +5160,15 @@ class Handler(BaseHTTPRequestHandler):
                 enabling_gate=True, discard_body=False
             ):
                 return
-            set_http_passkey_gate(enabled)
+            try:
+                http_auth_result({
+                    "command": "gate",
+                    "gate_mode": "on" if enabled else "off",
+                })
+            except Exception as exc:
+                _code, payload = _domain_exception_result(exc)
+                self._send_json(422, payload)
+                return
             extra = None
             if enabled and self._client_is_loopback() and not self._session_ok():
                 minted = mint_http_session()
@@ -5183,7 +5194,12 @@ class Handler(BaseHTTPRequestHandler):
             if not ok:
                 self._send_unauthorized()
                 return
-            payload = regenerate_http_auth_token()
+            try:
+                payload = http_auth_result({"command": "regenerate"})
+            except Exception as exc:
+                _code, error = _domain_exception_result(exc)
+                self._send_json(422, error)
+                return
             public = http_auth_public_status()
             cookie = self._auth_cookie_header(payload.get("token"))
             self._send_json(

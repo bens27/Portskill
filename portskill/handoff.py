@@ -17,6 +17,7 @@ import subprocess
 import sys
 from typing import Any
 
+from .domain import DomainError
 from .registry import atomic_write_text, config_dir, handoff_skill_path, parse_bool
 
 PACKAGE_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -218,6 +219,18 @@ def fetch_kit(ref: str | None = None, downloader=None) -> dict:
             "version": kit_version(target),
             "handoff_notice": f"Session Handoff kit {ref} installed at {target}; "
                               "hooks are not installed (see install help)."}
+
+
+def fetch_kit_result(options: dict | None = None) -> dict:
+    """Fetch the configured handoff kit without emitting or exiting."""
+    options = options or {}
+    result = fetch_kit(options.get("ref"))
+    if not result.get("ok"):
+        raise DomainError(
+            result.get("error") or "fetch_failed",
+            result.get("message"),
+        )
+    return result
 
 
 def kit_version(root: pathlib.Path | None = None, settings: dict | None = None) -> str:
