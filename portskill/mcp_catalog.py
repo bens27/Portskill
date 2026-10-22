@@ -1,6 +1,13 @@
 """Adapter-independent MCP tool catalog and enablement policy."""
 from __future__ import annotations
 
+from .command_specs import (
+    COMMAND_SPECS,
+    DOCTOR_COMMAND,
+    MISSING,
+    STATUS_COMMAND,
+    CommandSpec,
+)
 from .handoff import HANDOFF_TOOL_DEFS
 from .registry import normalize_profile
 
@@ -25,16 +32,66 @@ PORTSKILL_TOOL_DESCRIPTION = PORTSKILL_TOOL_PITCH + (
 )
 
 
+def _mcp_tool_definition(spec: CommandSpec) -> dict:
+    binding = spec.mcp
+    if binding is None:
+        raise ValueError(f"command has no MCP binding: {spec.id}")
+    properties = {}
+    required = []
+    for parameter in spec.params:
+        param_binding = parameter.mcp
+        if param_binding is None:
+            continue
+        name = parameter.key if param_binding.name is MISSING else param_binding.name
+        schema = {
+            "type": parameter.kind
+            if param_binding.json_type is MISSING
+            else param_binding.json_type,
+        }
+        if param_binding.description is not MISSING:
+            schema["description"] = param_binding.description
+        if param_binding.enum is not MISSING:
+            schema["enum"] = list(param_binding.enum)
+        if param_binding.minimum is not MISSING:
+            schema["minimum"] = param_binding.minimum
+        if param_binding.items_type is not MISSING:
+            schema["items"] = {"type": param_binding.items_type}
+        if param_binding.additional_properties_type is not MISSING:
+            schema["additionalProperties"] = {
+                "type": param_binding.additional_properties_type
+            }
+        properties[name] = schema
+        if param_binding.required:
+            required.append(name)
+    input_schema = {"type": "object", "properties": properties}
+    if required:
+        input_schema["required"] = required
+    definition = {
+        "name": binding.name,
+        "description": binding.description,
+        "inputSchema": input_schema,
+    }
+    if binding.annotations is not MISSING:
+        definition["annotations"] = dict(binding.annotations)
+    return definition
+
+
+_SPEC_LEAN_MCP_TOOLS = frozenset(
+    spec.mcp.name
+    for spec in COMMAND_SPECS
+    if spec.mcp is not None and spec.mcp.lean
+)
+
+
 LEAN_MCP_TOOLS_ENABLED = frozenset(
     {
         PORTSKILL_TOOL_NAME,
-        "status",
         "settings_get",
         "stop",
         "release",
         "allocate",
     }
-)
+) | _SPEC_LEAN_MCP_TOOLS
 
 
 TOOL_DEFS = [
@@ -135,16 +192,7 @@ TOOL_DEFS = [
             "required": ["range_id"],
         },
     },
-    {
-        "name": "status",
-        "description": "Inspect registry state (portskill status).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "project": {"type": "string", "description": "Optional project filter"},
-            },
-        },
-    },
+    _mcp_tool_definition(STATUS_COMMAND),
     {
         "name": "portskill",
         "description": PORTSKILL_TOOL_DESCRIPTION,
@@ -184,16 +232,7 @@ TOOL_DEFS = [
             "required": ["mode"],
         },
     },
-    {
-        "name": "doctor",
-        "description": "Environment checks: registry, Tailscale bin, app files, placeholder start.sh, default_state counts.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "project": {"type": "string"},
-            },
-        },
-    },
+    _mcp_tool_definition(DOCTOR_COMMAND),
     {
         "name": "environment_export",
         "description": "Export a portable environment JSON of registered services (portskill environment export).",

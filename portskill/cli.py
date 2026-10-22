@@ -16,6 +16,13 @@ from .compatibility import (
     compatibility_result as domain_compatibility_result,
     enforce_compatibility as domain_enforce_compatibility,
 )
+from .command_specs import (
+    CLIParamBinding,
+    CommandSpec,
+    DOCTOR_COMMAND,
+    MISSING,
+    STATUS_COMMAND,
+)
 from .defaults import set_default_result, set_defaults_from_current_result
 from .deactivate import deactivate_result, item_matches_preset_service
 from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
@@ -960,6 +967,46 @@ def cmd_discover(args):
     fail("invalid_args", "discover requires ports|import")
 
 
+def _add_spec_cli_parser(subparsers, spec: CommandSpec, *, handler):
+    binding = spec.cli
+    if binding is None or len(binding.path) != 1:
+        raise ValueError(f"slice-1 CLI spec must have one path token: {spec.id}")
+    parser_kwargs = {}
+    if binding.aliases:
+        parser_kwargs["aliases"] = list(binding.aliases)
+    if binding.help is not MISSING:
+        parser_kwargs["help"] = binding.help
+    if binding.description is not MISSING:
+        parser_kwargs["description"] = binding.description
+    command_parser = subparsers.add_parser(binding.path[0], **parser_kwargs)
+    for parameter in spec.params:
+        cli_binding = parameter.cli
+        if cli_binding is None:
+            continue
+        if cli_binding.positional:
+            argument_names = (parameter.key,)
+        else:
+            argument_names = cli_binding.flags
+        argument_kwargs = {}
+        for key in (
+            "dest", "action", "required", "default", "nargs", "help", "metavar"
+        ):
+            value = getattr(cli_binding, key)
+            if value is not MISSING:
+                argument_kwargs[key] = value
+        if cli_binding.type_name is not MISSING:
+            argument_kwargs["type"] = {
+                "string": str,
+                "integer": int,
+                "number": float,
+            }[cli_binding.type_name]
+        if cli_binding.choices is not MISSING:
+            argument_kwargs["choices"] = list(cli_binding.choices)
+        command_parser.add_argument(*argument_names, **argument_kwargs)
+    command_parser.set_defaults(func=handler)
+    return command_parser
+
+
 def parser():
     root = JsonArgumentParser(prog="portskill-cli")
     subparsers = root.add_subparsers(dest="command", required=True)
@@ -1035,9 +1082,7 @@ def parser():
     )
     stop.set_defaults(func=cmd_stop)
 
-    status = subparsers.add_parser("status")
-    status.add_argument("--project", default=None)
-    status.set_defaults(func=cmd_status)
+    _add_spec_cli_parser(subparsers, STATUS_COMMAND, handler=cmd_status)
 
     path_cmd = subparsers.add_parser(
         "path",
@@ -1069,9 +1114,7 @@ def parser():
     path_cmd.add_argument("--environment", default=None, help="History env scope")
     path_cmd.set_defaults(func=cmd_path)
 
-    doctor = subparsers.add_parser("doctor")
-    doctor.add_argument("--project", default=".")
-    doctor.set_defaults(func=cmd_doctor)
+    _add_spec_cli_parser(subparsers, DOCTOR_COMMAND, handler=cmd_doctor)
 
     handoff = subparsers.add_parser("handoff", help="Experimental Session Handoff kit management")
     handoff_sub = handoff.add_subparsers(dest="handoff_command", required=True)

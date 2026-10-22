@@ -1,0 +1,164 @@
+{
+  "baseline": "c5ea284f64ef96cbafd2ca04b754804a8fe95a9c",
+  "serialization": "sha256 over exact UTF-8 bytes; MCP wire and canonical CLI inventory include a trailing newline",
+  "surface_inventory": {
+    "cli_choice_paths": ["allocate", "activate", "release", "start", "stop", "status", "path", "portskill-path", "portskill_path", "doctor", "handoff", "handoff/fetch", "http-auth", "http-auth/show", "http-auth/regenerate", "http-auth/gate", "http-auth/passkeys", "set-default", "set-defaults-from-current", "apply-defaults", "deactivate", "exit-house", "leave", "schedule", "busy", "compat", "compat/check", "environment", "environment/export", "environment/import", "environment/check", "preset", "preset/save", "preset/list", "preset/show", "preset/delete", "preset/apply", "preset/check", "settings", "settings/get", "settings/set", "set-tailnet", "tailscale", "tailscale/status", "tailscale/login", "tailscale/logout", "tailscale/serve-portskill", "workspace", "workspace/draft-set", "workspace/draft-save", "workspace/draft-revert", "workspace/edit-mode", "workspace/capture-defaults", "history", "history/list", "history/restore", "history/reset", "history/clear", "discover", "discover/ports", "discover/import", "machine"],
+    "mcp_tool_names": ["allocate", "activate", "start", "stop", "release", "status", "portskill", "doctor", "environment_export", "environment_import", "set_default", "apply_defaults", "deactivate", "exit_house", "compat_check", "preset_save", "preset_list", "preset_apply", "preset_delete", "settings_get", "settings_set", "set_tailnet", "tailscale_status", "tailscale_login", "ports_discover", "ports_import", "history_list", "history_restore", "history_reset", "handoff_status", "handoff_skill", "handoff_template", "handoff_list", "handoff_resolve", "handoff_new_path", "handoff_resume", "handoff_supersede", "handoff_install_help"],
+    "ui_actions": ["allocate", "apply-defaults", "capture-defaults", "close-environment-tab", "compat-check", "deactivate", "discover-import", "discover-ports", "draft-revert", "draft-save", "draft-stage", "edit-mode", "exit-house", "export-environment", "focus-environment", "handoff-codex-install", "handoff-fetch", "handoff-package", "handoff-set-enabled", "handoff-set-kit", "handoff-skill-clear", "handoff-skill-download", "handoff-skill-upload", "history-clear", "history-reset", "history-restore", "import-environment", "machine-add", "machine-list", "machine-remove", "mcp-tool-set", "mcp-user-command-delete", "mcp-user-command-dry-run", "mcp-user-command-save", "new-environment", "open-environment-tab", "preset-apply", "preset-delete", "preset-save", "reclaim-start", "release", "serve-portskill", "set-default", "set-defaults-from-current", "set-tailnet", "settings-save", "start", "start-all", "stop", "stop-all", "stop-non-default", "tailscale-login", "tailscale-logout", "tailscale-status"]
+  },
+  "lean_tools": {
+    "activate": false,
+    "allocate": true,
+    "apply_defaults": false,
+    "compat_check": false,
+    "deactivate": false,
+    "doctor": false,
+    "environment_export": false,
+    "environment_import": false,
+    "exit_house": false,
+    "handoff_install_help": false,
+    "handoff_list": false,
+    "handoff_new_path": false,
+    "handoff_resolve": false,
+    "handoff_resume": false,
+    "handoff_skill": false,
+    "handoff_status": false,
+    "handoff_supersede": false,
+    "handoff_template": false,
+    "history_list": false,
+    "history_reset": false,
+    "history_restore": false,
+    "ports_discover": false,
+    "ports_import": false,
+    "portskill": true,
+    "preset_apply": false,
+    "preset_delete": false,
+    "preset_list": false,
+    "preset_save": false,
+    "release": true,
+    "set_default": false,
+    "set_tailnet": false,
+    "settings_get": true,
+    "settings_set": false,
+    "start": false,
+    "status": true,
+    "stop": true,
+    "tailscale_login": false,
+    "tailscale_status": false
+  },
+  "mcp_tools_list": {
+    "full_handoff_off": {
+      "id": 101,
+      "settings": {"mcp_tools": {}, "mcp_tools_profile": "full", "handoff_enabled": false},
+      "wire": {"bytes": 13759, "sha256": "0ad4ea989593c5ca54292608fa2fc35b781d3708b8e3676aa974efbead3ec161"},
+      "tool_names": ["allocate", "activate", "start", "stop", "release", "status", "portskill", "doctor", "environment_export", "environment_import", "set_default", "apply_defaults", "deactivate", "exit_house", "compat_check", "preset_save", "preset_list", "preset_apply", "preset_delete", "settings_get", "settings_set", "set_tailnet", "tailscale_status", "tailscale_login", "ports_discover", "ports_import", "history_list", "history_restore", "history_reset"]
+    },
+    "full_handoff_on": {
+      "id": 102,
+      "settings": {"mcp_tools": {}, "mcp_tools_profile": "full", "handoff_enabled": true},
+      "wire": {"bytes": 16007, "sha256": "8ea12dcddf1c213f2c1cdbb0963812a78976303d768f2c9692f9f29b91580194"},
+      "tool_names": ["allocate", "activate", "start", "stop", "release", "status", "portskill", "doctor", "environment_export", "environment_import", "set_default", "apply_defaults", "deactivate", "exit_house", "compat_check", "preset_save", "preset_list", "preset_apply", "preset_delete", "settings_get", "settings_set", "set_tailnet", "tailscale_status", "tailscale_login", "ports_discover", "ports_import", "history_list", "history_restore", "history_reset", "handoff_status", "handoff_skill", "handoff_template", "handoff_list", "handoff_resolve", "handoff_new_path", "handoff_resume", "handoff_supersede", "handoff_install_help"]
+    },
+    "lean_handoff_off": {
+      "id": 103,
+      "settings": {"mcp_tools_ref": "lean_tools", "mcp_tools_profile": "lean", "handoff_enabled": false},
+      "wire": {"bytes": 4008, "sha256": "639672208e42f8789142307a3da9a7152b151ea59d29a4ae0ecf1983e58e25e8"},
+      "tool_names": ["allocate", "stop", "release", "status", "portskill", "settings_get"]
+    },
+    "lean_handoff_on": {
+      "id": 104,
+      "settings": {"mcp_tools_ref": "lean_tools", "mcp_tools_profile": "lean", "handoff_enabled": true},
+      "wire": {"bytes": 4008, "sha256": "282027c8ca5f6d01b65fa3bc31c19efb5266001b9a61a10c8ce7dd8916361d27"},
+      "tool_names": ["allocate", "stop", "release", "status", "portskill", "settings_get"]
+    },
+    "per_tool_overrides": {
+      "id": 105,
+      "settings": {"mcp_tools": {"allocate": false, "doctor": false, "status": true}, "mcp_tools_profile": "full", "handoff_enabled": false},
+      "wire": {"bytes": 12694, "sha256": "e4fc894b0f72eedc1cc2c70d1fde78352229b0809499b5c3131f9cba74ca40c9"},
+      "tool_names": ["activate", "start", "stop", "release", "status", "portskill", "environment_export", "environment_import", "set_default", "apply_defaults", "deactivate", "exit_house", "compat_check", "preset_save", "preset_list", "preset_apply", "preset_delete", "settings_get", "settings_set", "set_tailnet", "tailscale_status", "tailscale_login", "ports_discover", "ports_import", "history_list", "history_restore", "history_reset"]
+    },
+    "canonical_precedence": {
+      "id": 106,
+      "settings": {"mcp_tools": {"portskill": false, "portskill_path": true}, "mcp_tools_profile": "full", "handoff_enabled": false},
+      "wire": {"bytes": 11926, "sha256": "08b2c8fd962dcc9d5875de0b41e71be1e0c9b33a625ac97e4b7ae3988066a90f"},
+      "tool_names": ["allocate", "activate", "start", "stop", "release", "status", "doctor", "environment_export", "environment_import", "set_default", "apply_defaults", "deactivate", "exit_house", "compat_check", "preset_save", "preset_list", "preset_apply", "preset_delete", "settings_get", "settings_set", "set_tailnet", "tailscale_status", "tailscale_login", "ports_discover", "ports_import", "history_list", "history_restore", "history_reset"]
+    },
+    "legacy_preference": {
+      "id": 107,
+      "settings": {"mcp_tools": {"portskill_path": false}, "mcp_tools_profile": "full", "handoff_enabled": false},
+      "wire": {"bytes": 11926, "sha256": "f1056e5d0ea83599864ff95818b806fe6d9bf32f75d1d59da592168785ca4c8a"},
+      "tool_names": ["allocate", "activate", "start", "stop", "release", "status", "doctor", "environment_export", "environment_import", "set_default", "apply_defaults", "deactivate", "exit_house", "compat_check", "preset_save", "preset_list", "preset_apply", "preset_delete", "settings_get", "settings_set", "set_tailnet", "tailscale_status", "tailscale_login", "ports_discover", "ports_import", "history_list", "history_restore", "history_reset"]
+    },
+    "user_commands": {
+      "id": 108,
+      "settings": {
+        "mcp_tools": {},
+        "mcp_tools_profile": "full",
+        "handoff_enabled": false,
+        "mcp_user_commands": {
+          "audit_status": {
+            "name": "audit_status",
+            "description": "Audit current status",
+            "steps": [{"tool": "status", "arguments": {}, "mode": "series"}]
+          }
+        }
+      },
+      "wire": {"bytes": 14031, "sha256": "50722ac5af36e689fe7055f3c4e7908c90ad76a7605a1c1f8598811bdf66fee5"},
+      "tool_names": ["allocate", "activate", "start", "stop", "release", "status", "portskill", "doctor", "environment_export", "environment_import", "set_default", "apply_defaults", "deactivate", "exit_house", "compat_check", "preset_save", "preset_list", "preset_apply", "preset_delete", "settings_get", "settings_set", "set_tailnet", "tailscale_status", "tailscale_login", "ports_discover", "ports_import", "history_list", "history_restore", "history_reset", "audit_status"]
+    }
+  },
+  "cli": {
+    "tree_inventory": {
+      "wire": {"bytes": 68177, "sha256": "73cd377c5dbf51516417efa80a9f1e66317a2217dee2d0d2a098ba46396b65ad"},
+      "top_level_commands": ["allocate", "activate", "release", "start", "stop", "status", "path", "portskill-path", "portskill_path", "doctor", "handoff", "http-auth", "set-default", "set-defaults-from-current", "apply-defaults", "deactivate", "exit-house", "leave", "schedule", "busy", "compat", "environment", "preset", "settings", "set-tailnet", "tailscale", "workspace", "history", "discover", "machine"]
+    },
+    "parse_cases": {
+      "start_omitted": {"command": "start", "range_id": null, "reclaim": false, "all": false, "project": ".", "tailnet": null, "environment": null},
+      "start_reclaim_present": {"command": "start", "range_id": "r1", "reclaim": true, "all": false, "project": ".", "tailnet": null, "environment": null},
+      "stop_selectors_present": {"command": "stop", "range_id": null, "all": true, "non_default": true, "project": ".", "environment": null, "also_release": null},
+      "path_zero_empty_fields": {"command": "", "mode": "status", "project": "", "count": 0, "range_id": null, "note": null, "tailnet": null, "cwd": null, "default_state": null, "start": null, "environment": null},
+      "settings_repeated_mcp_tool": {"command": "settings", "settings_command": "set", "auto_apply": null, "auto_apply_preset": null, "auto_apply_on_launch": null, "auto_exit_on_shutdown": null, "stop_also_release": null, "serve_portskill_on_tailscale": null, "handoff_enabled": null, "require_compat": null, "overlap_policy": null, "default_tailnet": null, "open_environment_tabs": null, "focused_environment": null, "open_tab": null, "close_tab": null, "mcp_tools_profile": null, "mcp_tool": ["status=off", "doctor=on"], "mcp_tools_json": null, "mcp_user_commands_json": null, "mcp_user_command_upsert": null, "mcp_user_command_delete": null, "handoff_kit": null, "handoff_skill": null},
+      "settings_json_forms": {"command": "settings", "settings_command": "set", "auto_apply": null, "auto_apply_preset": null, "auto_apply_on_launch": null, "auto_exit_on_shutdown": null, "stop_also_release": null, "serve_portskill_on_tailscale": null, "handoff_enabled": null, "require_compat": null, "overlap_policy": null, "default_tailnet": null, "open_environment_tabs": null, "focused_environment": null, "open_tab": null, "close_tab": null, "mcp_tools_profile": null, "mcp_tool": null, "mcp_tools_json": "{\"status\":false}", "mcp_user_commands_json": "{\"audit\":{\"steps\":[{\"tool\":\"status\"}]}}", "mcp_user_command_upsert": null, "mcp_user_command_delete": null, "handoff_kit": null, "handoff_skill": null},
+      "settings_on_off": {"command": "settings", "settings_command": "set", "auto_apply": null, "auto_apply_preset": null, "auto_apply_on_launch": null, "auto_exit_on_shutdown": "on", "stop_also_release": "off", "serve_portskill_on_tailscale": null, "handoff_enabled": null, "require_compat": null, "overlap_policy": null, "default_tailnet": null, "open_environment_tabs": null, "focused_environment": null, "open_tab": null, "close_tab": null, "mcp_tools_profile": null, "mcp_tool": null, "mcp_tools_json": null, "mcp_user_commands_json": null, "mcp_user_command_upsert": null, "mcp_user_command_delete": null, "handoff_kit": null, "handoff_skill": null}
+    },
+    "parse_argv": {
+      "start_omitted": ["start"],
+      "start_reclaim_present": ["start", "--range-id", "r1", "--reclaim"],
+      "stop_selectors_present": ["stop", "--all", "--non-default"],
+      "path_zero_empty_fields": ["path", "--mode", "status", "--count", "0", "--project", "", "--command", ""],
+      "settings_repeated_mcp_tool": ["settings", "set", "--mcp-tool", "status=off", "--mcp-tool", "doctor=on"],
+      "settings_json_forms": ["settings", "set", "--mcp-tools-json", "{\"status\":false}", "--mcp-user-commands-json", "{\"audit\":{\"steps\":[{\"tool\":\"status\"}]}}"],
+      "settings_on_off": ["settings", "set", "--auto-exit-on-shutdown", "on", "--stop-also-release", "off"]
+    },
+    "cases": {
+      "settings_help": {"argv": ["settings", "--help"], "exit": 0, "stdout": {"bytes": 140, "sha256": "d8e7ed9becede9a536e58b6587c3a616571107fcf417fd6c400ee2fa99cb517d"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "workspace_help": {"argv": ["workspace", "--help"], "exit": 0, "stdout": {"bytes": 621, "sha256": "7486f7b127644d4db1bd38e37e3e9e9dfcaf60d27baef0061b8a7430c07b7b27"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "settings_missing_subcommand": {"argv": ["settings"], "exit": 2, "stdout": {"bytes": 110, "sha256": "b80f8644f6ff4bb56875d16eb2dc37ecc8158012cd708adb49c404569c2b949e"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "workspace_missing_subcommand": {"argv": ["workspace"], "exit": 2, "stdout": {"bytes": 111, "sha256": "115e0be75c0cd7231f807e68e5ccc401b31bd961be4b25a94316212555f5bb0d"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "allocate_bad_integer": {"argv": ["allocate", "--count", "bad"], "exit": 2, "stdout": {"bytes": 98, "sha256": "795617cec80deeb75e341b473fe78bc6decbed64a1df3e8b3215bc5e28e02726"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "allocate_zero": {"argv": ["allocate", "--count", "0", "--project", "$PROJECT", "--tailnet", "none"], "exit": 2, "stdout": {"bytes": 90, "sha256": "5e8f40aa2ba5d9a8990b6438a8c4d7746fc4e5c3ca15a3e575d211c01d92d5cd"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "tailscale_bad_float": {"argv": ["tailscale", "login", "--wait", "bad"], "exit": 2, "stdout": {"bytes": 97, "sha256": "2b987ba3eda73988894f34e3b2a8e1f2996464f717e982d40613410b0705cc71"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "history_negative_index": {"argv": ["history", "restore", "--index", "-1"], "exit": 2, "stdout": {"bytes": 91, "sha256": "c1f93170504ab6f2b71679754cbafc46be3eff6e1165769030f326e39d5ede51"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "set_default_invalid_choice": {"argv": ["set-default", "--range-id", "r1", "--state", "maybe"], "exit": 2, "stdout": {"bytes": 123, "sha256": "bd2148cc70bc4d116632258f1598643ec35480cb5ae7d10df53568efecc98060"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "path_invalid_choice": {"argv": ["path", "--mode", "invalid"], "exit": 2, "stdout": {"bytes": 160, "sha256": "3cb7ff4f67a945ef840b4ad87b2b55f2837c8c8857e163ca874fa538e498a029"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "start_conflicting_selectors": {"argv": ["start", "--range-id", "r1", "--all", "--project", "$PROJECT"], "exit": 0, "stdout": {"bytes": 119, "sha256": "8054e66de350c852309cafe31a0c29828fabccb6584e491f26194b1ae8d7576f"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "stop_conflicting_selectors": {"argv": ["stop", "--all", "--non-default", "--project", "$PROJECT"], "exit": 0, "stdout": {"bytes": 139, "sha256": "2de78c58944b636e8801770d00e0e92c82ec009d77ff4aa1e4971a64a3e3eeb9"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "settings_repeated_mcp_tool": {"argv": ["settings", "set", "--mcp-tool", "status=off", "--mcp-tool", "doctor=on"], "exit": 0, "stdout": {"bytes": 458, "sha256": "a46e4bdc93cc24b3edef335d9d164a4f7bac0b6889c4ede38f23150036823d97"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}, "registry": {"bytes": 722, "sha256": "241b5e62bc638e2275de8f358ada9fb4ed89190059a042ba59d63c6c214fba94"}},
+      "settings_tools_json": {"argv": ["settings", "set", "--mcp-tools-json", "{\"status\":false,\"doctor\":\"on\"}"], "exit": 0, "stdout": {"bytes": 458, "sha256": "a46e4bdc93cc24b3edef335d9d164a4f7bac0b6889c4ede38f23150036823d97"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}, "registry": {"bytes": 722, "sha256": "241b5e62bc638e2275de8f358ada9fb4ed89190059a042ba59d63c6c214fba94"}},
+      "settings_user_commands_json": {"argv": ["settings", "set", "--mcp-user-commands-json", "{\"audit\":{\"name\":\"audit\",\"description\":\"fixed\",\"steps\":[{\"tool\":\"status\",\"arguments\":{},\"mode\":\"series\"}]}}"], "exit": 0, "stdout": {"bytes": 535, "sha256": "a3d8b1d143717d8dd786e58e499d8b7c05fd9e24624e0be7d5a9f917d63114b1"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}, "registry": {"bytes": 799, "sha256": "b9af5e4bcda13ec8790fa3a3a315804a5d2640b456d3dd569d3de173673c1a5c"}},
+      "settings_boolean_on_off": {"argv": ["settings", "set", "--auto-exit-on-shutdown", "on", "--stop-also-release", "off"], "exit": 0, "stdout": {"bytes": 430, "sha256": "ee2a3d58dc31fb4ab1ccc927dfce94774b21c73e6a7aa3cdce6119dc63c7eab5"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}, "registry": {"bytes": 694, "sha256": "24f9a230dc63e33ae3b0a7943a5f43683b436ff7c14972ab1877512ad24f1228"}},
+      "doctor_success_controlled": {"argv": ["doctor", "--project", "$PROJECT"], "mock": "doctor_success", "exit": 0, "stdout": {"bytes": 76, "sha256": "d8687c701232ba8f65bf35d500b4312a1777337e09882a36b7daf85c8fac58c6"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "apply_defaults_fixed_clock": {"argv": ["apply-defaults"], "fixed_clock": true, "exit": 0, "stdout": {"bytes": 230, "sha256": "131c319aeb6d038b6655d9c2cb64d8b873c83f3ec9a3c465184c303e6ae399fd"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}, "registry": {"bytes": 858, "sha256": "493a84d61905db713f39e6c28004ea8fd242551343fe4e64e244311b1b578343"}},
+      "root_help": {"argv": ["--help"], "exit": 0, "stdout": {"bytes": 2357, "sha256": "07fe51bc11ccfceb145320f9a654031e401a96c4c1b1a4d403abb5f1992c595a"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "status_help": {"argv": ["status", "--help"], "exit": 0, "stdout": {"bytes": 136, "sha256": "4066a58401d74360ebf21089acef8456a63159b634ecc428cebb7fcb2add226e"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "doctor_help": {"argv": ["doctor", "--help"], "exit": 0, "stdout": {"bytes": 136, "sha256": "f5146064d8e6e21ef8e418350c375fab89a8574f036e8855c18b6dc38c31aae3"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "missing_command": {"argv": [], "exit": 2, "stdout": {"bytes": 101, "sha256": "50f1cd783967c33aeff6ad6c70f216b59f19ff857604b2b8a9accea17241279e"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "status_unknown": {"argv": ["status", "--unknown"], "exit": 2, "stdout": {"bytes": 89, "sha256": "442c2a8898e82b0e93e94aa4f860b7e67fb2a82d62f2fdf099218aa78a075300"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "status_option_like_project": {"argv": ["status", "--project", "-x"], "exit": 2, "stdout": {"bytes": 97, "sha256": "cc84ad8e39bd433e151369feaaa6895de6a6686df373aaaa25bb3f7cfb0be22c"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "doctor_missing_project": {"argv": ["doctor", "--project"], "exit": 2, "stdout": {"bytes": 97, "sha256": "cc84ad8e39bd433e151369feaaa6895de6a6686df373aaaa25bb3f7cfb0be22c"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "status_success": {"argv": ["status"], "extra_env": {}, "exit": 0, "stdout": {"bytes": 166, "sha256": "243a105c2d55c69cacd48b3e319acbcfe43a7e754c236a5ba91e1490e433aab4"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "status_invalid_pool": {"argv": ["status"], "extra_env": {"PORTSKILL_POOL_START": "bad"}, "exit": 2, "stdout": {"bytes": 86, "sha256": "1658997ac26946654a82548246a83d3c05c57e12c15b7a035e8724731906ab80"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},
+      "doctor_invalid_pool": {"argv": ["doctor"], "extra_env": {"PORTSKILL_POOL_START": "bad"}, "exit": 2, "stdout": {"bytes": 86, "sha256": "1658997ac26946654a82548246a83d3c05c57e12c15b7a035e8724731906ab80"}, "stderr": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}}
+    }
+  }
+}
