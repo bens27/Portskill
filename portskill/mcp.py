@@ -586,14 +586,12 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "isError": False,
         }
     if name in ("allocate", "activate", "release"):
-        from .cli import REGISTRY_MUTATION_RUNTIME
-
         operation = {
             "allocate": allocate_result,
             "activate": activate_result,
             "release": release_result,
         }[name]
-        body = operation(args, REGISTRY_MUTATION_RUNTIME)
+        body = operation(args)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,

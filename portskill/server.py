@@ -4596,8 +4596,6 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         except (TypeError, ValueError):
             count = 1
         project = body.get("project") or "."
-        from .cli import REGISTRY_MUTATION_RUNTIME
-
         options = {
             "count": count,
             "project": str(project),
@@ -4608,7 +4606,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             "scheme": body.get("scheme"),
         }
         try:
-            return 0, {"ok": True, "result": allocate_result(options, REGISTRY_MUTATION_RUNTIME)}
+            return 0, {"ok": True, "result": allocate_result(options)}
         except DomainError as exc:
             payload = exc.as_dict()
             return _cli_result(exc.exit_code, payload, json.dumps(payload, separators=(",", ":"), sort_keys=True))

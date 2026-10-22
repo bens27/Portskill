@@ -698,7 +698,7 @@ class FunnelListenRefuseTests(unittest.TestCase):
             self.assertEqual(payload.get("reason"), "funnel_listen_refused")
             self.assertIn("listen", (payload.get("message") or "").lower())
 
-            with patch("portskill.cli.subprocess.run") as run:
+            with patch("portskill.lifecycle.subprocess.run") as run:
                 run.return_value = type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
                 cli.run_tailnet("serve", 20050, off=False)
                 self.assertTrue(run.called)

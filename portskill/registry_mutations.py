@@ -5,27 +5,20 @@ module owns transport-neutral command contracts and imports no adapter.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from .domain import DomainError
-
-
-@dataclass(frozen=True)
-class RegistryMutationRuntime:
-    project_path: Callable[[Any], str]
-    require_project_directory: Callable[[str], None]
-    locked_registry: Callable[[Callable], dict]
-    resolve_history_env_name: Callable
-    ensure_baseline: Callable
-    maybe_push_history: Callable
-    allocate_range: Callable
-    find_project_range: Callable
-    is_remote_range: Callable
-    refuse_remote_process: Callable
-    activate_item: Callable
-    range_has_live_process: Callable
-    release_item: Callable
+from .lifecycle import activate_item, range_has_live_process, refuse_remote_process, release_item
+from .registry_domain import is_remote_range, project_path
+from .registry_operations import (
+    allocate_range,
+    ensure_baseline,
+    find_project_range,
+    locked_registry,
+    maybe_push_history,
+    require_project_directory,
+    resolve_history_env_name,
+)
 
 
 def _option(options: dict, name: str, default=None):
@@ -33,9 +26,9 @@ def _option(options: dict, name: str, default=None):
     return value
 
 
-def allocate_result(options: dict, runtime: RegistryMutationRuntime) -> dict:
-    project = runtime.project_path(_option(options, "project", "."))
-    runtime.require_project_directory(project)
+def allocate_result(options: dict) -> dict:
+    project = project_path(_option(options, "project", "."))
+    require_project_directory(project)
     count = _option(options, "count", 1)
     tailnet = _option(options, "tailnet")
     if tailnet is None:
@@ -51,9 +44,9 @@ def allocate_result(options: dict, runtime: RegistryMutationRuntime) -> dict:
         raise DomainError("needs_input", exit_code=3, payload=payload)
 
     def mutate(registry):
-        history = runtime.resolve_history_env_name(registry, options.get("environment"))
-        runtime.ensure_baseline(registry, history)
-        item, warnings = runtime.allocate_range(
+        history = resolve_history_env_name(registry, options.get("environment"))
+        ensure_baseline(registry, history)
+        item, warnings = allocate_range(
             registry,
             project,
             count,
@@ -64,50 +57,50 @@ def allocate_result(options: dict, runtime: RegistryMutationRuntime) -> dict:
             host=options.get("host"),
             scheme=options.get("scheme"),
         )
-        runtime.maybe_push_history(registry, "allocate", history)
+        maybe_push_history(registry, "allocate", history)
         payload = {"status": "ok", "range": item}
         if warnings:
             payload["warnings"] = warnings
         return payload, [project]
 
-    return runtime.locked_registry(mutate)
+    return locked_registry(mutate)
 
 
-def activate_result(options: dict, runtime: RegistryMutationRuntime) -> dict:
-    project = runtime.project_path(_option(options, "project", "."))
-    runtime.require_project_directory(project)
+def activate_result(options: dict) -> dict:
+    project = project_path(_option(options, "project", "."))
+    require_project_directory(project)
     range_id = options.get("range_id")
 
     def mutate(registry):
-        item = runtime.find_project_range(registry, project, range_id)
+        item = find_project_range(registry, project, range_id)
         if item is None:
             raise DomainError("not_found", f"range id not found for project: {range_id}")
-        if runtime.is_remote_range(registry, item):
-            runtime.refuse_remote_process(registry, item, action="activate")
-        runtime.activate_item(item, project, range_id, options.get("tailnet"))
+        if is_remote_range(registry, item):
+            refuse_remote_process(registry, item, action="activate")
+        activate_item(item, project, range_id, options.get("tailnet"))
         return {"status": "ok", "range": item}, [project]
 
-    return runtime.locked_registry(mutate)
+    return locked_registry(mutate)
 
 
-def release_result(options: dict, runtime: RegistryMutationRuntime) -> dict:
-    project = runtime.project_path(_option(options, "project", "."))
-    runtime.require_project_directory(project)
+def release_result(options: dict) -> dict:
+    project = project_path(_option(options, "project", "."))
+    require_project_directory(project)
     range_id = options.get("range_id")
 
     def mutate(registry):
-        history = runtime.resolve_history_env_name(registry, options.get("environment"))
-        runtime.ensure_baseline(registry, history)
-        item = runtime.find_project_range(registry, project, range_id)
+        history = resolve_history_env_name(registry, options.get("environment"))
+        ensure_baseline(registry, history)
+        item = find_project_range(registry, project, range_id)
         if item is None:
             raise DomainError("not_found", f"range id not found for project: {range_id}")
-        if runtime.range_has_live_process(item):
+        if range_has_live_process(item):
             raise DomainError(
                 "process_still_running",
                 "range still has a live pid/pgid; use stop (not release) to terminate then free the ports",
             )
-        runtime.release_item(item)
-        runtime.maybe_push_history(registry, "release", history)
+        release_item(item)
+        maybe_push_history(registry, "release", history)
         return {"status": "ok", "range": item}, [project]
 
-    return runtime.locked_registry(mutate)
+    return locked_registry(mutate)

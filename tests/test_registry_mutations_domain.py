@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import argparse
 import io
 import json
 import os
@@ -124,7 +125,7 @@ class RegistryMutationDomainTests(unittest.TestCase):
             self.assertEqual(responses[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
 
     def test_direct_expected_errors_never_emit_or_raise_system_exit(self) -> None:
-        from portskill.cli import REGISTRY_MUTATION_RUNTIME, range_record
+        from portskill.cli import range_record
         from portskill.domain import DomainError
         from portskill.registry_mutations import activate_result, allocate_result
 
@@ -135,14 +136,14 @@ class RegistryMutationDomainTests(unittest.TestCase):
             with mock.patch("sys.stdout", stdout):
                 iso.write_registry_raw("{broken")
                 with self.assertRaises(DomainError):
-                    allocate_result({"count": 1, "project": str(project), "tailnet": "none"}, REGISTRY_MUTATION_RUNTIME)
+                    allocate_result({"count": 1, "project": str(project), "tailnet": "none"})
                 iso.write_registry()
                 with self.assertRaises(DomainError):
-                    allocate_result({"count": 0, "project": str(project), "tailnet": "none"}, REGISTRY_MUTATION_RUNTIME)
+                    allocate_result({"count": 0, "project": str(project), "tailnet": "none"})
                 item = range_record("r1", 21004, 21004, None, "serve")
                 iso.write_registry({"projects": {str(project.resolve()): {"ranges": [item]}}})
                 with self.assertRaises(DomainError):
-                    activate_result({"project": str(project), "range_id": "r1", "tailnet": "serve"}, REGISTRY_MUTATION_RUNTIME)
+                    activate_result({"project": str(project), "range_id": "r1", "tailnet": "serve"})
         self.assertEqual(stdout.getvalue(), "")
 
     def test_server_allocate_uses_domain_path(self) -> None:
@@ -182,7 +183,6 @@ class RegistryMutationDomainTests(unittest.TestCase):
         self.assertTrue(valid["ok"])
 
     def test_concurrent_allocations_are_lock_serialized(self) -> None:
-        from portskill.cli import REGISTRY_MUTATION_RUNTIME
         from portskill.registry_mutations import allocate_result
 
         with IsolatedConfig() as iso:
@@ -193,7 +193,7 @@ class RegistryMutationDomainTests(unittest.TestCase):
             barrier = __import__("threading").Barrier(2)
             def allocate(_):
                 barrier.wait()
-                return allocate_result(options, REGISTRY_MUTATION_RUNTIME)
+                return allocate_result(options)
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
                 results = list(pool.map(allocate, range(2)))
         starts = {result["range"]["start"] for result in results}
@@ -221,10 +221,12 @@ class RegistryMutationDomainTests(unittest.TestCase):
 
     def test_portskill_serve_disable_tolerates_domain_teardown_error(self) -> None:
         from portskill import cli
+        from portskill import lifecycle as lifecycle_module
 
         failed = type("Result", (), {"returncode": 1, "stdout": "", "stderr": "gone"})()
         with mock.patch.object(cli, "tailscale_bin_available", return_value=(True, "tailscale")), mock.patch.object(
-            cli.subprocess, "run", return_value=failed
+            lifecycle_module.subprocess,
+            "run", return_value=failed
         ), mock.patch.object(
             cli, "probe_tailscale_status", return_value={"Self": None}
         ):
@@ -234,6 +236,75 @@ class RegistryMutationDomainTests(unittest.TestCase):
 
         self.assertEqual(payload["status"], "ok")
         self.assertFalse(payload["enabled"])
+
+    def test_post_launch_activation_failure_keeps_lifecycle_metadata(self) -> None:
+        from portskill import cli
+        from portskill import lifecycle as lifecycle_module
+        from portskill.domain import DomainError
+        from portskill.service import ServiceLaunchOutcome
+
+        item = cli.range_record("r1", 21030, 21030, None, "serve")
+        def launched(target, _project):
+            target["lifecycle"].update({"pid": 4321, "pgid": 4321, "started_at": "now"})
+            return ServiceLaunchOutcome(True, source="command", pid=4321, pgid=4321, started_at="now")
+        with mock.patch.object(cli, "launch_service", side_effect=launched), mock.patch.object(
+            lifecycle_module,
+            "ensure_tailscale_authenticated",
+            side_effect=DomainError("tailscale_bin_missing", "missing"),
+        ):
+            ok, detail = cli.start_item_for_apply(item, "/tmp/project")
+        self.assertFalse(ok)
+        self.assertIs(detail["range"], item)
+        self.assertEqual(item["lifecycle"]["pid"], 4321)
+        self.assertEqual(item["lifecycle"]["started_at"], "now")
+
+    def test_exit_house_continues_for_reserved_and_release_policies(self) -> None:
+        from portskill import cli
+        from portskill.domain import DomainError
+
+        for also_release, helper in ((False, "run_tailnet"), (True, "release_item")):
+            with self.subTest(also_release=also_release), IsolatedConfig() as iso:
+                project = str((iso.root / "project").resolve())
+                (iso.root / "project").mkdir()
+                ranges = []
+                for index in range(2):
+                    item = cli.range_record(f"r{index}", 21040 + index, 21040 + index, None, "serve", default_state="on")
+                    item["state"] = "active"
+                    item["tailnet"]["configured_at"] = "configured"
+                    ranges.append(item)
+                iso.write_registry({"projects": {project: {"ranges": ranges}}})
+                with mock.patch.object(
+                    cli, helper, side_effect=[DomainError("tailnet_command_failed", "failed"), None]
+                ):
+                    payload = cli.run_exit_house(also_release=also_release, clear_session=False)
+                self.assertEqual(payload["error_count"], 1)
+                self.assertEqual(payload["stopped_count"], 1)
+
+    def test_discover_import_batch_continues_after_domain_error(self) -> None:
+        from portskill import cli
+        from portskill.domain import DomainError
+
+        discovery = {
+            "discoveries": [
+                {"port": 21050, "missing": True},
+                {"port": 21051, "missing": True},
+            ],
+            "missing": [{"port": 21050}, {"port": 21051}],
+            "serve": {"ports": {}},
+        }
+        second = {"status": "ok", "port": 21051}
+        args = argparse.Namespace(
+            tailnet="none", note=None, project=None, all_missing=True, port=None
+        )
+        stdout = io.StringIO()
+        with mock.patch.object(
+            cli, "locked_registry", side_effect=[discovery, DomainError("port_in_use", "busy"), second]
+        ), mock.patch("sys.stdout", stdout):
+            cli.cmd_discover_import(args)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "partial")
+        self.assertEqual(payload["imported"], [second])
+        self.assertEqual(payload["errors"][0]["reason"], "port_in_use")
 
 
 if __name__ == "__main__":

@@ -277,10 +277,10 @@ class PathCliMcpTests(unittest.TestCase):
                     return_value={"logged_in": True},
                 ),
                 mock.patch(
-                    "portskill.cli.ensure_tailscale_authenticated",
+                    "portskill.lifecycle.ensure_tailscale_authenticated",
                     side_effect=checked,
                 ),
-                mock.patch("portskill.cli.run_tailnet", side_effect=served),
+                mock.patch("portskill.lifecycle.run_tailnet", side_effect=served),
             ):
                 payload = run_path(
                     mode="start",
