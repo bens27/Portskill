@@ -785,52 +785,17 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "isError": False,
         }
     try:
-        argv = tool_argv(name, arguments or {})
+        tool_argv(name, arguments or {})
     except (KeyError, TypeError, ValueError) as exc:
         return {
             "content": [{"type": "text", "text": json.dumps({"ok": False, "message": str(exc)})}],
             "isError": True,
         }
-    code, payload, raw = run_cli(argv)
-    if code == 0:
-        if name == "environment_export" and payload is None and raw:
-            # Full environment JSON printed to stdout when --out omitted
-            try:
-                env_body = json.loads(raw)
-            except json.JSONDecodeError:
-                env_body = None
-            if isinstance(env_body, dict) and env_body.get("kind") == "portskill-environment":
-                body = {"status": "ok", "environment": env_body}
-                return {
-                    "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
-                    "structuredContent": body,
-                    "isError": False,
-                }
-        body = payload if payload is not None else {"ok": True, "raw": raw}
-        return {
-            "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
-            "structuredContent": body if isinstance(body, dict) else {"ok": True},
-            "isError": False,
-        }
-    if code == 3:
-        needs = payload if isinstance(payload, dict) else {"status": "needs_input", "raw": raw}
-        needs = dict(needs)
-        needs["ok"] = False
-        needs["needs_input"] = True
-        if "resume_hint" not in needs:
-            needs["resume_hint"] = "--tailnet"
-        return {
-            "content": [{"type": "text", "text": json.dumps(needs, sort_keys=True)}],
-            "structuredContent": needs,
-            "isError": True,
-        }
-    err = payload if isinstance(payload, dict) else {"status": "error", "message": raw or f"exit {code}"}
-    if isinstance(err, dict):
-        err = dict(err)
-        err.setdefault("ok", False)
     return {
-        "content": [{"type": "text", "text": json.dumps(err, sort_keys=True)}],
-        "structuredContent": err if isinstance(err, dict) else {"ok": False},
+        "content": [{"type": "text", "text": json.dumps({
+            "ok": False,
+            "message": f"in-process route missing for tool: {name}",
+        })}],
         "isError": True,
     }
 

@@ -116,6 +116,11 @@ from .webauthn import (
     revoke_http_session,
     session_cookie_header,
 )
+from .workspace import (
+    workspace_draft_revert_result,
+    workspace_draft_save_result,
+    workspace_draft_set_result,
+)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765  # historical default only; launch prefers sticky/allocate
@@ -281,20 +286,15 @@ def _iter_portskill_claim_ports(raw: dict | None = None) -> list[int]:
 
 def _dogfood_allocate_port(prefer_start: int | None = None) -> int | None:
     """Claim one port via registry allocate (dogfood). Returns start or None."""
-    argv = [
-        "allocate",
-        "--count",
-        "1",
-        "--project",
-        _portskill_project_path(),
-        "--note",
-        PORTSKILL_NOTE,
-        "--tailnet",
-        "none",
-    ]
+    options = {
+        "count": 1,
+        "project": _portskill_project_path(),
+        "note": PORTSKILL_NOTE,
+        "tailnet": "none",
+    }
     if prefer_start is not None:
-        argv += ["--start", str(int(prefer_start))]
-    code, payload, stdout = run_cli(argv)
+        options["start"] = int(prefer_start)
+    code, payload, stdout = _run_domain(lambda: allocate_result(options))
     if code != 0:
         print(
             f"dogfood allocate failed ({code}): {payload or stdout}",
@@ -4099,6 +4099,13 @@ class _SettingsArgvParser(argparse.ArgumentParser):
         raise DomainError("invalid_args", message)
 
 
+def _legacy_cli_option_value(flag: str, value: str, *, prog: str) -> str:
+    """Parse one legacy CLI option value, preserving argparse edge cases."""
+    parser = _SettingsArgvParser(prog=prog, add_help=False)
+    parser.add_argument(flag)
+    return vars(parser.parse_args([flag, value]))[flag.lstrip("-").replace("-", "_")]
+
+
 def _settings_set_options(*pairs: tuple[str, str]) -> dict:
     """Build settings_set options as `settings set FLAG VALUE ...` argparse would.
 
@@ -4555,12 +4562,26 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         name = body.get("name")
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
-        argv = ["preset", "save", "--name", name.strip(), "--empty"]
         desc = body.get("description")
-        if isinstance(desc, str) and desc:
-            argv += ["--description", desc]
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+
+        def create_environment():
+            parsed_name = _legacy_cli_option_value(
+                "--name", name.strip(), prog="portskill-cli preset save"
+            )
+            parsed_description = (
+                _legacy_cli_option_value(
+                    "--description", desc, prog="portskill-cli preset save"
+                )
+                if isinstance(desc, str) and desc
+                else ""
+            )
+            return preset_save_result({
+                "name": parsed_name,
+                "empty": True,
+                "description": parsed_description,
+            })
+
+        return _domain_cli_result(create_environment)
     if action in ("focus-environment", "open-environment-tab"):
         name = body.get("name")
         if not isinstance(name, str) or not name.strip():
@@ -4691,39 +4712,66 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         range_id = body.get("rangeId")
         if not isinstance(range_id, str) or not range_id.strip():
             return 400, {"ok": False, "message": "expected rangeId"}
-        argv = ["workspace", "draft-set", "--range-id", range_id.strip()]
         mapping = [
-            ("startScript", "--start-script"),
-            ("start_script", "--start-script"),
-            ("stopScript", "--stop-script"),
-            ("stop_script", "--stop-script"),
-            ("command", "--command"),
-            ("cwd", "--cwd"),
+            ("startScript", "start_script", "--start-script"),
+            ("start_script", "start_script", "--start-script"),
+            ("stopScript", "stop_script", "--stop-script"),
+            ("stop_script", "stop_script", "--stop-script"),
+            ("command", "command", "--command"),
+            ("cwd", "cwd", "--cwd"),
         ]
-        seen = set()
-        for key, flag in mapping:
-            if flag in seen:
-                continue
-            val = body.get(key)
-            if isinstance(val, str):
-                argv += [flag, val]
-                seen.add(flag)
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+
+        def stage_draft():
+            options = {"range_id": _legacy_cli_option_value(
+                "--range-id",
+                range_id.strip(),
+                prog="portskill-cli workspace draft-set",
+            )}
+            seen = set()
+            for key, option, flag in mapping:
+                if option in seen:
+                    continue
+                val = body.get(key)
+                if isinstance(val, str):
+                    options[option] = _legacy_cli_option_value(
+                        flag, val, prog="portskill-cli workspace draft-set"
+                    )
+                    seen.add(option)
+            return workspace_draft_set_result(options)
+
+        return _domain_cli_result(stage_draft)
     if action == "draft-save":
-        argv = ["workspace", "draft-save"]
         range_id = body.get("rangeId")
-        if isinstance(range_id, str) and range_id.strip():
-            argv += ["--range-id", range_id.strip()]
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+
+        def save_draft():
+            parsed_range = (
+                _legacy_cli_option_value(
+                    "--range-id",
+                    range_id.strip(),
+                    prog="portskill-cli workspace draft-save",
+                )
+                if isinstance(range_id, str) and range_id.strip()
+                else None
+            )
+            return workspace_draft_save_result({"range_id": parsed_range})
+
+        return _domain_cli_result(save_draft)
     if action == "draft-revert":
-        argv = ["workspace", "draft-revert"]
         range_id = body.get("rangeId")
-        if isinstance(range_id, str) and range_id.strip():
-            argv += ["--range-id", range_id.strip()]
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+
+        def revert_draft():
+            parsed_range = (
+                _legacy_cli_option_value(
+                    "--range-id",
+                    range_id.strip(),
+                    prog="portskill-cli workspace draft-revert",
+                )
+                if isinstance(range_id, str) and range_id.strip()
+                else None
+            )
+            return workspace_draft_revert_result({"range_id": parsed_range})
+
+        return _domain_cli_result(revert_draft)
     if action in ("machine-list", "machine-add", "machine-remove"):
         return 400, {"ok": False, "message": "Remote machines — Coming soon"}
     return 400, {"ok": False, "message": f"unsupported action: {action}"}
