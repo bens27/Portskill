@@ -26,6 +26,7 @@ from socketserver import TCPServer
 from urllib.parse import urlparse, unquote
 
 from . import __version__
+from .request_origin import http_host_name
 from .handoff import (
     HANDOFF_TOOL_NAMES,
     handoff_enabled,
@@ -4830,31 +4831,6 @@ def json_content_type_ok(content_type: str | None) -> bool:
     return media == "application/json"
 
 
-def http_host_name(authority: str | None) -> str | None:
-    """Parse a single HTTP Host authority without resolving untrusted DNS."""
-    if not isinstance(authority, str) or not authority:
-        return None
-    if any(c.isspace() or c in "/\\?#@%" for c in authority):
-        return None
-    if authority.startswith("[") and not re.fullmatch(r"\[[0-9a-fA-F:.]+\](?::[0-9]+)?", authority):
-        return None
-    try:
-        parsed = urlparse("//" + authority)
-        host = parsed.hostname
-        port = parsed.port
-    except ValueError:
-        return None
-    if not host or authority.endswith(":") or port == 0:
-        return None
-    host = host.lower().rstrip(".")
-    try:
-        return str(ipaddress.ip_address(host))
-    except ValueError:
-        if ":" in host or not re.fullmatch(r"[a-z0-9_-]+(?:\.[a-z0-9_-]+)*", host):
-            return None
-        return host
-
-
 def trusted_http_host(host: str, known_hosts: set[str]) -> bool:
     """Only literal loopback addresses, localhost, or explicit local names."""
     if host == "localhost":
@@ -4870,7 +4846,16 @@ def trusted_http_host(host: str, known_hosts: set[str]) -> bool:
 def own_tailscale_http_host(server) -> str | None:
     """Resolve the opted-in Serve name from local Tailscale state, never peers."""
     try:
-        if not (load_registry().get("settings") or {}).get("serve_portskill_on_tailscale"):
+        # Re-read settings only when the registry file changes, not per request.
+        try:
+            stamp = registry_path().stat().st_mtime_ns
+        except FileNotFoundError:
+            stamp = None
+        cached_stamp, enabled = getattr(server, "portskill_tailnet_setting_cache", (object(), False))
+        if stamp != cached_stamp:
+            enabled = bool((load_registry().get("settings") or {}).get("serve_portskill_on_tailscale"))
+            server.portskill_tailnet_setting_cache = (stamp, enabled)
+        if not enabled:
             return None
         now = time.monotonic()
         expires, host = getattr(server, "portskill_tailnet_host_cache", (0, None))

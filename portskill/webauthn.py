@@ -18,6 +18,7 @@ from typing import Any
 from . import cbor_lite
 from . import p256
 from .cli import registry_path, utc_now
+from .request_origin import origin_and_rpid
 
 HTTP_PASSKEY_FILENAME = "http_passkey.json"
 HTTP_SESSIONS_FILENAME = "http_sessions.json"
@@ -192,27 +193,6 @@ def delete_passkey_credential(cred_id: str) -> bool:
     doc["credentials"] = after
     write_passkey_doc(doc)
     return True
-
-
-def _parse_host(host_header: str) -> tuple[str, str]:
-    raw = (host_header or "").strip() or "127.0.0.1"
-    if raw.startswith("["):
-        end = raw.find("]")
-        hostname = raw[1:end] if end > 0 else raw.strip("[]")
-    elif raw.count(":") == 1:
-        hostname = raw.rsplit(":", 1)[0]
-    else:
-        hostname = raw
-    return raw, hostname
-
-
-def origin_and_rpid(host_header: str, *, forwarded_proto: str | None = None) -> tuple[str, str]:
-    host, hostname = _parse_host(host_header)
-    proto = "http"
-    if isinstance(forwarded_proto, str) and forwarded_proto.strip().lower() == "https":
-        proto = "https"
-    origin = f"{proto}://{host}"
-    return origin, hostname
 
 
 def _challenge_key(challenge_b64: str) -> str:
