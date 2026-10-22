@@ -5406,7 +5406,7 @@ def cmd_doctor(args):
     ]
     missing = [name for name in required_rel if not (skill / name).exists()]
     skill_md_ok = (skill / "skill" / "SKILL.md").exists() or (skill / "SKILL.md").exists()
-    ui_ok = (skill / "ui").is_dir() or (app_pkg / "static").is_dir()
+    ui_ok = (app_pkg / "static").is_dir()
     skill_ok = not missing and ui_ok
     detail = str(skill)
     if missing:
@@ -5414,7 +5414,7 @@ def cmd_doctor(args):
     if not skill_md_ok:
         detail += "; optional agent skill sidecar not installed"
     if not ui_ok:
-        detail += "; missing ui/ (or portskill/static/)"
+        detail += "; missing portskill/static/"
     checks.append({"name": "skill_files", "ok": skill_ok, "detail": detail})
 
     project = project_path(args.project)

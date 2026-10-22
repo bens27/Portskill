@@ -7,8 +7,8 @@ This package ships three ways to see/use the Portskill UI. Node is **not** requi
 Open the pre-rendered Roster-style page in a browser:
 
 ```bash
-open ui/portskill-preview.html
-# or: xdg-open ui/portskill-preview.html
+open portskill/static/portskill-preview.html
+# or: xdg-open portskill/static/portskill-preview.html
 ```
 
 This uses baked-in sample projects/ranges and shows Start / Stop / Release buttons. Action clicks will fail against a `file://` origin (no server); use the live UI below for real actions.
@@ -112,7 +112,7 @@ The live `serve_ui.py` passes `--tailnet none` on `start` when needed to avoid e
 
 ## Reference only
 
-`ui/reference/portskill-console.e2e.test.ts` is the original Roster vitest coverage. It depends on the Roster test harness and full packages — do not run it standalone from this skill package.
+`portskill/static/reference/portskill-console.e2e.test.ts` is the original Roster vitest coverage. It depends on the Roster test harness and full packages — do not run it standalone from this skill package.
 
 ## 5. MCP connect
 

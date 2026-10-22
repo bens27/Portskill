@@ -5,7 +5,6 @@ recursive-include scripts *.sh
 recursive-include skill *.md
 recursive-include examples *.json
 recursive-include macos *.swift *.plist *.sh *.bash *.png
-recursive-include ui *.html *.ts *.md
 recursive-include tests *.py
 prune macos/Portskill.app
 prune macos/PortskillMenu/PortskillMenu.app

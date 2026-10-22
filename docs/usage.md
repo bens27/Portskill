@@ -38,7 +38,7 @@ Exit 0 on pass. GitHub Actions runs the same script on every push/PR to `main` (
 | Exit | When |
 |------|------|
 | **0** | Healthy offline / default: registry absent (cold) or readable object; listen.json absent or valid; not listening, or listening and UI/MCP GET 200; runtime files present; optional Session Handoff kit present, or disabled and unconfigured. Non-loopback `bind_host` **with** `allow_non_loopback` recorded warns (`message` + `checks[].warning`, `ok: true`). Tailscale missing, placeholder start script, and default-state counts are informational. |
-| **2** | Fail-closed: corrupt `registry.json` or `listen.json` (never wiped), missing runtime files (`portskill/{__init__,cli,server,mcp}.py` + `ui/` or `static/`), `listening: true` with a missing UI/MCP URL or non-200 GET, non-loopback bind without `--allow-non-loopback`, or missing Session Handoff kit when enabled or explicitly configured. Payload `status=error`, `reason=doctor_failed`. |
+| **2** | Fail-closed: corrupt `registry.json` or `listen.json` (never wiped), missing runtime files (`portskill/{__init__,cli,server,mcp}.py` + `portskill/static/`), `listening: true` with a missing UI/MCP URL or non-200 GET, non-loopback bind without `--allow-non-loopback`, or missing Session Handoff kit when enabled or explicitly configured. Payload `status=error`, `reason=doctor_failed`. |
 
 Doctor is **read-only and idempotent** — running it twice does not create, rewrite, or delete registry/listen files. Default bind remains loopback. Remote machine management is not implemented.
 

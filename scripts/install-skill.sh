@@ -63,8 +63,8 @@ cp -R "${PACKAGE_DIR}/portskill" "${CANONICAL_DIR}/portskill"
 # Drop bytecode from copy
 find "${CANONICAL_DIR}/portskill" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
+# The UI assets ship inside portskill/static/; drop the pre-2026-10 ui/ copy.
 rm -rf "${CANONICAL_DIR}/ui"
-cp -R "${PACKAGE_DIR}/ui" "${CANONICAL_DIR}/ui"
 
 rm -rf "${CANONICAL_DIR}/examples"
 cp -R "${PACKAGE_DIR}/examples" "${CANONICAL_DIR}/examples"
@@ -72,7 +72,7 @@ cp -R "${PACKAGE_DIR}/examples" "${CANONICAL_DIR}/examples"
 rm -rf "${CANONICAL_DIR}/macos"
 cp -R "${PACKAGE_DIR}/macos" "${CANONICAL_DIR}/macos"
 
-echo "  updated:   ${CANONICAL_DIR}/{SKILL.md,skill/,portskill/,ui/,app.py,examples/,macos/}"
+echo "  updated:   ${CANONICAL_DIR}/{SKILL.md,skill/,portskill/,app.py,examples/,macos/}"
 
 # Claude Code: symlink ~/.claude/skills/portskill → canonical
 mkdir -p "$(dirname "${CLAUDE_LINK}")"
@@ -107,7 +107,6 @@ rsync -a --delete \
   chmod +x "${CODEX_DIR}/portskill_cli.py" "${CODEX_DIR}/serve_ui.py" "${CODEX_DIR}/app.py"
   rm -rf "${CODEX_DIR}/portskill" "${CODEX_DIR}/ui" "${CODEX_DIR}/skill" "${CODEX_DIR}/examples" "${CODEX_DIR}/macos"
   cp -R "${CANONICAL_DIR}/portskill" "${CODEX_DIR}/portskill"
-  cp -R "${CANONICAL_DIR}/ui" "${CODEX_DIR}/ui"
   cp -R "${CANONICAL_DIR}/skill" "${CODEX_DIR}/skill" 2>/dev/null || true
   cp -R "${CANONICAL_DIR}/examples" "${CODEX_DIR}/examples"
   cp -R "${CANONICAL_DIR}/macos" "${CODEX_DIR}/macos"
