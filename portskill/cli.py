@@ -4,6 +4,7 @@ import argparse
 from . import __version__
 from . import discover_ports as discover_ports_mod
 from .handoff import doctor_handoff
+from .service import launch_service, service_launch
 import copy
 import datetime
 import fcntl
@@ -2608,17 +2609,6 @@ def activate_item(item, project, range_id, tailnet_arg):
     item["activated_at"] = now
 
 
-def service_launch(item, command):
-    """argv + env for a service: PORT is the range start, and $PORT / ${PORT} in the
-    command are substituted (commands run without a shell, so nothing else expands)."""
-    port = str(item["start"])
-    env = {**os.environ, "PORT": port}
-    if command:
-        command = command.replace("${PORT}", port).replace("$PORT", port)
-        return shlex.split(command), env
-    return None, env
-
-
 def release_item(item):
     tailnet = item.setdefault("tailnet", {"mode": None, "port": None, "configured_at": None})
     mode = tailnet.get("mode")
@@ -2918,50 +2908,10 @@ def cmd_start(args):
         if args.tailnet is None and recorded_mode is None:
             emit(needs_tailnet(project, args.range_id))
             raise SystemExit(3)
-        cwd_override = normalize_optional_str(item.get("cwd")) or project
-        command = normalize_optional_str(item.get("command"))
-        start_script = resolve_project_relative(project, life["start_script"], "start_script")
-        start_log = resolve_project_relative(project, life["start_log"], "start_log")
-        if command:
-            # Prefer explicit command when set (edit-mode field)
-            start_log.parent.mkdir(parents=True, exist_ok=True)
-            with start_log.open("a", encoding="utf-8") as log:
-                argv, env = service_launch(item, command)
-                try:
-                    process = subprocess.Popen(
-                        argv,
-                        env=env,
-                        cwd=cwd_override,
-                        stdin=subprocess.DEVNULL,
-                        stdout=log,
-                        stderr=subprocess.STDOUT,
-                        start_new_session=True,
-                    )
-                except OSError as exc:
-                    fail("start_command_failed", str(exc))
-        else:
-            validate_start_script(start_script)
-            start_log.parent.mkdir(parents=True, exist_ok=True)
-            with start_log.open("a", encoding="utf-8") as log:
-                try:
-                    process = subprocess.Popen(
-                        [str(start_script)],
-                        env=service_launch(item, None)[1],
-                        cwd=cwd_override,
-                        stdin=subprocess.DEVNULL,
-                        stdout=log,
-                        stderr=subprocess.STDOUT,
-                        start_new_session=True,
-                    )
-                except OSError as exc:
-                    fail("start_script_failed", str(exc))
-        life["pid"] = process.pid
-        try:
-            life["pgid"] = os.getpgid(process.pid)
-        except ProcessLookupError:
-            life["pgid"] = process.pid
-        life["started_at"] = utc_now()
-        life["stopped_at"] = None
+        outcome = launch_service(item, project)
+        if not outcome.ok:
+            detail = outcome.error_detail()
+            fail(detail.pop("reason"), detail.pop("message", None), **detail)
         activate_item(item, project, args.range_id, args.tailnet)
         maybe_push_history(registry, "start", hist_key)
         return {"status": "ok", "range": item}, [project]
@@ -3420,42 +3370,12 @@ def start_item_for_apply(item, project, registry=None):
         life["pid"] = None
         life["pgid"] = None
     mode = (item.get("tailnet") or {}).get("mode") or "none"
-    try:
-        start_script = resolve_project_relative(project, life["start_script"], "start_script")
-        start_log = resolve_project_relative(project, life["start_log"], "start_log")
-    except SystemExit:
-        return False, {"reason": "invalid_lifecycle_path", "range_id": item.get("id")}
-    if not start_script.exists():
-        return False, {"reason": "start_script_missing", "range_id": item.get("id"), "path": str(start_script)}
-    if script_is_placeholder(start_script):
-        return False, {
-            "reason": "start_script_placeholder",
-            "range_id": item.get("id"),
-            "path": str(start_script),
-            "skipped": True,
-        }
-    if not start_script.is_file() or not os.access(start_script, os.X_OK):
-        return False, {"reason": "start_script_invalid", "range_id": item.get("id"), "path": str(start_script)}
-    start_log.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with start_log.open("a", encoding="utf-8") as log:
-            process = subprocess.Popen(
-                [str(start_script)],
-                cwd=project,
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
-    except OSError as exc:
-        return False, {"reason": "start_script_failed", "message": str(exc), "range_id": item.get("id")}
-    life["pid"] = process.pid
-    try:
-        life["pgid"] = os.getpgid(process.pid)
-    except ProcessLookupError:
-        life["pgid"] = process.pid
-    life["started_at"] = utc_now()
-    life["stopped_at"] = None
+    outcome = launch_service(item, project)
+    if not outcome.ok:
+        detail = outcome.error_detail(item.get("id"))
+        if detail.get("reason") == "start_script_placeholder":
+            detail["skipped"] = True
+        return False, detail
     try:
         activate_item(item, project, item.get("id"), mode)
     except SystemExit:

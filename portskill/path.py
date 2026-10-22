@@ -333,62 +333,18 @@ def _mark_active(item):
 
 
 def _launch_start(item, project):
-    from .cli import (
-        fail,
-        lifecycle,
-        normalize_optional_str,
-        resolve_project_relative,
-        service_launch,
-        utc_now,
-        validate_start_script,
-    )
-    import os
-    import shlex
-    import subprocess
+    from .cli import fail
+    from .service import launch_service
 
-    life = lifecycle(item)
-    cwd_override = normalize_optional_str(item.get("cwd")) or project
-    command = normalize_optional_str(item.get("command"))
-    start_log = resolve_project_relative(project, life["start_log"], "start_log")
-    start_log.parent.mkdir(parents=True, exist_ok=True)
-    with start_log.open("a", encoding="utf-8") as log:
-        if command:
-            try:
-                argv, env = service_launch(item, command)
-                process = subprocess.Popen(
-                    argv,
-                    env=env,
-                    cwd=cwd_override,
-                    stdin=subprocess.DEVNULL,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                )
-            except OSError as exc:
-                fail("start_command_failed", str(exc))
-        else:
-            start_script = resolve_project_relative(project, life["start_script"], "start_script")
-            validate_start_script(start_script)
-            try:
-                process = subprocess.Popen(
-                    [str(start_script)],
-                    env=service_launch(item, None)[1],
-                    cwd=cwd_override,
-                    stdin=subprocess.DEVNULL,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                )
-            except OSError as exc:
-                fail("start_script_failed", str(exc))
-    life["pid"] = process.pid
-    try:
-        life["pgid"] = os.getpgid(process.pid)
-    except ProcessLookupError:
-        life["pgid"] = process.pid
-    life["started_at"] = utc_now()
-    life["stopped_at"] = None
-    return {"pid": process.pid, "pgid": life["pgid"]}
+    outcome = launch_service(item, project)
+    if not outcome.ok:
+        detail = outcome.error_detail()
+        fail(detail.pop("reason"), detail.pop("message", None), **detail)
+    return {
+        "source": outcome.source,
+        "pid": outcome.pid,
+        "pgid": outcome.pgid,
+    }
 
 
 def _apply_tailnet(item, mode):
