@@ -49,6 +49,8 @@ def apply_defaults_result(
     record_session=True,
     enforce_overlap=True,
 ):
+    if isinstance(project_filter, str):
+        project_filter = [project_filter]
     filters = [project_path(p) for p in project_filter] if project_filter else None
 
     def mutate(registry):

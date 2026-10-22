@@ -35,8 +35,12 @@ from .registry import (
 )
 from .domain import DomainError
 from .compatibility import compatibility_result
+from .apply_defaults import apply_defaults_result
+from .defaults import set_default_result
+from .deactivate import deactivate_result
 from .doctor import doctor_result
 from .environments import environment_export_result, environment_import_result
+from .history import history_list_result, history_reset_result, history_restore_result
 from .presets import (
     preset_apply_result,
     preset_delete_result,
@@ -589,6 +593,30 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "structuredContent": body,
             "isError": False,
         }
+    if name == "set_default":
+        body = set_default_result(args)
+        return {
+            "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
+            "structuredContent": body,
+            "isError": False,
+        }
+    if name == "apply_defaults":
+        body = apply_defaults_result(
+            project_filter=args.get("project"),
+            also_stop_off=bool(args.get("also_stop_off")),
+        )
+        return {
+            "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
+            "structuredContent": body,
+            "isError": False,
+        }
+    if name in ("deactivate", "exit_house"):
+        body = deactivate_result(args)
+        return {
+            "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
+            "structuredContent": body,
+            "isError": False,
+        }
     if name == "compat_check":
         body = compatibility_result(args)
         if not body.get("compatible"):
@@ -604,6 +632,18 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "preset_list": preset_list_result,
             "preset_apply": preset_apply_result,
             "preset_delete": preset_delete_result,
+        }[name]
+        body = operation(args)
+        return {
+            "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
+            "structuredContent": body,
+            "isError": False,
+        }
+    if name in ("history_list", "history_restore", "history_reset"):
+        operation = {
+            "history_list": history_list_result,
+            "history_restore": history_restore_result,
+            "history_reset": history_reset_result,
         }[name]
         body = operation(args)
         return {

@@ -16,7 +16,19 @@ from .compatibility import (
     compatibility_result as domain_compatibility_result,
     enforce_compatibility as domain_enforce_compatibility,
 )
+from .defaults import set_default_result, set_defaults_from_current_result
+from .deactivate import deactivate_result, item_matches_preset_service
 from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
+from .history import (
+    clear_history_stack,
+    history_list_payload,
+    history_clear_result,
+    history_list_result,
+    history_reset_result,
+    history_restore_result,
+    reset_history,
+    restore_history,
+)
 from .doctor import DOCTOR_FAIL_CLOSED_EXIT, DOCTOR_HARD_CHECKS
 from .domain import (
     DomainError,
@@ -342,254 +354,6 @@ def build_schedule_windows(registry, focus=None):
 
 
 
-def history_env_from_args(args, registry=None):
-    explicit = getattr(args, "environment", None) if args is not None else None
-    if isinstance(explicit, str) and explicit.strip():
-        return explicit.strip()
-    if registry is not None:
-        return resolve_history_env_name(registry, None)
-    return None
-
-
-def _snapshot_at_index(entry, index):
-    entry = normalize_history_entry(entry)
-    try:
-        index = int(index)
-    except (TypeError, ValueError):
-        fail("invalid_args", "history index must be an integer")
-    if index < 0:
-        fail("invalid_args", "history index must be >= 0")
-    if index == 0:
-        snap = entry.get("baseline")
-        if not isinstance(snap, dict):
-            fail("history_corrupt", "baseline snapshot missing")
-        return snap
-    steps = entry.get("steps") or []
-    if index > len(steps):
-        fail("invalid_args", f"history index {index} out of range (0..{len(steps)})")
-    step = steps[index - 1]
-    snap = step.get("snapshot") if isinstance(step, dict) else None
-    if not isinstance(snap, dict):
-        fail("history_corrupt", f"snapshot missing at index {index}")
-    return snap
-
-
-def _ports_free_for_restore(registry, start, end, exclude_range_id=None):
-    for other in non_released_ranges(registry):
-        if exclude_range_id and other.get("id") == exclude_range_id:
-            continue
-        if overlaps(start, end, other["start"], other["end"]):
-            return False
-    return True
-
-
-def _apply_range_fields_from_snapshot(item, snap_range):
-    """Update existing range record to match snapshot (registry state, not live PIDs)."""
-    keep_life = item.get("lifecycle")
-    for key, value in snap_range.items():
-        if key == "lifecycle":
-            continue
-        item[key] = copy.deepcopy(value)
-    # Restore lifecycle metadata but clear live pid/pgid — do not resurrect processes
-    life = copy.deepcopy(snap_range.get("lifecycle") or default_lifecycle())
-    if not isinstance(life, dict):
-        life = default_lifecycle()
-    life["pid"] = None
-    life["pgid"] = None
-    # Prefer stopped_at if snapshot had active process markers
-    if keep_life and isinstance(keep_life, dict):
-        # If something is still live on the old record, caller should have stopped/released first
-        pass
-    item["lifecycle"] = normalize_lifecycle(life)
-    normalize_range_record(item)
-    return item
-
-
-def restore_history(registry, env_name, index):
-    key = resolve_history_env_name(registry, env_name)
-    hist = registry.setdefault("environment_history", {})
-    entry = normalize_history_entry(hist.get(key))
-    if entry.get("baseline") is None and not entry.get("steps"):
-        fail("history_empty", f"no history for environment {key}")
-    snap = _snapshot_at_index(entry, index)
-    snap_ranges = snap.get("ranges")
-    if not isinstance(snap_ranges, list):
-        fail("history_corrupt", "snapshot.ranges missing or not a list")
-
-    desired = {}  # range_id -> (project, range_dict)
-    for row in snap_ranges:
-        if not isinstance(row, dict):
-            fail("history_corrupt", "snapshot range row corrupt")
-        project = row.get("project")
-        rng = row.get("range")
-        if not isinstance(project, str) or not project.strip():
-            fail("history_corrupt", "snapshot range missing project")
-        if not isinstance(rng, dict) or not isinstance(rng.get("id"), str):
-            fail("history_corrupt", "snapshot range missing id")
-        desired[rng["id"]] = (project.strip(), rng)
-
-    # Current cohort (what we manage for this env)
-    current_refs = _cohort_range_refs(registry, key)
-    current_by_id = {item.get("id"): (proj, item) for proj, item in current_refs if item.get("id")}
-
-    changed_projects = set()
-
-    # Release ranges present now in cohort but not in snapshot
-    for rid, (proj, item) in list(current_by_id.items()):
-        if rid in desired:
-            continue
-        if range_has_live_process(item):
-            # stop then release path
-            try:
-                run_stop_script_if_ready(item, proj)
-            except Exception:
-                pass
-            try:
-                terminate_lifecycle_processes(item)
-            except Exception:
-                pass
-            if range_has_live_process(item):
-                fail(
-                    "process_still_running",
-                    f"cannot restore: range {rid} still has a live process; stop it first",
-                )
-        release_item(item)
-        changed_projects.add(proj)
-
-    # Update existing or re-add missing from snapshot
-    for rid, (project, snap_range) in desired.items():
-        existing_proj, existing = find_range_anywhere(registry, rid, None)
-        start = int(snap_range.get("start") or 0)
-        end = int(snap_range.get("end") or 0)
-        if existing is not None:
-            # If ports differ, ensure free (excluding self)
-            if not _ports_free_for_restore(registry, start, end, exclude_range_id=rid):
-                fail(
-                    "port_in_use",
-                    f"cannot restore range {rid}: ports {start}-{end} overlap another live range",
-                )
-            # Move project if needed
-            if existing_proj != project:
-                # Remove from old project list and append to new
-                old_entry = registry["projects"].get(existing_proj) or {}
-                old_ranges = old_entry.get("ranges") or []
-                old_entry["ranges"] = [r for r in old_ranges if r.get("id") != rid]
-                registry["projects"][existing_proj] = old_entry
-                changed_projects.add(existing_proj)
-                ensure_project(registry, project)
-                _apply_range_fields_from_snapshot(existing, snap_range)
-                # Ensure reserved-like restore of registry status from snapshot
-                registry["projects"][project].setdefault("ranges", []).append(existing)
-                changed_projects.add(project)
-            else:
-                if not _ports_free_for_restore(registry, start, end, exclude_range_id=rid):
-                    fail("port_in_use", f"cannot restore range {rid}: ports busy")
-                _apply_range_fields_from_snapshot(existing, snap_range)
-                changed_projects.add(project)
-        else:
-            if not _ports_free_for_restore(registry, start, end, exclude_range_id=None):
-                fail(
-                    "port_in_use",
-                    f"cannot restore missing range {rid}: ports {start}-{end} not free",
-                )
-            ensure_project(registry, project)
-            new_item = copy.deepcopy(snap_range)
-            life = new_item.get("lifecycle") or default_lifecycle()
-            if isinstance(life, dict):
-                life = dict(life)
-                life["pid"] = None
-                life["pgid"] = None
-                new_item["lifecycle"] = life
-            # Prefer reserved when restoring without process resurrection
-            if new_item.get("state") == "active":
-                new_item["state"] = "reserved"
-                new_item["activated_at"] = None
-            normalize_range_record(new_item)
-            registry["projects"][project]["ranges"].append(new_item)
-            changed_projects.add(project)
-
-    # Restore preset services list when present in snapshot
-    services = snap.get("services")
-    if key != HISTORY_ALL_KEY and isinstance(services, list):
-        presets = registry.setdefault("presets", {})
-        if key in presets and isinstance(presets[key], dict):
-            cleaned = []
-            for svc in services:
-                normalized = normalize_preset_service(svc)
-                if normalized is not None:
-                    cleaned.append(normalized)
-            presets[key]["services"] = cleaned
-            presets[key]["updated_at"] = utc_now()
-            presets[key] = normalize_preset_entry(key, presets[key])
-        elif key not in presets:
-            presets[key] = normalize_preset_entry(key, {
-                "name": key,
-                "description": "",
-                "updated_at": utc_now(),
-                "services": services,
-            })
-
-    entry["cursor"] = int(index)
-    hist[key] = entry
-    registry["environment_history"] = hist
-    return {
-        "status": "ok",
-        "environment": key,
-        "index": int(index),
-        "modified": history_is_modified(entry),
-        "cursor": entry["cursor"],
-        "step_count": len(entry.get("steps") or []),
-    }, sorted(changed_projects)
-
-
-def reset_history(registry, env_name):
-    return restore_history(registry, env_name, 0)
-
-
-def clear_history_stack(registry, env_name):
-    """Drop history stack for env; keep live registry state. Re-baseline from current."""
-    key = resolve_history_env_name(registry, env_name)
-    hist = registry.setdefault("environment_history", {})
-    hist[key] = {
-        "baseline": snapshot_environment(registry, key),
-        "steps": [],
-        "cursor": 0,
-    }
-    registry["environment_history"] = hist
-    return {
-        "status": "ok",
-        "environment": key,
-        "cleared": True,
-        "modified": False,
-        "cursor": 0,
-        "step_count": 0,
-    }
-
-
-def history_list_payload(registry, env_name):
-    key = resolve_history_env_name(registry, env_name)
-    hist = normalize_environment_history(registry.get("environment_history"))
-    entry = normalize_history_entry(hist.get(key))
-    steps_out = []
-    for i, step in enumerate(entry.get("steps") or []):
-        steps_out.append({
-            "id": step.get("id"),
-            "label": step.get("label"),
-            "at": step.get("at"),
-            "index": i + 1,
-        })
-    return {
-        "status": "ok",
-        "environment": key,
-        "baselineLabel": "Original",
-        "baseline": entry.get("baseline") is not None,
-        "cursor": int(entry.get("cursor") or 0),
-        "modified": history_is_modified(entry),
-        "steps": steps_out,
-        "step_count": len(steps_out),
-    }
-
-
 
 
 
@@ -786,61 +550,18 @@ def cmd_environment_import(args):
 
 
 def cmd_set_default(args):
-    state = normalize_default_state(args.state)
-    project = project_path(args.project) if args.project else None
-    if project is not None:
-        require_project_directory(project)
-
-    def mutate(registry):
-        hist_key = resolve_history_env_name(registry, getattr(args, "environment", None))
-        ensure_baseline(registry, hist_key)
-        found_project, item = find_range_anywhere(registry, args.range_id, project)
-        if item is None:
-            fail("not_found", f"range id not found: {args.range_id}")
-        item["default_state"] = state
-        normalize_range_record(item)
-        maybe_push_history(registry, "set-default", hist_key)
-        return {"status": "ok", "range": item, "project": found_project}, [found_project]
-
-    emit(locked_registry(mutate))
+    emit(set_default_result({
+        "range_id": args.range_id,
+        "state": args.state,
+        "project": args.project,
+        "environment": getattr(args, "environment", None),
+    }))
 
 
 def cmd_set_defaults_from_current(args):
-    """For every non-released local range: active -> default_state=on, else off."""
-
-    def mutate(registry):
-        hist_key = resolve_history_env_name(registry, getattr(args, "environment", None))
-        ensure_baseline(registry, hist_key)
-        updated = []
-        changed = set()
-        for project, item in iter_project_ranges(registry, None):
-            if is_remote_range(registry, item):
-                continue
-            state = item.get("state") or "reserved"
-            desired = "on" if state == "active" else "off"
-            prev = normalize_default_state(item.get("default_state"))
-            if prev == desired:
-                continue
-            item["default_state"] = desired
-            normalize_range_record(item)
-            updated.append({
-                "project": project,
-                "range_id": item.get("id"),
-                "state": state,
-                "default_state": desired,
-                "previous_default_state": prev,
-            })
-            changed.add(project)
-        if updated:
-            maybe_push_history(registry, "set-defaults-from-current", hist_key)
-        return {
-            "status": "ok",
-            "updated": updated,
-            "updated_count": len(updated),
-            "message": f"Set default_state from current for {len(updated)} range(s)",
-        }, sorted(changed)
-
-    emit(locked_registry(mutate))
+    emit(set_defaults_from_current_result({
+        "environment": getattr(args, "environment", None),
+    }))
 
 
 
@@ -884,106 +605,13 @@ def cmd_apply_defaults(args):
     emit(payload)
 
 
-def item_matches_preset_service(project, item, service):
-    """Match a live range to a preset service by range_id or project+note."""
-    svc_raw = service.get("project")
-    if not isinstance(svc_raw, str) or not svc_raw.strip():
-        return False
-    try:
-        svc_project = project_path(svc_raw)
-    except SystemExit:
-        svc_project = svc_raw
-    proj = project_path(project) if not str(project).startswith("/") else str(project)
-    # project keys in registry are already normalized absolute paths
-    if str(project) != str(svc_project) and proj != str(svc_project) and str(project) != svc_raw:
-        return False
-    rid = service.get("range_id")
-    if isinstance(rid, str) and rid.strip():
-        return item.get("id") == rid.strip()
-    return (item.get("note") or None) == (service.get("note") or None)
-
-
-
-
 def run_exit_house(project_filter=None, preset_name=None, also_release=False, clear_session=True):
-    """Stop Default On cohort (or preset-matched running services).
-
-    Safe path only: project stop.sh if ready + terminate tracked pgids + tailnet off.
-    Default keeps ranges reserved unless also_release.
-    """
-    filters = [project_path(p) for p in project_filter] if project_filter else None
-    preset_name = (preset_name or "").strip() or None
-
-    def mutate(registry):
-        stopped = []
-        skipped = []
-        errors = []
-        changed = set()
-        preset_services = None
-        if preset_name:
-            presets = registry.get("presets") or {}
-            if preset_name not in presets:
-                fail("preset_not_found", f"preset not found: {preset_name}")
-            preset_services = list(
-                normalize_preset_entry(preset_name, presets[preset_name]).get("services") or []
-            )
-
-        for project, item in list(iter_project_ranges(registry, filters)):
-            if preset_services is not None:
-                matched = any(
-                    item_matches_preset_service(project, item, svc) for svc in preset_services
-                )
-                if not matched:
-                    continue
-            else:
-                if normalize_default_state(item.get("default_state")) != "on":
-                    continue
-            live = range_has_live_process(item)
-            is_active = item.get("state") == "active"
-            if not live and not is_active:
-                skipped.append({
-                    "project": project,
-                    "range_id": item.get("id"),
-                    "reason": "not_running",
-                })
-                continue
-            ok, detail = park_item_for_exit(item, project, also_release=also_release)
-            detail = dict(detail)
-            detail["project"] = project
-            if ok:
-                stopped.append(detail)
-                changed.add(project)
-            else:
-                errors.append(detail)
-                if "range" in detail:
-                    changed.add(project)
-        payload = {
-            "status": "ok",
-            "stopped": stopped,
-            "skipped": skipped,
-            "errors": errors,
-            "stopped_count": len(stopped),
-            "skipped_count": len(skipped),
-            "error_count": len(errors),
-            "also_release": bool(also_release),
-            "preset": preset_name,
-        }
-        # Clear active session on full deactivate (no project/preset filter)
-        if clear_session and not filters and not preset_name:
-            closed = end_active_session(registry)
-            payload["session_closed"] = closed
-            changed.add("__sessions__")
-        elif clear_session and preset_name:
-            # Preset-scoped deactivate closes active only when it matches
-            sessions = normalize_sessions(registry.get("sessions"))
-            active = sessions.get("active")
-            if active and active.get("preset") == preset_name:
-                closed = end_active_session(registry)
-                payload["session_closed"] = closed
-                changed.add("__sessions__")
-        return payload, sorted(changed)
-
-    return locked_registry(mutate)
+    return deactivate_result({
+        "project": project_filter,
+        "preset": preset_name,
+        "also_release": also_release,
+        "clear_session": clear_session,
+    })
 
 
 def cmd_deactivate(args):
@@ -1902,42 +1530,22 @@ def cmd_handoff_fetch(args):
 
 
 def cmd_history_list(args):
-    env = getattr(args, "environment", None)
-
-    def read(registry):
-        return history_list_payload(registry, env), False, []
-
-    emit(mutate_registry_meta(read))
+    emit(history_list_result({"environment": getattr(args, "environment", None)}))
 
 
 def cmd_history_restore(args):
-    env = getattr(args, "environment", None)
-    index = args.index
-
-    def mutate(registry):
-        payload, changed = restore_history(registry, env, index)
-        return payload, True, changed
-
-    emit(mutate_registry_meta(mutate))
+    emit(history_restore_result({
+        "environment": getattr(args, "environment", None),
+        "index": args.index,
+    }))
 
 
 def cmd_history_reset(args):
-    env = getattr(args, "environment", None)
-
-    def mutate(registry):
-        payload, changed = reset_history(registry, env)
-        return payload, True, changed
-
-    emit(mutate_registry_meta(mutate))
+    emit(history_reset_result({"environment": getattr(args, "environment", None)}))
 
 
 def cmd_history_clear(args):
-    env = getattr(args, "environment", None)
-
-    def mutate(registry):
-        return clear_history_stack(registry, env), True, []
-
-    emit(mutate_registry_meta(mutate))
+    emit(history_clear_result({"environment": getattr(args, "environment", None)}))
 
 
 def cmd_history(args):

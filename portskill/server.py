@@ -35,8 +35,12 @@ from .auth import (
 )
 from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
 from .domain import DomainError
+from .apply_defaults import apply_defaults_result
 from .compatibility import compatibility_result
+from .defaults import set_default_result, set_defaults_from_current_result
+from .deactivate import deactivate_result
 from .environments import environment_export_result, environment_import_result
+from .history import history_clear_result, history_reset_result, history_restore_result
 from .network import (
     ALLOW_NON_LOOPBACK_FLAG,
     bind_host_warning,
@@ -4102,50 +4106,40 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             index = int(index)
         except (TypeError, ValueError):
             return 400, {"ok": False, "message": "expected index"}
-        argv = ["history", "restore", "--index", str(index)]
         env = body.get("environment") or body.get("name")
-        if isinstance(env, str) and env.strip():
-            argv += ["--environment", env.strip()]
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+        return _domain_cli_result(lambda: history_restore_result({
+            "index": index,
+            "environment": env.strip() if isinstance(env, str) and env.strip() else None,
+        }))
     if action == "history-reset":
-        argv = ["history", "reset"]
         env = body.get("environment") or body.get("name")
-        if isinstance(env, str) and env.strip():
-            argv += ["--environment", env.strip()]
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+        return _domain_cli_result(lambda: history_reset_result({
+            "environment": env.strip() if isinstance(env, str) and env.strip() else None,
+        }))
     if action == "history-clear":
-        argv = ["history", "clear"]
         env = body.get("environment") or body.get("name")
-        if isinstance(env, str) and env.strip():
-            argv += ["--environment", env.strip()]
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+        return _domain_cli_result(lambda: history_clear_result({
+            "environment": env.strip() if isinstance(env, str) and env.strip() else None,
+        }))
     if action == "set-default":
         project = body.get("project")
         range_id = body.get("rangeId")
         state = body.get("state")
         if not isinstance(range_id, str) or state not in ("on", "off"):
             return 400, {"ok": False, "message": "expected rangeId and state on|off"}
-        argv = ["set-default", "--range-id", range_id, "--state", state]
-        if isinstance(project, str) and project:
-            argv += ["--project", project]
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+        return _domain_cli_result(lambda: set_default_result({
+            "range_id": range_id,
+            "state": state,
+            "project": project if isinstance(project, str) and project else None,
+        }))
     if action == "apply-defaults":
-        argv = ["apply-defaults"]
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+        return _domain_cli_result(lambda: apply_defaults_result())
     if action in ("exit-house", "deactivate"):
-        argv = ["deactivate"]
         preset = body.get("preset")
-        if isinstance(preset, str) and preset.strip():
-            argv += ["--preset", preset.strip()]
-        if body.get("alsoRelease") or body.get("also_release"):
-            argv.append("--also-release")
-        code, payload, stdout = run_cli(argv)
-        return _cli_result(code, payload, stdout)
+        return _domain_cli_result(lambda: deactivate_result({
+            "preset": preset.strip() if isinstance(preset, str) and preset.strip() else None,
+            "also_release": bool(body.get("alsoRelease") or body.get("also_release")),
+        }))
     if action == "compat-check":
         presets = body.get("presets") or body.get("names") or []
         if isinstance(presets, str) and presets.strip():
@@ -4643,8 +4637,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
     if action == "stop-non-default":
         return _domain_cli_result(lambda: stop_result({"non_default": True}))
     if action in ("set-defaults-from-current", "capture-defaults"):
-        code, payload, stdout = run_cli(["set-defaults-from-current"])
-        return _cli_result(code, payload, stdout)
+        return _domain_cli_result(set_defaults_from_current_result)
     if action == "tailscale-logout":
         code, payload, stdout = run_cli(["tailscale", "logout"])
         if isinstance(payload, dict):
@@ -5476,11 +5469,13 @@ def serve_http(
             if not settings.get("auto_exit_on_shutdown"):
                 return
             print("auto_exit_on_shutdown: running deactivate…", flush=True)
-            code, payload, stdout = run_cli(["deactivate"])
-            if code == 0:
-                print(f"deactivate ok: {payload or stdout}", flush=True)
-            else:
-                print(f"deactivate best-effort failed ({code}): {payload or stdout}", flush=True)
+            payload = deactivate_result()
+            print(f"deactivate ok: {payload}", flush=True)
+        except DomainError as exc:
+            print(
+                f"deactivate best-effort failed ({exc.exit_code}): {exc.as_dict()}",
+                flush=True,
+            )
         except Exception as exc:  # noqa: BLE001
             print(f"deactivate best-effort error: {exc}", flush=True)
 
