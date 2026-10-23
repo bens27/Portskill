@@ -79,6 +79,8 @@ from .registry import (
     read_settings,
 )
 from .domain import DomainError
+from . import command_chains
+from .command_chains import group_chain_steps as _group_user_command_steps  # noqa: F401 - compatibility alias
 from .port_discovery import discover_import_result, discover_ports_result
 from .tailscale_commands import set_tailnet_result, tailscale_login_result, tailscale_status_result
 from .apply_defaults import apply_defaults_result  # noqa: F401 - compatibility reexport
@@ -129,41 +131,16 @@ def _load_settings_from_registry() -> dict:
 
 def _mcp_tools_prefs(registry_or_settings=None) -> dict:
     """Return settings.mcp_tools map (name -> bool). Missing key = enabled."""
-    settings = _load_settings_from_registry() if registry_or_settings is None else registry_or_settings
-    if not isinstance(settings, dict):
-        settings = {}
-    if isinstance(settings.get("settings"), dict):
-        settings = settings["settings"]
-    prefs = settings.get("mcp_tools", settings)
-    if not isinstance(prefs, dict):
-        prefs = {}
-    out: dict[str, bool] = {}
-    for key, val in prefs.items():
-        if not isinstance(key, str) or not key.strip():
-            continue
-        name = key.strip()
-        out[name] = parse_bool(val)
-    if not handoff_enabled(settings):
-        out.update({name: False for name in HANDOFF_TOOL_NAMES})
-    return out
+    return command_chains.mcp_tools_prefs(
+        registry_or_settings, load_settings=_load_settings_from_registry
+    )
 
 
 def _load_user_commands(registry_or_settings=None) -> dict:
     """Return settings.mcp_user_commands map."""
-    settings = None
-    if registry_or_settings is None:
-        settings = _load_settings_from_registry()
-    elif isinstance(registry_or_settings, dict):
-        if "settings" in registry_or_settings and isinstance(registry_or_settings.get("settings"), dict):
-            settings = registry_or_settings["settings"]
-        elif "mcp_user_commands" in registry_or_settings:
-            return registry_or_settings.get("mcp_user_commands") or {}
-        else:
-            settings = registry_or_settings
-    if not isinstance(settings, dict):
-        return {}
-    raw = settings.get("mcp_user_commands")
-    return raw if isinstance(raw, dict) else {}
+    return command_chains.user_commands(
+        registry_or_settings, load_settings=_load_settings_from_registry
+    )
 
 
 def user_command_tool_def(cmd: dict) -> dict:
@@ -449,61 +426,24 @@ def tool_argv(name: str, arguments: dict) -> list[str]:
     raise ValueError(f"unknown tool: {name}")
 
 
-def _group_user_command_steps(steps: list) -> list[tuple[str, list]]:
-    """Group consecutive parallel steps; series steps are singleton groups."""
-    groups: list[tuple[str, list]] = []
-    pending_parallel: list = []
-    for step in steps:
-        mode = (step.get("mode") or "series").strip().lower()
-        if mode == "parallel":
-            pending_parallel.append(step)
-            continue
-        if pending_parallel:
-            groups.append(("parallel", pending_parallel))
-            pending_parallel = []
-        groups.append(("series", [step]))
-    if pending_parallel:
-        groups.append(("parallel", pending_parallel))
-    return groups
-
-
-def _run_one_chain_step(step: dict, prefs: dict, system_names: set[str]) -> dict:
-    tool = step.get("tool")
-    arguments = step.get("arguments") if isinstance(step.get("arguments"), dict) else {}
-    mode = step.get("mode") or "series"
-    dispatch = canonical_mcp_tool_name(tool) if isinstance(tool, str) else tool
-    if not isinstance(tool, str) or (tool not in system_names and dispatch not in system_names):
-        return {
-            "ok": False,
-            "tool": tool,
-            "mode": mode,
-            "error": "unknown_or_non_system_tool",
-            "message": f"Step tool must be an existing system TOOL_DEFS name (got {tool!r})",
-        }
-    if tool in _load_user_commands():
-        return {
-            "ok": False,
-            "tool": tool,
-            "mode": mode,
-            "error": "nested_user_command_forbidden",
-            "message": "v1: user commands cannot nest other user commands",
-        }
-    if not _tool_enabled(prefs, dispatch):
-        return {
-            "ok": False,
-            "tool": tool,
-            "mode": mode,
-            "error": "tool_disabled",
-            "message": f"Step tool disabled in settings.mcp_tools: {tool}",
-        }
-    result = call_tool(dispatch if dispatch in system_names else tool, arguments)
+def _run_one_chain_step(step: dict, prefs: dict, system_names) -> dict:
+    check = command_chains.validate_chain_step(
+        step,
+        prefs,
+        system_names,
+        policy=command_chains.RUN_CHAIN_POLICY,
+        load_user_commands=_load_user_commands,
+    )
+    if check.rejection is not None:
+        return check.rejection
+    result = call_tool(check.target, check.arguments)
     is_err = bool(result.get("isError"))
     structured = result.get("structuredContent")
     return {
         "ok": not is_err,
-        "tool": tool,
-        "mode": mode,
-        "arguments": arguments,
+        "tool": check.tool,
+        "mode": check.mode,
+        "arguments": check.arguments,
         "isError": is_err,
         "result": structured if structured is not None else result,
     }
@@ -512,7 +452,7 @@ def _run_one_chain_step(step: dict, prefs: dict, system_names: set[str]) -> dict
 def call_user_command(name: str, cmd: dict) -> dict:
     """Run a user command chain; series in order, parallel groups via ThreadPoolExecutor."""
     prefs = _mcp_tools_prefs()
-    system_names = _system_tool_names()
+    system_names = command_chains.chain_tool_specs()
     normalized = normalize_mcp_user_commands({name: cmd}).get(name)
     if not normalized:
         body = {"ok": False, "error": "invalid_user_command", "name": name}

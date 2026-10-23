@@ -14,7 +14,6 @@ import ipaddress
 import json
 import os
 import pathlib
-import re
 import signal
 import socket
 import sys
@@ -83,6 +82,8 @@ from .handoff import (
     persist_custom_skill,
     status_payload,
 )
+from . import command_chains
+from .mcp_catalog import tool_enabled
 from .mcp import (
     SERVER_NAME,
     SERVER_VERSION,
@@ -2294,175 +2295,7 @@ def modified_badge_html(view: dict) -> str:
 
 def dry_run_user_command_steps(steps: list) -> dict:
     """Validate a user-command chain without calling tools (no side effects)."""
-    from .mcp import _group_user_command_steps  # type: ignore  # noqa: PLC0415
-
-    system = {
-        t.get("name"): t
-        for t in TOOL_DEFS
-        if isinstance(t, dict) and isinstance(t.get("name"), str) and t.get("name").strip()
-    }
-    prefs = {}
-    try:
-        from .mcp import _mcp_tools_prefs  # noqa: PLC0415
-
-        prefs = _mcp_tools_prefs() or {}
-    except Exception:  # noqa: BLE001
-        prefs = {}
-
-    step_results = []
-    any_error = False
-    for step in steps or []:
-        if not isinstance(step, dict):
-            step_results.append(
-                {"ok": False, "tool": None, "mode": "series", "message": "step must be an object"}
-            )
-            any_error = True
-            continue
-        tool = step.get("tool")
-        mode = step.get("mode") or "series"
-        if not isinstance(mode, str):
-            mode = "series"
-        mode = mode.strip().lower()
-        if mode not in ("series", "parallel"):
-            mode = "series"
-        arguments = step.get("arguments") if isinstance(step.get("arguments"), dict) else {}
-        if tool == "stop":
-            arguments = {}
-        if not isinstance(tool, str) or tool not in system:
-            step_results.append(
-                {
-                    "ok": False,
-                    "tool": tool,
-                    "mode": mode,
-                    "message": f"unknown or non-system tool: {tool!r}",
-                }
-            )
-            any_error = True
-            continue
-        # nested user commands forbidden
-        try:
-            from .mcp import _load_user_commands  # noqa: PLC0415
-
-            if tool in _load_user_commands():
-                step_results.append(
-                    {
-                        "ok": False,
-                        "tool": tool,
-                        "mode": mode,
-                        "message": "nested user commands forbidden",
-                    }
-                )
-                any_error = True
-                continue
-        except Exception:  # noqa: BLE001
-            pass
-        enabled = True if tool not in prefs else bool(prefs.get(tool))
-        if not enabled:
-            step_results.append(
-                {
-                    "ok": False,
-                    "tool": tool,
-                    "mode": mode,
-                    "message": f"tool disabled in settings.mcp_tools: {tool}",
-                }
-            )
-            any_error = True
-            continue
-        schema = system[tool].get("inputSchema") if isinstance(system[tool].get("inputSchema"), dict) else {}
-        props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
-        required = schema.get("required") if isinstance(schema.get("required"), list) else []
-        missing = []
-        for key in required:
-            if key not in arguments or arguments.get(key) in (None, ""):
-                missing.append(key)
-        unknown = [k for k in arguments.keys() if props and k not in props]
-        msgs = []
-        if missing:
-            msgs.append("missing required: " + ", ".join(missing))
-        if unknown:
-            msgs.append("unknown args: " + ", ".join(unknown))
-        # light type checks
-        for key, val in arguments.items():
-            if key not in props:
-                continue
-            p = props.get(key) or {}
-            typ = p.get("type")
-            if typ == "integer" and not isinstance(val, int):
-                msgs.append(f"{key}: expected integer")
-            elif typ == "number" and not isinstance(val, (int, float)):
-                msgs.append(f"{key}: expected number")
-            elif typ == "boolean" and not isinstance(val, bool):
-                msgs.append(f"{key}: expected boolean")
-            elif typ == "string" and not isinstance(val, str):
-                msgs.append(f"{key}: expected string")
-            elif typ == "array" and not isinstance(val, list):
-                msgs.append(f"{key}: expected array")
-            elif typ == "object" and not isinstance(val, dict):
-                msgs.append(f"{key}: expected object")
-            enum = p.get("enum")
-            if isinstance(enum, list) and val not in enum:
-                msgs.append(f"{key}: must be one of {enum}")
-        ok = not msgs
-        if not ok:
-            any_error = True
-        step_results.append(
-            {
-                "ok": ok,
-                "tool": tool,
-                "mode": mode,
-                "arguments": arguments,
-                "message": "; ".join(msgs) if msgs else "ok",
-            }
-        )
-
-    groups_out = []
-    try:
-        from .mcp import _group_user_command_steps  # noqa: PLC0415
-
-        for kind, group in _group_user_command_steps(
-            [
-                {
-                    "tool": s.get("tool"),
-                    "mode": s.get("mode") or "series",
-                    "arguments": s.get("arguments") if isinstance(s.get("arguments"), dict) else {},
-                }
-                for s in (steps or [])
-                if isinstance(s, dict)
-            ]
-        ):
-            groups_out.append(
-                {"kind": kind, "tools": [g.get("tool") for g in group], "count": len(group)}
-            )
-    except Exception:  # noqa: BLE001
-        groups_out = []
-
-    # sentence summary
-    parts = []
-    for g in groups_out:
-        tools = [t for t in (g.get("tools") or []) if t]
-        if g.get("kind") == "parallel" and len(tools) > 1:
-            if len(tools) == 2:
-                parts.append(f"{tools[0]} and {tools[1]} in parallel")
-            else:
-                parts.append(", ".join(tools[:-1]) + f", and {tools[-1]} in parallel")
-        elif tools:
-            parts.append(tools[0])
-    if not parts:
-        summary = ""
-    elif len(parts) == 1:
-        summary = f"Run {parts[0]}."
-    else:
-        summary = "Run " + ", then ".join(parts[:-1]) + f", then {parts[-1]}."
-
-    return {
-        "ok": not any_error and bool(step_results),
-        "dry_run": True,
-        "executed": False,
-        "steps": step_results,
-        "groups": groups_out,
-        "summary": summary,
-        "message": "validated without executing tools" if not any_error else "validation failed",
-    }
+    return command_chains.dry_run_chain(steps)
 
 
 def mcp_tools_panel_html(view: dict | None = None) -> str:
@@ -2475,16 +2308,16 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
     settings = (view or {}).get("settings") or {}
     prefs = settings.get("mcpTools") if isinstance(settings.get("mcpTools"), dict) else {}
     user_cmds = settings.get("mcpUserCommands") if isinstance(settings.get("mcpUserCommands"), dict) else {}
-    from .mcp import _mcp_tools_prefs, _tool_enabled  # noqa: PLC0415
-
-    prefs = _mcp_tools_prefs({"mcp_tools": prefs, "handoff_enabled": settings.get("handoffEnabled", False)})
+    prefs = command_chains.mcp_tools_prefs(
+        {"mcp_tools": prefs, "handoff_enabled": settings.get("handoffEnabled", False)}
+    )
     visible_tools = [t for t in TOOL_DEFS if t.get("name") not in HANDOFF_TOOL_NAMES or settings.get("handoffEnabled", False)]
 
     def tool_row(name: str, desc: str, *, user: bool = False) -> str:
         desc_one = " ".join((desc or "").strip().split())
         if len(desc_one) > 140:
             desc_one = desc_one[:137] + "…"
-        is_enabled = _tool_enabled(prefs, name)
+        is_enabled = tool_enabled(prefs, name)
         checked = "checked" if is_enabled else ""
         aria = "true" if is_enabled else "false"
         disabled_cls = "" if is_enabled else " is-disabled"
@@ -2527,7 +2360,7 @@ def mcp_tools_panel_html(view: dict | None = None) -> str:
         desc = tool.get("description") or ""
         if not isinstance(desc, str):
             desc = ""
-        is_enabled = _tool_enabled(prefs, name)
+        is_enabled = tool_enabled(prefs, name)
         if is_enabled:
             enabled_count += 1
         system_rows.append(tool_row(name, desc, user=False))
@@ -4665,40 +4498,9 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         return (0 if result.get("ok") else 422), result
 
     if action == "mcp-user-command-save":
-        name = body.get("name")
-        if not isinstance(name, str) or not name.strip():
-            return 400, {"ok": False, "message": "expected name"}
-        name = name.strip()
-        if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
-            return 400, {"ok": False, "message": "name must be letters, numbers, _ or -"}
-        system_names = {
-            t.get("name")
-            for t in TOOL_DEFS
-            if isinstance(t, dict) and isinstance(t.get("name"), str)
-        }
-        if name in system_names:
-            return 400, {"ok": False, "message": f"cannot shadow system tool: {name}"}
-        steps = body.get("steps")
-        if not isinstance(steps, list) or not steps:
-            return 400, {"ok": False, "message": "expected non-empty steps"}
-        cleaned_steps = []
-        for step in steps:
-            if not isinstance(step, dict) or step.get("tool") not in system_names:
-                return 400, {
-                    "ok": False,
-                    "message": f"each step.tool must be a system TOOL_DEFS name (got {step!r})",
-                }
-            tool = step.get("tool")
-            mode = step.get("mode") or "series"
-            arguments = step.get("arguments") if isinstance(step.get("arguments"), dict) else {}
-            if tool == "stop":
-                arguments = {}
-            cleaned_steps.append({"tool": tool, "arguments": arguments, "mode": mode})
-        cmd = {
-            "name": name,
-            "description": body.get("description") if isinstance(body.get("description"), str) else "",
-            "steps": cleaned_steps,
-        }
+        cmd, error = command_chains.saved_chain_command(body)
+        if error is not None:
+            return 400, {"ok": False, "message": error}
         code, payload, stdout = _run_domain(
             lambda: _execute_ui_command(
                 "mcp-user-command-save", {"command": cmd}
