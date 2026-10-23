@@ -141,9 +141,8 @@ class CallableDomainSlice7ATests(unittest.TestCase):
 
         with mock.patch.object(
             server, "run_cli", side_effect=AssertionError("subprocess used")
-        ), mock.patch.object(
-            server,
-            "fetch_kit_result",
+        ), mock.patch(
+            "portskill.handoff.fetch_kit_result",
             side_effect=[
                 DomainError("fetch_failed", "boom"),
                 {"ok": True, "ref": "v1"},
@@ -283,8 +282,8 @@ class CallableDomainSlice7ATests(unittest.TestCase):
                             raise RuntimeError("boom")
                         return real(options)
 
-                    with self.subTest(path=path), mock.patch.object(
-                        server, "http_auth_result", side_effect=operation
+                    with self.subTest(path=path), mock.patch(
+                        "portskill.auth.http_auth_result", side_effect=operation
                     ):
                         failed = _http_json(
                             f"http://127.0.0.1:{port}{path}",

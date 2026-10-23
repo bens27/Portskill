@@ -125,7 +125,7 @@ class CallableDomainSlice8Tests(unittest.TestCase):
 
         cases = (
             (
-                "portskill.server.preset_save_result",
+                "portskill.presets.preset_save_result",
                 {"action": "new-environment", "name": "empty"},
             ),
             (

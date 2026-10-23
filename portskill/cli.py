@@ -5,7 +5,6 @@ from . import __version__
 from .auth import (
     ensure_http_auth_token,
     http_auth_public_status,
-    http_auth_result,
     http_auth_token,
     http_bearer_matches,
     regenerate_http_auth_token,
@@ -30,6 +29,12 @@ from .command_specs import (
     HISTORY_LIST_COMMAND,
     HISTORY_RESET_COMMAND,
     HISTORY_RESTORE_COMMAND,
+    HANDOFF_FETCH_COMMAND,
+    HTTP_AUTH_GATE_COMMAND,
+    HTTP_AUTH_PASSKEYS_COMMAND,
+    HTTP_AUTH_REGENERATE_COMMAND,
+    HTTP_AUTH_SHOW_COMMAND,
+    MACHINE_COMMAND,
     MISSING,
     PATH_COMMAND,
     PORTS_DISCOVER_COMMAND,
@@ -42,6 +47,7 @@ from .command_specs import (
     PRESET_SHOW_COMMAND,
     COMPAT_COMMAND,
     RELEASE_COMMAND,
+    SCHEDULE_COMMAND,
     SET_DEFAULT_COMMAND,
     SET_DEFAULTS_FROM_CURRENT_COMMAND,
     SETTINGS_GET_COMMAND,
@@ -64,7 +70,7 @@ from .defaults import set_default_result, set_defaults_from_current_result  # no
 from .deactivate import deactivate_result, item_matches_preset_service
 from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
 from .history import clear_history_stack, history_list_payload, reset_history, restore_history
-from .handoff import fetch_kit_result
+from .schedule import build_schedule_windows  # compatibility reexport
 from .doctor import DOCTOR_FAIL_CLOSED_EXIT, DOCTOR_HARD_CHECKS
 from .domain import (
     DomainError,
@@ -312,67 +318,6 @@ def begin_active_session(registry, preset, source):
 
 def end_active_session(registry):
     return domain_end_active_session(registry)
-
-
-def build_schedule_windows(registry, focus=None):
-    """Opaque busy windows for schedule/busy view (no services list)."""
-    sessions = normalize_sessions(registry.get("sessions"))
-    focus_name = normalize_session_preset(focus)
-    windows = []
-    active = sessions.get("active")
-    active_key = None
-    if active and active.get("started_at"):
-        active_key = (active.get("preset"), active.get("started_at"))
-    for entry in sessions.get("history") or []:
-        preset = entry.get("preset")
-        if focus_name is not None and preset != focus_name:
-            continue
-        windows.append(
-            {
-                "preset": preset,
-                "started_at": entry.get("started_at"),
-                "ended_at": entry.get("ended_at"),
-                "busy": True,
-                "opaque": True,
-            }
-        )
-    # Ensure open active window is present even if history was trimmed oddly
-    if active and active.get("started_at"):
-        if focus_name is None or active.get("preset") == focus_name:
-            found_open = any(
-                w.get("started_at") == active.get("started_at")
-                and w.get("preset") == active.get("preset")
-                and w.get("ended_at") is None
-                for w in windows
-            )
-            if not found_open:
-                windows.append(
-                    {
-                        "preset": active.get("preset"),
-                        "started_at": active.get("started_at"),
-                        "ended_at": None,
-                        "busy": True,
-                        "opaque": True,
-                    }
-                )
-    windows.sort(key=lambda w: w.get("started_at") or "")
-    return {
-        "status": "ok",
-        "overlap_policy": normalize_settings(registry.get("settings")).get("overlap_policy"),
-        "active": active,
-        "focus": focus_name,
-        "windows": windows,
-        "count": len(windows),
-    }
-
-
-
-
-
-
-
-
-
 
 
 
@@ -706,12 +651,7 @@ def maybe_auto_apply_on_launch():
 
 
 def cmd_schedule(args):
-    focus = getattr(args, "focus", None)
-
-    def read(registry):
-        return build_schedule_windows(registry, focus=focus), False, []
-
-    emit(mutate_registry_meta(read))
+    emit(execute_command(SCHEDULE_COMMAND, vars(args)))
 
 
 def cmd_environment_check(args):
@@ -810,12 +750,13 @@ def cmd_workspace(args):
 
 
 def cmd_http_auth(args):
-    emit(http_auth_result({
-        "command": getattr(args, "http_auth_command", None),
-        "gate_mode": getattr(args, "gate_mode", None),
-        "passkeys_action": getattr(args, "passkeys_action", None),
-        "credential_id": getattr(args, "credential_id", None),
-    }))
+    spec = {
+        "show": HTTP_AUTH_SHOW_COMMAND,
+        "regenerate": HTTP_AUTH_REGENERATE_COMMAND,
+        "gate": HTTP_AUTH_GATE_COMMAND,
+        "passkeys": HTTP_AUTH_PASSKEYS_COMMAND,
+    }[args.http_auth_command]
+    emit(execute_command(spec, vars(args)))
 
 
 def cmd_tailscale(args):
@@ -836,7 +777,7 @@ def cmd_doctor(args):
 
 
 def cmd_handoff_fetch(args):
-    emit(fetch_kit_result({"ref": getattr(args, "ref", None)}))
+    emit(execute_command(HANDOFF_FETCH_COMMAND, vars(args)))
 
 
 def cmd_history_list(args):
@@ -870,7 +811,8 @@ def cmd_history(args):
 
 def cmd_machine(args):
     """Public machine CLI held — Coming soon (no mutate / no writes)."""
-    print("Remote machines — Coming soon", file=__import__("sys").stderr)
+    result = execute_command(MACHINE_COMMAND, vars(args))
+    print(result["message"], file=__import__("sys").stderr)
     raise SystemExit(2)
 
 
@@ -930,6 +872,8 @@ def _add_spec_cli_arguments(command_parser, spec: CommandSpec):
         ):
             value = getattr(cli_binding, key)
             if value is not MISSING:
+                if key == "help" and value == "==SUPPRESS==":
+                    value = argparse.SUPPRESS
                 argument_kwargs[key] = value
         if cli_binding.type_name is not MISSING:
             argument_kwargs["type"] = {
@@ -1002,70 +946,18 @@ def parser():
 
     _add_spec_cli_parser(subparsers, DOCTOR_COMMAND, handler=cmd_doctor)
 
-    handoff = subparsers.add_parser("handoff", help="Experimental Session Handoff kit management")
-    handoff_sub = handoff.add_subparsers(dest="handoff_command", required=True)
-    handoff_fetch = handoff_sub.add_parser(
-        "fetch", help="Download the Session Handoff kit release into the Portskill config dir")
-    handoff_fetch.add_argument("--ref", default=None,
-                               help="Kit git ref (tag/branch/sha); default is the pinned release")
-    handoff_fetch.set_defaults(func=cmd_handoff_fetch)
-
-    http_auth = subparsers.add_parser(
-        "http-auth",
-        help="Optional helper: bearer token + opt-in passkey gate (default off)",
-    )
-    http_auth_sub = http_auth.add_subparsers(dest="http_auth_command", required=True)
-    http_auth_show = http_auth_sub.add_parser(
-        "show",
-        help="Print the local HTTP bearer token (mints one if missing)",
-    )
-    http_auth_show.set_defaults(func=cmd_http_auth)
-    http_auth_regen = http_auth_sub.add_parser(
-        "regenerate",
-        help="Mint a new HTTP bearer token and invalidate the old one",
-    )
-    http_auth_regen.set_defaults(func=cmd_http_auth)
-    http_auth_gate = http_auth_sub.add_parser(
-        "gate",
-        help="Show or set the opt-in passkey HTTP gate (default off)",
-    )
-    http_auth_gate.add_argument(
-        "gate_mode",
-        nargs="?",
-        choices=["on", "off", "show"],
-        default="show",
-        help="on|off|show (default show). Off keeps post-#14 open listen.",
-    )
-    http_auth_gate.set_defaults(func=cmd_http_auth)
-    http_auth_keys = http_auth_sub.add_parser(
-        "passkeys",
-        help="List or delete local operator passkeys (not stored in registry.json)",
-    )
-    http_auth_keys.add_argument(
-        "passkeys_action",
-        nargs="?",
-        choices=["list", "delete"],
-        default="list",
-    )
-    http_auth_keys.add_argument("--id", dest="credential_id", default=None)
-    http_auth_keys.set_defaults(func=cmd_http_auth)
+    _add_spec_cli_parser(subparsers, HANDOFF_FETCH_COMMAND, handler=cmd_handoff_fetch)
+    _add_spec_cli_parser(subparsers, HTTP_AUTH_SHOW_COMMAND, handler=cmd_http_auth)
+    _add_spec_cli_parser(subparsers, HTTP_AUTH_REGENERATE_COMMAND, handler=cmd_http_auth)
+    _add_spec_cli_parser(subparsers, HTTP_AUTH_GATE_COMMAND, handler=cmd_http_auth)
+    _add_spec_cli_parser(subparsers, HTTP_AUTH_PASSKEYS_COMMAND, handler=cmd_http_auth)
 
     _add_spec_cli_parser(subparsers, SET_DEFAULT_COMMAND, handler=cmd_set_default)
     _add_spec_cli_parser(subparsers, SET_DEFAULTS_FROM_CURRENT_COMMAND, handler=cmd_set_defaults_from_current)
     _add_spec_cli_parser(subparsers, APPLY_DEFAULTS_COMMAND, handler=cmd_apply_defaults)
     _add_spec_cli_parser(subparsers, DEACTIVATE_COMMAND, handler=cmd_deactivate)
 
-    schedule = subparsers.add_parser(
-        "schedule",
-        aliases=["busy"],
-        help="(Inert) session history windows — prefer compat check for port conflicts",
-    )
-    schedule.add_argument(
-        "--focus",
-        default=None,
-        help="Optional preset name to filter windows",
-    )
-    schedule.set_defaults(func=cmd_schedule)
+    _add_spec_cli_parser(subparsers, SCHEDULE_COMMAND, handler=cmd_schedule)
 
     compat = subparsers.add_parser(
         "compat",
@@ -1120,16 +1012,7 @@ def parser():
     _add_spec_cli_parser(subparsers, PORTS_DISCOVER_COMMAND, handler=cmd_discover)
     _add_spec_cli_parser(subparsers, PORTS_IMPORT_COMMAND, handler=cmd_discover)
 
-    machine = subparsers.add_parser(
-        "machine",
-        help="Remote machines — Coming soon",
-    )
-    machine.add_argument(
-        "machine_args",
-        nargs=argparse.REMAINDER,
-        help=argparse.SUPPRESS,
-    )
-    machine.set_defaults(func=cmd_machine)
+    _add_spec_cli_parser(subparsers, MACHINE_COMMAND, handler=cmd_machine)
 
     return root
 

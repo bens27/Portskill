@@ -13,6 +13,15 @@ from .command_specs import (
     HISTORY_LIST_COMMAND,
     HISTORY_RESET_COMMAND,
     HISTORY_RESTORE_COMMAND,
+    HANDOFF_INSTALL_HELP_COMMAND,
+    HANDOFF_LIST_COMMAND,
+    HANDOFF_NEW_PATH_COMMAND,
+    HANDOFF_RESOLVE_COMMAND,
+    HANDOFF_RESUME_COMMAND,
+    HANDOFF_SKILL_COMMAND,
+    HANDOFF_STATUS_COMMAND,
+    HANDOFF_SUPERSEDE_COMMAND,
+    HANDOFF_TEMPLATE_COMMAND,
     EXIT_HOUSE_COMMAND,
     MISSING,
     PATH_COMMAND,
@@ -37,7 +46,6 @@ from .command_specs import (
     TAILSCALE_STATUS_COMMAND,
     CommandSpec,
 )
-from .handoff import HANDOFF_TOOL_DEFS
 from .registry import normalize_profile
 
 PORTSKILL_TOOL_NAME = "portskill"
@@ -143,7 +151,15 @@ TOOL_DEFS = [
     _mcp_tool_definition(HISTORY_LIST_COMMAND),
     _mcp_tool_definition(HISTORY_RESTORE_COMMAND),
     _mcp_tool_definition(HISTORY_RESET_COMMAND),
-    *HANDOFF_TOOL_DEFS,
+    _mcp_tool_definition(HANDOFF_STATUS_COMMAND),
+    _mcp_tool_definition(HANDOFF_SKILL_COMMAND),
+    _mcp_tool_definition(HANDOFF_TEMPLATE_COMMAND),
+    _mcp_tool_definition(HANDOFF_LIST_COMMAND),
+    _mcp_tool_definition(HANDOFF_RESOLVE_COMMAND),
+    _mcp_tool_definition(HANDOFF_NEW_PATH_COMMAND),
+    _mcp_tool_definition(HANDOFF_RESUME_COMMAND),
+    _mcp_tool_definition(HANDOFF_SUPERSEDE_COMMAND),
+    _mcp_tool_definition(HANDOFF_INSTALL_HELP_COMMAND),
 ]
 
 

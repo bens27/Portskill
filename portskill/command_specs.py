@@ -518,7 +518,11 @@ PRESET_SAVE_COMMAND = CommandSpec(
     ),
     cli=CLICommandBinding(path=("preset", "save"), parent_destinations=("preset_command",), parent_required=(True,)),
     mcp=MCPCommandBinding(name="preset_save", description="Save a named preset into the registry (snapshot live ranges or --from-file environment JSON).", catalog_position=15),
-    ui=UICommandBinding(actions=("preset-save",), binder="preset_save"),
+    ui=UICommandBinding(
+        actions=("preset-save", "new-environment"),
+        binder="preset_save",
+        action_binders=(("new-environment", "new_environment"),),
+    ),
 )
 
 
@@ -1614,6 +1618,264 @@ WORKSPACE_EDIT_MODE_COMMAND = CommandSpec(
 )
 
 
+HTTP_AUTH_SHOW_COMMAND = CommandSpec(
+    id="http_auth_show",
+    handler=HandlerRef("portskill.auth", "http_auth_result", "http_auth"),
+    cli=CLICommandBinding(
+        path=("http-auth", "show"),
+        help="Print the local HTTP bearer token (mints one if missing)",
+        parent_destinations=("http_auth_command",),
+        parent_required=(True,),
+        parent_helps=(
+            "Optional helper: bearer token + opt-in passkey gate (default off)",
+        ),
+    ),
+)
+
+
+HTTP_AUTH_REGENERATE_COMMAND = CommandSpec(
+    id="http_auth_regenerate",
+    handler=HandlerRef("portskill.auth", "http_auth_result", "http_auth"),
+    cli=CLICommandBinding(
+        path=("http-auth", "regenerate"),
+        help="Mint a new HTTP bearer token and invalidate the old one",
+        parent_destinations=("http_auth_command",),
+        parent_required=(True,),
+        parent_helps=(
+            "Optional helper: bearer token + opt-in passkey gate (default off)",
+        ),
+    ),
+)
+
+
+HTTP_AUTH_GATE_COMMAND = CommandSpec(
+    id="http_auth_gate",
+    handler=HandlerRef("portskill.auth", "http_auth_result", "http_auth"),
+    params=(
+        ParamSpec(
+            key="gate_mode",
+            cli=CLIParamBinding(
+                positional=True,
+                nargs="?",
+                choices=("on", "off", "show"),
+                default="show",
+                help="on|off|show (default show). Off keeps post-#14 open listen.",
+            ),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("http-auth", "gate"),
+        help="Show or set the opt-in passkey HTTP gate (default off)",
+        parent_destinations=("http_auth_command",),
+        parent_required=(True,),
+        parent_helps=(
+            "Optional helper: bearer token + opt-in passkey gate (default off)",
+        ),
+    ),
+)
+
+
+HTTP_AUTH_PASSKEYS_COMMAND = CommandSpec(
+    id="http_auth_passkeys",
+    handler=HandlerRef("portskill.auth", "http_auth_result", "http_auth"),
+    params=(
+        ParamSpec(
+            key="passkeys_action",
+            cli=CLIParamBinding(
+                positional=True,
+                nargs="?",
+                choices=("list", "delete"),
+                default="list",
+            ),
+        ),
+        ParamSpec(
+            key="credential_id",
+            cli=CLIParamBinding(flags=("--id",), dest="credential_id", default=None),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("http-auth", "passkeys"),
+        help="List or delete local operator passkeys (not stored in registry.json)",
+        parent_destinations=("http_auth_command",),
+        parent_required=(True,),
+        parent_helps=(
+            "Optional helper: bearer token + opt-in passkey gate (default off)",
+        ),
+    ),
+)
+
+
+HANDOFF_FETCH_COMMAND = CommandSpec(
+    id="handoff_fetch",
+    handler=HandlerRef("portskill.handoff", "fetch_kit_result"),
+    params=(
+        ParamSpec(
+            key="ref",
+            cli=CLIParamBinding(
+                flags=("--ref",),
+                default=None,
+                help="Kit git ref (tag/branch/sha); default is the pinned release",
+            ),
+            ui=UIParamBinding(("ref",), coercion="nonblank_string_or_none"),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("handoff", "fetch"),
+        help="Download the Session Handoff kit release into the Portskill config dir",
+        parent_destinations=("handoff_command",),
+        parent_required=(True,),
+        parent_helps=("Experimental Session Handoff kit management",),
+    ),
+    ui=UICommandBinding(actions=("handoff-fetch",), binder="declared_params"),
+)
+
+
+HANDOFF_PACKAGE_COMMAND = CommandSpec(
+    id="handoff_package",
+    handler=HandlerRef("portskill.handoff", "run_package_sh", "registry_settings"),
+    ui=UICommandBinding(actions=("handoff-package",), binder="none"),
+)
+
+
+HANDOFF_CODEX_INSTALL_COMMAND = CommandSpec(
+    id="handoff_codex_install",
+    handler=HandlerRef(
+        "portskill.handoff", "run_codex_install", "registry_settings"
+    ),
+    ui=UICommandBinding(actions=("handoff-codex-install",), binder="none"),
+)
+
+
+HANDOFF_SKILL_DOWNLOAD_COMMAND = CommandSpec(
+    id="handoff_skill_download",
+    handler=HandlerRef(
+        "portskill.handoff", "bundled_skill_text", "registry_settings"
+    ),
+    ui=UICommandBinding(actions=("handoff-skill-download",), binder="none"),
+)
+
+
+def _handoff_mcp_command(
+    name: str,
+    description: str,
+    position: int,
+    params: tuple[ParamSpec, ...] = (),
+) -> CommandSpec:
+    return CommandSpec(
+        id=name,
+        handler=HandlerRef(
+            "portskill.handoff", "call_handoff_tool", f"handoff_mcp:{name}"
+        ),
+        params=params,
+        mcp=MCPCommandBinding(
+            name=name, description=description, catalog_position=position
+        ),
+    )
+
+
+HANDOFF_STATUS_COMMAND = _handoff_mcp_command(
+    "handoff_status",
+    "Session Handoff kit status: fetched or override path, skill readable, open-handoff count, install matrix (Claude Code / Cowork / Codex / Chat / Chrome).",
+    29,
+    (ParamSpec(key="project", mcp=MCPParamBinding(description="Project dir for ledger list (default cwd)")),),
+)
+HANDOFF_SKILL_COMMAND = _handoff_mcp_command(
+    "handoff_skill",
+    "Return Write-a-Handoff SKILL.md text from the custom file under ~/.config/portskill/ when set, else the fetched kit (or a kit override).",
+    30,
+)
+HANDOFF_TEMPLATE_COMMAND = _handoff_mcp_command(
+    "handoff_template", "Return handoff-template.md from the resolved kit.", 31
+)
+HANDOFF_LIST_COMMAND = _handoff_mcp_command(
+    "handoff_list",
+    "Wrap the kit handoff_ledger.py list --json (open handoffs).",
+    32,
+    (
+        ParamSpec(key="project", mcp=MCPParamBinding(description="Project directory (default cwd)")),
+        ParamSpec(key="max_age_days", kind="integer", mcp=MCPParamBinding(minimum=0)),
+    ),
+)
+HANDOFF_RESOLVE_COMMAND = _handoff_mcp_command(
+    "handoff_resolve",
+    "Wrap the kit handoff_ledger.py resolve <topic-or-path> --json.",
+    33,
+    (
+        ParamSpec(key="topic", mcp=MCPParamBinding(required=True, description="Topic name or handoff file path")),
+        ParamSpec(key="path", mcp=MCPParamBinding(description="Alias of topic when it is a path")),
+        ParamSpec(key="project", mcp=MCPParamBinding()),
+    ),
+)
+HANDOFF_NEW_PATH_COMMAND = _handoff_mcp_command(
+    "handoff_new_path",
+    "Wrap the kit handoff_ledger.py new-path (deterministic path + created timestamp). Does not write a file.",
+    34,
+    (
+        ParamSpec(key="topic", mcp=MCPParamBinding(required=True)),
+        ParamSpec(key="project", mcp=MCPParamBinding()),
+    ),
+)
+HANDOFF_RESUME_COMMAND = _handoff_mcp_command(
+    "handoff_resume",
+    "Wrap the kit handoff_ledger.py resume <path> (marks status resumed).",
+    35,
+    (ParamSpec(key="path", mcp=MCPParamBinding(required=True)),),
+)
+HANDOFF_SUPERSEDE_COMMAND = _handoff_mcp_command(
+    "handoff_supersede",
+    "Wrap the kit handoff_ledger.py supersede <path> [--by <new-path>].",
+    36,
+    (
+        ParamSpec(key="path", mcp=MCPParamBinding(required=True)),
+        ParamSpec(key="by", mcp=MCPParamBinding(description="Optional newer handoff path")),
+    ),
+)
+HANDOFF_INSTALL_HELP_COMMAND = _handoff_mcp_command(
+    "handoff_install_help",
+    "Install matrix + commands for Claude Code, Cowork, Codex, chat skill, and Chrome extension.",
+    37,
+)
+
+
+SCHEDULE_COMMAND = CommandSpec(
+    id="schedule",
+    handler=HandlerRef("portskill.schedule", "schedule_result"),
+    params=(
+        ParamSpec(
+            key="focus",
+            cli=CLIParamBinding(
+                flags=("--focus",),
+                default=None,
+                help="Optional preset name to filter windows",
+            ),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("schedule",),
+        aliases=("busy",),
+        help="(Inert) session history windows — prefer compat check for port conflicts",
+    ),
+)
+
+
+MACHINE_COMMAND = CommandSpec(
+    id="machine",
+    handler=HandlerRef("portskill.machine_commands", "machine_unavailable_result"),
+    params=(
+        ParamSpec(
+            key="machine_args",
+            cli=CLIParamBinding(
+                positional=True, nargs="...", help="==SUPPRESS=="
+            ),
+        ),
+    ),
+    cli=CLICommandBinding(path=("machine",), help="Remote machines — Coming soon"),
+    ui=UICommandBinding(
+        actions=("machine-list", "machine-add", "machine-remove"), binder="none"
+    ),
+)
+
+
 COMMAND_SPECS = (
     ALLOCATE_COMMAND,
     ACTIVATE_COMMAND,
@@ -1655,6 +1917,25 @@ COMMAND_SPECS = (
     WORKSPACE_DRAFT_SAVE_COMMAND,
     WORKSPACE_DRAFT_REVERT_COMMAND,
     WORKSPACE_EDIT_MODE_COMMAND,
+    HTTP_AUTH_SHOW_COMMAND,
+    HTTP_AUTH_REGENERATE_COMMAND,
+    HTTP_AUTH_GATE_COMMAND,
+    HTTP_AUTH_PASSKEYS_COMMAND,
+    HANDOFF_FETCH_COMMAND,
+    HANDOFF_PACKAGE_COMMAND,
+    HANDOFF_CODEX_INSTALL_COMMAND,
+    HANDOFF_SKILL_DOWNLOAD_COMMAND,
+    HANDOFF_STATUS_COMMAND,
+    HANDOFF_SKILL_COMMAND,
+    HANDOFF_TEMPLATE_COMMAND,
+    HANDOFF_LIST_COMMAND,
+    HANDOFF_RESOLVE_COMMAND,
+    HANDOFF_NEW_PATH_COMMAND,
+    HANDOFF_RESUME_COMMAND,
+    HANDOFF_SUPERSEDE_COMMAND,
+    HANDOFF_INSTALL_HELP_COMMAND,
+    SCHEDULE_COMMAND,
+    MACHINE_COMMAND,
 )
 
 

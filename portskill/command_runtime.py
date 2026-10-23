@@ -33,6 +33,22 @@ def _bind_project(handler: Callable[..., dict], options: dict[str, Any]) -> dict
     return handler(options.get("project"))
 
 
+def _bind_registry_settings(
+    handler: Callable[..., dict], options: dict[str, Any]
+) -> dict:
+    del options
+    from .registry import read_registry
+
+    return handler(read_registry()["settings"])
+
+
+def _bind_http_auth(handler: Callable[..., dict], options: dict[str, Any]) -> dict:
+    auth_options = dict(options)
+    if auth_options.get("http_auth_command"):
+        auth_options["command"] = auth_options["http_auth_command"]
+    return handler(auth_options)
+
+
 def _bind_path(handler: Callable[..., dict], options: dict[str, Any]) -> dict:
     payload = handler(
         mode=options.get("mode"),
@@ -94,6 +110,8 @@ _BINDERS = {
     "options": _bind_options,
     "none": _bind_none,
     "project": _bind_project,
+    "registry_settings": _bind_registry_settings,
+    "http_auth": _bind_http_auth,
     "path": _bind_path,
     "apply_defaults": _bind_apply_defaults,
     "compatibility": _bind_compatibility,
@@ -106,6 +124,13 @@ def execute_command(
     """Execute one catalog command without applying transport serialization."""
     if not any(spec is trusted for trusted in COMMAND_SPECS):
         raise ValueError("command spec is not declared in COMMAND_SPECS")
+    if spec.handler.binder.startswith("handoff_mcp:"):
+        from .registry import read_settings
+
+        tool_name = spec.handler.binder.split(":", 1)[1]
+        return resolve_handler(spec.handler)(
+            tool_name, dict(options or {}), read_settings()
+        )
     try:
         binder = _BINDERS[spec.handler.binder]
     except KeyError as exc:

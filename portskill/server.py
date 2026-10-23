@@ -28,7 +28,6 @@ from urllib.parse import urlparse, unquote
 from . import __version__
 from .auth import (
     ensure_http_auth_token,
-    http_auth_result,
     http_auth_public_status,
     http_auth_token,
     http_bearer_matches,
@@ -37,8 +36,18 @@ from .command_runtime import execute_command
 from .command_specs import (
     ALLOCATE_COMMAND,
     COMMAND_SPECS,
+    DEACTIVATE_COMMAND,
+    HANDOFF_CODEX_INSTALL_COMMAND,
+    HANDOFF_FETCH_COMMAND,
+    HANDOFF_PACKAGE_COMMAND,
+    HANDOFF_SKILL_DOWNLOAD_COMMAND,
+    HTTP_AUTH_GATE_COMMAND,
+    HTTP_AUTH_PASSKEYS_COMMAND,
+    HTTP_AUTH_REGENERATE_COMMAND,
+    MACHINE_COMMAND,
     PORTS_DISCOVER_COMMAND,
     PORTS_IMPORT_COMMAND,
+    PRESET_SAVE_COMMAND,
     SET_TAILNET_COMMAND,
     TAILSCALE_LOGIN_COMMAND,
     TAILSCALE_LOGOUT_COMMAND,
@@ -69,13 +78,9 @@ from .registry import (
 )
 from .handoff import (
     HANDOFF_TOOL_NAMES,
-    fetch_kit_result,
     handoff_enabled,
-    bundled_skill_text,
     install_help_text,
     persist_custom_skill,
-    run_codex_install,
-    run_package_sh,
     status_payload,
 )
 from .mcp import (
@@ -210,6 +215,10 @@ def _coerce_ui_nonempty_string_or_none(value):
     return value if isinstance(value, str) and value else None
 
 
+def _coerce_ui_nonblank_string_or_none(value):
+    return value if isinstance(value, str) and value.strip() else None
+
+
 def _coerce_ui_environment_name(value):
     name = value or "environment"
     return name.strip() if isinstance(name, str) and name.strip() else "environment"
@@ -227,6 +236,7 @@ _UI_VALUE_COERCERS = {
     "parsed_boolean": _coerce_ui_parsed_boolean,
     "import_tailnet_mode": _coerce_ui_import_tailnet_mode,
     "nonempty_string_or_none": _coerce_ui_nonempty_string_or_none,
+    "nonblank_string_or_none": _coerce_ui_nonblank_string_or_none,
     "environment_name": _coerce_ui_environment_name,
 }
 
@@ -308,6 +318,24 @@ def _bind_ui_preset_save(spec: CommandSpec, payload: dict) -> dict:
     options = _bind_ui_declared_params(spec, payload)
     if not options.get("description"):
         options.pop("description", None)
+    return options
+
+
+def _bind_ui_new_environment(spec: CommandSpec, payload: dict) -> dict:
+    options = {"empty": True}
+    for key in ("name", "description"):
+        parameter = next(parameter for parameter in spec.params if parameter.key == key)
+        binding = parameter.ui
+        value = _ui_field_value(binding, payload)
+        if key == "description" and (
+            not isinstance(value, str) or not value
+        ):
+            options[key] = ""
+            continue
+        value = _UI_VALUE_COERCERS[binding.coercion](value)
+        options[key] = _legacy_cli_option_value(
+            parameter.cli.flags[0], value, prog="portskill-cli preset save"
+        )
     return options
 
 
@@ -412,6 +440,7 @@ _UI_PAYLOAD_BINDERS = {
     "deactivate": _bind_ui_declared_params,
     "compat": _bind_ui_compat,
     "preset_save": _bind_ui_preset_save,
+    "new_environment": _bind_ui_new_environment,
     "settings_save": _bind_ui_settings_save,
     "mcp_user_command_save": _bind_ui_mcp_user_command_save,
     "mcp_user_command_delete": _bind_ui_mcp_user_command_delete,
@@ -4718,14 +4747,10 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         )
 
     if action == "handoff-fetch":
-        ref = body.get("ref")
-        return _domain_cli_result(lambda: fetch_kit_result({
-            "ref": str(ref) if isinstance(ref, str) and ref.strip() else None,
-        }))
+        return _domain_cli_result(lambda: _execute_ui_command(action, body))
 
     if action == "handoff-skill-download":
-        settings = load_registry().get("settings") or {}
-        result = bundled_skill_text(settings)
+        result = _execute_ui_command(action, body)
         if not result.get("ok"):
             return 422, result
         return 0, {
@@ -4766,8 +4791,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         return 409, {"ok": False, "error": "handoff_disabled", "message": "Enable Session Handoff under Experimental (Beta) before installing or packaging the kit."}
 
     if action == "handoff-package":
-        settings = load_registry().get("settings") or {}
-        result = run_package_sh(settings)
+        result = _execute_ui_command(action, body)
         if result.get("ok"):
             out = dict(result)
             out["ok"] = True
@@ -4775,8 +4799,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         return 422, result
 
     if action == "handoff-codex-install":
-        settings = load_registry().get("settings") or {}
-        result = run_codex_install(settings)
+        result = _execute_ui_command(action, body)
         if result.get("ok"):
             out = dict(result)
             out["ok"] = True
@@ -4851,26 +4874,9 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         name = body.get("name")
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
-        desc = body.get("description")
-
-        def create_environment():
-            parsed_name = _legacy_cli_option_value(
-                "--name", name.strip(), prog="portskill-cli preset save"
-            )
-            parsed_description = (
-                _legacy_cli_option_value(
-                    "--description", desc, prog="portskill-cli preset save"
-                )
-                if isinstance(desc, str) and desc
-                else ""
-            )
-            return preset_save_result({
-                "name": parsed_name,
-                "empty": True,
-                "description": parsed_description,
-            })
-
-        return _domain_cli_result(create_environment)
+        return _domain_cli_result(
+            lambda: _execute_ui_command(action, {**body, "name": name.strip()})
+        )
     if action in ("focus-environment", "open-environment-tab"):
         name = body.get("name")
         if not isinstance(name, str) or not name.strip():
@@ -5020,7 +5026,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
     if action == "draft-revert":
         return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action in ("machine-list", "machine-add", "machine-remove"):
-        return 400, {"ok": False, "message": "Remote machines — Coming soon"}
+        return 400, _execute_ui_command(action, body)
     return 400, {"ok": False, "message": f"unsupported action: {action}"}
 
 
@@ -5454,7 +5460,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"ok": False, "message": "id required"})
                 return
             try:
-                result = http_auth_result({
+                result = execute_command(HTTP_AUTH_PASSKEYS_COMMAND, {
                     "command": "passkeys",
                     "passkeys_action": "delete",
                     "credential_id": cred_id.strip(),
@@ -5483,7 +5489,7 @@ class Handler(BaseHTTPRequestHandler):
             ):
                 return
             try:
-                http_auth_result({
+                execute_command(HTTP_AUTH_GATE_COMMAND, {
                     "command": "gate",
                     "gate_mode": "on" if enabled else "off",
                 })
@@ -5517,7 +5523,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_unauthorized()
                 return
             try:
-                payload = http_auth_result({"command": "regenerate"})
+                payload = execute_command(
+                    HTTP_AUTH_REGENERATE_COMMAND, {"command": "regenerate"}
+                )
             except Exception as exc:
                 _code, error = _domain_exception_result(exc)
                 self._send_json(422, error)
@@ -5826,7 +5834,7 @@ def serve_http(
             if not settings.get("auto_exit_on_shutdown"):
                 return
             print("auto_exit_on_shutdown: running deactivate…", flush=True)
-            payload = deactivate_result()
+            payload = execute_command(DEACTIVATE_COMMAND, {})
             print(f"deactivate ok: {payload}", flush=True)
         except DomainError as exc:
             print(

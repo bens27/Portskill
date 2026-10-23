@@ -22,6 +22,15 @@ from .command_specs import (
     HISTORY_LIST_COMMAND,
     HISTORY_RESET_COMMAND,
     HISTORY_RESTORE_COMMAND,
+    HANDOFF_INSTALL_HELP_COMMAND,
+    HANDOFF_LIST_COMMAND,
+    HANDOFF_NEW_PATH_COMMAND,
+    HANDOFF_RESOLVE_COMMAND,
+    HANDOFF_RESUME_COMMAND,
+    HANDOFF_SKILL_COMMAND,
+    HANDOFF_STATUS_COMMAND,
+    HANDOFF_SUPERSEDE_COMMAND,
+    HANDOFF_TEMPLATE_COMMAND,
     EXIT_HOUSE_COMMAND,
     PATH_COMMAND,
     PORTS_DISCOVER_COMMAND,
@@ -42,7 +51,11 @@ from .command_specs import (
     TAILSCALE_LOGIN_COMMAND,
     TAILSCALE_STATUS_COMMAND,
 )
-from .handoff import HANDOFF_TOOL_NAMES, call_handoff_tool, handoff_enabled
+from .handoff import (  # noqa: F401 - call_handoff_tool compatibility reexport
+    HANDOFF_TOOL_NAMES,
+    call_handoff_tool,
+    handoff_enabled,
+)
 from .mcp_catalog import (
     LEAN_MCP_TOOLS_ENABLED,
     PORTSKILL_TOOL_ALIASES,
@@ -92,6 +105,21 @@ SERVER_VERSION = __version__
 PROTOCOL_VERSION = "2024-11-05"
 
 PACKAGE_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+HANDOFF_COMMANDS = {
+    spec.mcp.name: spec
+    for spec in (
+        HANDOFF_STATUS_COMMAND,
+        HANDOFF_SKILL_COMMAND,
+        HANDOFF_TEMPLATE_COMMAND,
+        HANDOFF_LIST_COMMAND,
+        HANDOFF_RESOLVE_COMMAND,
+        HANDOFF_NEW_PATH_COMMAND,
+        HANDOFF_RESUME_COMMAND,
+        HANDOFF_SUPERSEDE_COMMAND,
+        HANDOFF_INSTALL_HELP_COMMAND,
+    )
+}
 
 
 def _load_settings_from_registry() -> dict:
@@ -612,7 +640,7 @@ def _call_tool(name: str, arguments: dict) -> dict:
         if not _tool_enabled(_mcp_tools_prefs(settings), name):
             body = {"ok": False, "error": "tool_disabled", "message": "Session Handoff is disabled. Enable it under Experimental (Beta)."}
             return {"content": [{"type": "text", "text": json.dumps(body)}], "structuredContent": body, "isError": True}
-        return call_handoff_tool(name, args, settings)
+        return execute_command(HANDOFF_COMMANDS[name], args)
     if name == "status":
         body = execute_command(STATUS_COMMAND, args)
         return {
