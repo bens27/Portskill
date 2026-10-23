@@ -125,27 +125,26 @@ class CallableDomainSlice8Tests(unittest.TestCase):
 
         cases = (
             (
-                "preset_save_result",
+                "portskill.server.preset_save_result",
                 {"action": "new-environment", "name": "empty"},
             ),
             (
-                "workspace_draft_set_result",
+                "portskill.workspace.workspace_draft_set_result",
                 {"action": "draft-stage", "rangeId": "r1", "command": "run"},
             ),
             (
-                "workspace_draft_save_result",
+                "portskill.workspace.workspace_draft_save_result",
                 {"action": "draft-save", "rangeId": "r1"},
             ),
             (
-                "workspace_draft_revert_result",
+                "portskill.workspace.workspace_draft_revert_result",
                 {"action": "draft-revert", "rangeId": "r1"},
             ),
         )
         for operation_name, body in cases:
             with self.subTest(action=body["action"]), mock.patch.object(
                 server, "run_cli", side_effect=AssertionError("subprocess used")
-            ), mock.patch.object(
-                server,
+            ), mock.patch(
                 operation_name,
                 side_effect=[
                     DomainError("registry_unavailable", "boom", exit_code=1),

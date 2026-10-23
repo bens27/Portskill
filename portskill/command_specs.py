@@ -80,6 +80,7 @@ class CLICommandBinding:
     description: str | _Missing = MISSING
     parent_destinations: tuple[str, ...] = ()
     parent_required: tuple[bool, ...] = ()
+    parent_helps: tuple[str | _Missing, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1023,6 +1024,252 @@ SETTINGS_SET_COMMAND = CommandSpec(
 )
 
 
+HISTORY_LIST_COMMAND = CommandSpec(
+    id="history_list",
+    handler=HandlerRef("portskill.history", "history_list_result"),
+    params=(
+        ParamSpec(
+            key="environment",
+            cli=CLIParamBinding(
+                flags=("--environment",),
+                default=None,
+                help="Env name (default: focused or __all__)",
+            ),
+            mcp=MCPParamBinding(
+                description="Env name (default: focused or __all__)"
+            ),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("history", "list"),
+        help="List Original + steps for an environment",
+        parent_destinations=("history_command",),
+        parent_required=(True,),
+        parent_helps=("Photoshop-style environment undo stack (per focused env)",),
+    ),
+    mcp=MCPCommandBinding(
+        name="history_list",
+        description=(
+            "List Photoshop-style environment history (Original + steps) for "
+            "focused or named env."
+        ),
+        catalog_position=26,
+    ),
+)
+
+
+HISTORY_RESTORE_COMMAND = CommandSpec(
+    id="history_restore",
+    handler=HandlerRef("portskill.history", "history_restore_result"),
+    params=(
+        ParamSpec(
+            key="index",
+            kind="integer",
+            cli=CLIParamBinding(flags=("--index",), type_name="integer", required=True),
+            mcp=MCPParamBinding(required=True, minimum=0, order=0),
+            ui=UIParamBinding(("index",), required=True, coercion="integer"),
+        ),
+        ParamSpec(
+            key="environment",
+            cli=CLIParamBinding(flags=("--environment",), default=None),
+            mcp=MCPParamBinding(order=1),
+            ui=UIParamBinding(
+                ("environment", "name"), coercion="stripped_or_none"
+            ),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("history", "restore"),
+        help="Restore snapshot at index (0=Original)",
+        parent_destinations=("history_command",),
+        parent_required=(True,),
+        parent_helps=("Photoshop-style environment undo stack (per focused env)",),
+    ),
+    mcp=MCPCommandBinding(
+        name="history_restore",
+        description=(
+            "Restore environment history snapshot at index (0 = Original / baseline)."
+        ),
+        catalog_position=27,
+    ),
+    ui=UICommandBinding(actions=("history-restore",), binder="declared_params"),
+)
+
+
+HISTORY_RESET_COMMAND = CommandSpec(
+    id="history_reset",
+    handler=HandlerRef("portskill.history", "history_reset_result"),
+    params=(
+        ParamSpec(
+            key="environment",
+            cli=CLIParamBinding(flags=("--environment",), default=None),
+            mcp=MCPParamBinding(),
+            ui=UIParamBinding(
+                ("environment", "name"), coercion="stripped_or_none"
+            ),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("history", "reset"),
+        help="Restore Original (index 0)",
+        parent_destinations=("history_command",),
+        parent_required=(True,),
+        parent_helps=("Photoshop-style environment undo stack (per focused env)",),
+    ),
+    mcp=MCPCommandBinding(
+        name="history_reset",
+        description="Reset environment to Original (history index 0).",
+        catalog_position=28,
+    ),
+    ui=UICommandBinding(actions=("history-reset",), binder="declared_params"),
+)
+
+
+HISTORY_CLEAR_COMMAND = CommandSpec(
+    id="history_clear",
+    handler=HandlerRef("portskill.history", "history_clear_result"),
+    params=(
+        ParamSpec(
+            key="environment",
+            cli=CLIParamBinding(flags=("--environment",), default=None),
+            ui=UIParamBinding(
+                ("environment", "name"), coercion="stripped_or_none"
+            ),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("history", "clear"),
+        help="Drop stack; keep live state; re-baseline",
+        parent_destinations=("history_command",),
+        parent_required=(True,),
+        parent_helps=("Photoshop-style environment undo stack (per focused env)",),
+    ),
+    ui=UICommandBinding(actions=("history-clear",), binder="declared_params"),
+)
+
+
+WORKSPACE_DRAFT_SET_COMMAND = CommandSpec(
+    id="workspace_draft_set",
+    handler=HandlerRef("portskill.workspace", "workspace_draft_set_result"),
+    params=(
+        ParamSpec(
+            key="range_id",
+            cli=CLIParamBinding(flags=("--range-id",), required=True),
+            ui=UIParamBinding(("rangeId",), required=True),
+        ),
+        ParamSpec(
+            key="start_script",
+            cli=CLIParamBinding(flags=("--start-script",), default=None),
+            ui=UIParamBinding(("startScript", "start_script")),
+        ),
+        ParamSpec(
+            key="stop_script",
+            cli=CLIParamBinding(flags=("--stop-script",), default=None),
+            ui=UIParamBinding(("stopScript", "stop_script")),
+        ),
+        ParamSpec(
+            key="command",
+            cli=CLIParamBinding(flags=("--command",), default=None),
+            ui=UIParamBinding(("command",)),
+        ),
+        ParamSpec(
+            key="cwd",
+            cli=CLIParamBinding(flags=("--cwd",), default=None),
+            ui=UIParamBinding(("cwd",)),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("workspace", "draft-set"),
+        help="Stage edit-mode fields for a range",
+        parent_destinations=("workspace_command",),
+        parent_required=(True,),
+        parent_helps=("Workspace draft edit-mode (Save/Revert metadata)",),
+    ),
+    ui=UICommandBinding(actions=("draft-stage",), binder="workspace_draft"),
+)
+
+
+WORKSPACE_DRAFT_SAVE_COMMAND = CommandSpec(
+    id="workspace_draft_save",
+    handler=HandlerRef("portskill.workspace", "workspace_draft_save_result"),
+    params=(
+        ParamSpec(
+            key="range_id",
+            cli=CLIParamBinding(
+                flags=("--range-id",),
+                default=None,
+                help="Apply only this range's draft (default: all)",
+            ),
+            ui=UIParamBinding(("rangeId",)),
+        ),
+        ParamSpec(
+            key="keep_edit_mode",
+            kind="boolean",
+            cli=CLIParamBinding(flags=("--keep-edit-mode",), action="store_true"),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("workspace", "draft-save"),
+        help="Persist draft metadata into registry",
+        parent_destinations=("workspace_command",),
+        parent_required=(True,),
+        parent_helps=("Workspace draft edit-mode (Save/Revert metadata)",),
+    ),
+    ui=UICommandBinding(actions=("draft-save",), binder="workspace_draft"),
+)
+
+
+WORKSPACE_DRAFT_REVERT_COMMAND = CommandSpec(
+    id="workspace_draft_revert",
+    handler=HandlerRef("portskill.workspace", "workspace_draft_revert_result"),
+    params=(
+        ParamSpec(
+            key="range_id",
+            cli=CLIParamBinding(
+                flags=("--range-id",),
+                default=None,
+                help="Clear only this range's draft (default: all)",
+            ),
+            ui=UIParamBinding(("rangeId",)),
+        ),
+        ParamSpec(
+            key="keep_edit_mode",
+            kind="boolean",
+            cli=CLIParamBinding(flags=("--keep-edit-mode",), action="store_true"),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("workspace", "draft-revert"),
+        help="Discard draft; restore last saved",
+        parent_destinations=("workspace_command",),
+        parent_required=(True,),
+        parent_helps=("Workspace draft edit-mode (Save/Revert metadata)",),
+    ),
+    ui=UICommandBinding(actions=("draft-revert",), binder="workspace_draft"),
+)
+
+
+WORKSPACE_EDIT_MODE_COMMAND = CommandSpec(
+    id="workspace_edit_mode",
+    handler=HandlerRef("portskill.workspace", "workspace_edit_mode_result"),
+    params=(
+        ParamSpec(
+            key="state",
+            cli=CLIParamBinding(
+                flags=("--state",), choices=("on", "off"), default="on"
+            ),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("workspace", "edit-mode"),
+        help="Enter/leave edit mode",
+        parent_destinations=("workspace_command",),
+        parent_required=(True,),
+        parent_helps=("Workspace draft edit-mode (Save/Revert metadata)",),
+    ),
+)
+
+
 COMMAND_SPECS = (
     ALLOCATE_COMMAND,
     ACTIVATE_COMMAND,
@@ -1049,6 +1296,14 @@ COMMAND_SPECS = (
     PRESET_CHECK_COMMAND,
     SETTINGS_GET_COMMAND,
     SETTINGS_SET_COMMAND,
+    HISTORY_LIST_COMMAND,
+    HISTORY_RESTORE_COMMAND,
+    HISTORY_RESET_COMMAND,
+    HISTORY_CLEAR_COMMAND,
+    WORKSPACE_DRAFT_SET_COMMAND,
+    WORKSPACE_DRAFT_SAVE_COMMAND,
+    WORKSPACE_DRAFT_REVERT_COMMAND,
+    WORKSPACE_EDIT_MODE_COMMAND,
 )
 
 

@@ -19,6 +19,9 @@ from .command_specs import (
     DOCTOR_COMMAND,
     ENVIRONMENT_EXPORT_COMMAND,
     ENVIRONMENT_IMPORT_COMMAND,
+    HISTORY_LIST_COMMAND,
+    HISTORY_RESET_COMMAND,
+    HISTORY_RESTORE_COMMAND,
     EXIT_HOUSE_COMMAND,
     PATH_COMMAND,
     PRESET_APPLY_COMMAND,
@@ -64,7 +67,6 @@ from .apply_defaults import apply_defaults_result  # noqa: F401 - compatibility 
 from .defaults import set_default_result  # noqa: F401 - compatibility reexport
 from .deactivate import deactivate_result  # noqa: F401 - compatibility reexport
 from .doctor import doctor_result  # noqa: F401 - compatibility reexport
-from .history import history_list_result, history_reset_result, history_restore_result
 from .settings import settings_get, settings_set  # noqa: F401 - compatibility reexports
 from .status import status_result  # noqa: F401 - compatibility reexport
 from .registry_mutations import (  # noqa: F401 - compatibility reexports
@@ -675,11 +677,11 @@ def _call_tool(name: str, arguments: dict) -> dict:
         }
     if name in ("history_list", "history_restore", "history_reset"):
         operation = {
-            "history_list": history_list_result,
-            "history_restore": history_restore_result,
-            "history_reset": history_reset_result,
+            "history_list": HISTORY_LIST_COMMAND,
+            "history_restore": HISTORY_RESTORE_COMMAND,
+            "history_reset": HISTORY_RESET_COMMAND,
         }[name]
-        body = operation(args)
+        body = execute_command(operation, args)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,

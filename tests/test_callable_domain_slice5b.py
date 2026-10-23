@@ -146,9 +146,9 @@ class CallableDomainSlice5BTests(unittest.TestCase):
         from portskill import server
 
         cases = (
-            ("portskill.server.history_restore_result", {"action": "history-restore", "index": 0}),
-            ("portskill.server.history_reset_result", {"action": "history-reset"}),
-            ("portskill.server.history_clear_result", {"action": "history-clear"}),
+            ("portskill.history.history_restore_result", {"action": "history-restore", "index": 0}),
+            ("portskill.history.history_reset_result", {"action": "history-reset"}),
+            ("portskill.history.history_clear_result", {"action": "history-clear"}),
             ("portskill.defaults.set_default_result", {
                 "action": "set-default",
                 "rangeId": "r1",

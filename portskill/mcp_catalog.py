@@ -10,6 +10,9 @@ from .command_specs import (
     DOCTOR_COMMAND,
     ENVIRONMENT_EXPORT_COMMAND,
     ENVIRONMENT_IMPORT_COMMAND,
+    HISTORY_LIST_COMMAND,
+    HISTORY_RESET_COMMAND,
+    HISTORY_RESTORE_COMMAND,
     EXIT_HOUSE_COMMAND,
     MISSING,
     PATH_COMMAND,
@@ -202,38 +205,9 @@ TOOL_DEFS = [
             },
         },
     },
-    {
-        "name": "history_list",
-        "description": "List Photoshop-style environment history (Original + steps) for focused or named env.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "environment": {"type": "string", "description": "Env name (default: focused or __all__)"},
-            },
-        },
-    },
-    {
-        "name": "history_restore",
-        "description": "Restore environment history snapshot at index (0 = Original / baseline).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "index": {"type": "integer", "minimum": 0},
-                "environment": {"type": "string"},
-            },
-            "required": ["index"],
-        },
-    },
-    {
-        "name": "history_reset",
-        "description": "Reset environment to Original (history index 0).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "environment": {"type": "string"},
-            },
-        },
-    },
+    _mcp_tool_definition(HISTORY_LIST_COMMAND),
+    _mcp_tool_definition(HISTORY_RESTORE_COMMAND),
+    _mcp_tool_definition(HISTORY_RESET_COMMAND),
     *HANDOFF_TOOL_DEFS,
 ]
 

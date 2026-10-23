@@ -40,7 +40,6 @@ from .domain import DomainError
 from .apply_defaults import apply_defaults_result  # noqa: F401 - compatibility reexport
 from .defaults import set_default_result, set_defaults_from_current_result  # noqa: F401 - compatibility reexports
 from .deactivate import deactivate_result
-from .history import history_clear_result, history_reset_result, history_restore_result
 from .network import (
     ALLOW_NON_LOOPBACK_FLAG,
     bind_host_warning,
@@ -118,11 +117,6 @@ from .webauthn import (
     revoke_http_session,
     session_cookie_header,
 )
-from .workspace import (
-    workspace_draft_revert_result,
-    workspace_draft_save_result,
-    workspace_draft_set_result,
-)
 
 
 def _build_ui_command_index() -> tuple[dict[str, CommandSpec], dict[str, str]]:
@@ -164,6 +158,10 @@ def _coerce_ui_integer_or_one(value):
         return 1
 
 
+def _coerce_ui_integer(value):
+    return int(value)
+
+
 def _coerce_ui_string_or_dot(value):
     return str(value or ".")
 
@@ -192,6 +190,7 @@ def _coerce_ui_environment_name(value):
 _UI_VALUE_COERCERS = {
     "identity": _coerce_ui_identity,
     "integer_or_one": _coerce_ui_integer_or_one,
+    "integer": _coerce_ui_integer,
     "string_or_dot": _coerce_ui_string_or_dot,
     "tailnet_mode_or_none": _coerce_ui_tailnet_mode_or_none,
     "stripped_or_none": _coerce_ui_stripped_or_none,
@@ -316,6 +315,39 @@ def _bind_ui_close_environment_tab(spec: CommandSpec, payload: dict) -> dict:
     return _settings_set_options(("--close-tab", payload["name"].strip()))
 
 
+def _bind_ui_workspace_draft(spec: CommandSpec, payload: dict) -> dict:
+    options = {}
+    for parameter in spec.params:
+        binding = parameter.ui
+        if binding is None:
+            continue
+        value = None
+        present = False
+        for field in binding.fields:
+            candidate = payload.get(field)
+            if isinstance(candidate, str):
+                value = candidate
+                present = True
+                break
+        if parameter.key == "range_id":
+            if not present or not value.strip():
+                if binding.required:
+                    raise ValueError("expected rangeId")
+                continue
+            value = value.strip()
+        elif not present:
+            continue
+        flag = parameter.cli.flags[0]
+        options[parameter.key] = _UI_VALUE_COERCERS[binding.coercion](
+            _legacy_cli_option_value(
+                flag,
+                value,
+                prog=f"portskill-cli workspace {spec.cli.path[-1]}",
+            )
+        )
+    return options
+
+
 _UI_PAYLOAD_BINDERS = {
     "allocate_body": _bind_ui_declared_params,
     "range_action": _bind_ui_declared_params,
@@ -339,6 +371,7 @@ _UI_PAYLOAD_BINDERS = {
     "handoff_skill_clear": _bind_ui_handoff_skill_clear,
     "open_environment_tab": _bind_ui_open_environment_tab,
     "close_environment_tab": _bind_ui_close_environment_tab,
+    "workspace_draft": _bind_ui_workspace_draft,
 }
 
 
@@ -4374,26 +4407,20 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             return 400, {"ok": False, "message": "expected project and rangeId"}
         return run_cli_action(project, range_id, action)
     if action == "history-restore":
-        index = body.get("index")
+        spec = UI_COMMAND_SPECS[action]
+        index_binding = next(param.ui for param in spec.params if param.key == "index")
+        index = _ui_field_value(index_binding, body)
         try:
             index = int(index)
         except (TypeError, ValueError):
             return 400, {"ok": False, "message": "expected index"}
-        env = body.get("environment") or body.get("name")
-        return _domain_cli_result(lambda: history_restore_result({
-            "index": index,
-            "environment": env.strip() if isinstance(env, str) and env.strip() else None,
-        }))
+        return _domain_cli_result(
+            lambda: _execute_ui_command(action, {**body, "index": index})
+        )
     if action == "history-reset":
-        env = body.get("environment") or body.get("name")
-        return _domain_cli_result(lambda: history_reset_result({
-            "environment": env.strip() if isinstance(env, str) and env.strip() else None,
-        }))
+        return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action == "history-clear":
-        env = body.get("environment") or body.get("name")
-        return _domain_cli_result(lambda: history_clear_result({
-            "environment": env.strip() if isinstance(env, str) and env.strip() else None,
-        }))
+        return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action == "set-default":
         range_id = body.get("rangeId")
         state = body.get("state")
@@ -4895,69 +4922,25 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         # Global edit-mode kept for CLI; UI no longer uses it.
         return 200, {"ok": True, "ignored": True, "message": "edit-mode is CLI-only; use per-card Edit"}
     if action == "draft-stage":
-        range_id = body.get("rangeId")
+        spec = UI_COMMAND_SPECS[action]
+        range_binding = next(
+            param.ui for param in spec.params if param.key == "range_id"
+        )
+        range_id = next(
+            (
+                body.get(field)
+                for field in range_binding.fields
+                if isinstance(body.get(field), str)
+            ),
+            None,
+        )
         if not isinstance(range_id, str) or not range_id.strip():
             return 400, {"ok": False, "message": "expected rangeId"}
-        mapping = [
-            ("startScript", "start_script", "--start-script"),
-            ("start_script", "start_script", "--start-script"),
-            ("stopScript", "stop_script", "--stop-script"),
-            ("stop_script", "stop_script", "--stop-script"),
-            ("command", "command", "--command"),
-            ("cwd", "cwd", "--cwd"),
-        ]
-
-        def stage_draft():
-            options = {"range_id": _legacy_cli_option_value(
-                "--range-id",
-                range_id.strip(),
-                prog="portskill-cli workspace draft-set",
-            )}
-            seen = set()
-            for key, option, flag in mapping:
-                if option in seen:
-                    continue
-                val = body.get(key)
-                if isinstance(val, str):
-                    options[option] = _legacy_cli_option_value(
-                        flag, val, prog="portskill-cli workspace draft-set"
-                    )
-                    seen.add(option)
-            return workspace_draft_set_result(options)
-
-        return _domain_cli_result(stage_draft)
+        return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action == "draft-save":
-        range_id = body.get("rangeId")
-
-        def save_draft():
-            parsed_range = (
-                _legacy_cli_option_value(
-                    "--range-id",
-                    range_id.strip(),
-                    prog="portskill-cli workspace draft-save",
-                )
-                if isinstance(range_id, str) and range_id.strip()
-                else None
-            )
-            return workspace_draft_save_result({"range_id": parsed_range})
-
-        return _domain_cli_result(save_draft)
+        return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action == "draft-revert":
-        range_id = body.get("rangeId")
-
-        def revert_draft():
-            parsed_range = (
-                _legacy_cli_option_value(
-                    "--range-id",
-                    range_id.strip(),
-                    prog="portskill-cli workspace draft-revert",
-                )
-                if isinstance(range_id, str) and range_id.strip()
-                else None
-            )
-            return workspace_draft_revert_result({"range_id": parsed_range})
-
-        return _domain_cli_result(revert_draft)
+        return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action in ("machine-list", "machine-add", "machine-remove"):
         return 400, {"ok": False, "message": "Remote machines — Coming soon"}
     return 400, {"ok": False, "message": f"unsupported action: {action}"}

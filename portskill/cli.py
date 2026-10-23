@@ -26,6 +26,10 @@ from .command_specs import (
     ENVIRONMENT_CHECK_COMMAND,
     ENVIRONMENT_EXPORT_COMMAND,
     ENVIRONMENT_IMPORT_COMMAND,
+    HISTORY_CLEAR_COMMAND,
+    HISTORY_LIST_COMMAND,
+    HISTORY_RESET_COMMAND,
+    HISTORY_RESTORE_COMMAND,
     MISSING,
     PATH_COMMAND,
     PRESET_APPLY_COMMAND,
@@ -43,21 +47,16 @@ from .command_specs import (
     START_COMMAND,
     STATUS_COMMAND,
     STOP_COMMAND,
+    WORKSPACE_DRAFT_REVERT_COMMAND,
+    WORKSPACE_DRAFT_SAVE_COMMAND,
+    WORKSPACE_DRAFT_SET_COMMAND,
+    WORKSPACE_EDIT_MODE_COMMAND,
 )
 from .command_runtime import execute_command
 from .defaults import set_default_result, set_defaults_from_current_result  # noqa: F401 - compatibility reexports
 from .deactivate import deactivate_result, item_matches_preset_service
 from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
-from .history import (
-    clear_history_stack,
-    history_list_payload,
-    history_clear_result,
-    history_list_result,
-    history_reset_result,
-    history_restore_result,
-    reset_history,
-    restore_history,
-)
+from .history import clear_history_stack, history_list_payload, reset_history, restore_history
 from .handoff import fetch_kit_result
 from .doctor import DOCTOR_FAIL_CLOSED_EXIT, DOCTOR_HARD_CHECKS
 from .domain import (
@@ -215,12 +214,6 @@ from .status import (
     observed_range_status,
     project_from_context,
     status_result,  # noqa: F401 - compatibility reexport
-)
-from .workspace import (
-    workspace_draft_revert_result,
-    workspace_draft_save_result,
-    workspace_draft_set_result,
-    workspace_edit_mode_result,
 )
 import copy
 import json
@@ -790,19 +783,19 @@ def cmd_tailscale_logout(args):
 
 
 def cmd_workspace_draft_set(args):
-    emit(workspace_draft_set_result(vars(args)))
+    emit(execute_command(WORKSPACE_DRAFT_SET_COMMAND, vars(args)))
 
 
 def cmd_workspace_draft_save(args):
-    emit(workspace_draft_save_result(vars(args)))
+    emit(execute_command(WORKSPACE_DRAFT_SAVE_COMMAND, vars(args)))
 
 
 def cmd_workspace_draft_revert(args):
-    emit(workspace_draft_revert_result(vars(args)))
+    emit(execute_command(WORKSPACE_DRAFT_REVERT_COMMAND, vars(args)))
 
 
 def cmd_workspace_edit_mode(args):
-    emit(workspace_edit_mode_result(vars(args)))
+    emit(execute_command(WORKSPACE_EDIT_MODE_COMMAND, vars(args)))
 
 
 def cmd_workspace(args):
@@ -851,22 +844,19 @@ def cmd_handoff_fetch(args):
 
 
 def cmd_history_list(args):
-    emit(history_list_result({"environment": getattr(args, "environment", None)}))
+    emit(execute_command(HISTORY_LIST_COMMAND, vars(args)))
 
 
 def cmd_history_restore(args):
-    emit(history_restore_result({
-        "environment": getattr(args, "environment", None),
-        "index": args.index,
-    }))
+    emit(execute_command(HISTORY_RESTORE_COMMAND, vars(args)))
 
 
 def cmd_history_reset(args):
-    emit(history_reset_result({"environment": getattr(args, "environment", None)}))
+    emit(execute_command(HISTORY_RESET_COMMAND, vars(args)))
 
 
 def cmd_history_clear(args):
-    emit(history_clear_result({"environment": getattr(args, "environment", None)}))
+    emit(execute_command(HISTORY_CLEAR_COMMAND, vars(args)))
 
 
 def cmd_history(args):
@@ -978,7 +968,12 @@ def _add_spec_cli_parser(subparsers, spec: CommandSpec, *, handler):
         if cached is not None:
             command_subparsers = cached
             continue
-        parent_parser = command_subparsers.add_parser(parent_name)
+        parent_kwargs = {}
+        if depth < len(binding.parent_helps):
+            parent_help = binding.parent_helps[depth]
+            if parent_help is not MISSING:
+                parent_kwargs["help"] = parent_help
+        parent_parser = command_subparsers.add_parser(parent_name, **parent_kwargs)
         destination = binding.parent_destinations[depth]
         required = binding.parent_required[depth]
         command_subparsers = parent_parser.add_subparsers(
@@ -1164,29 +1159,11 @@ def parser():
     )
     ts_serve_ps.set_defaults(func=cmd_tailscale)
 
-    workspace = subparsers.add_parser(
-        "workspace",
-        help="Workspace draft edit-mode (Save/Revert metadata)",
-    )
-    ws_sub = workspace.add_subparsers(dest="workspace_command", required=True)
-    ws_set = ws_sub.add_parser("draft-set", help="Stage edit-mode fields for a range")
-    ws_set.add_argument("--range-id", required=True)
-    ws_set.add_argument("--start-script", default=None)
-    ws_set.add_argument("--stop-script", default=None)
-    ws_set.add_argument("--command", default=None)
-    ws_set.add_argument("--cwd", default=None)
-    ws_set.set_defaults(func=cmd_workspace)
-    ws_save = ws_sub.add_parser("draft-save", help="Persist draft metadata into registry")
-    ws_save.add_argument("--range-id", default=None, help="Apply only this range's draft (default: all)")
-    ws_save.add_argument("--keep-edit-mode", action="store_true")
-    ws_save.set_defaults(func=cmd_workspace)
-    ws_revert = ws_sub.add_parser("draft-revert", help="Discard draft; restore last saved")
-    ws_revert.add_argument("--range-id", default=None, help="Clear only this range's draft (default: all)")
-    ws_revert.add_argument("--keep-edit-mode", action="store_true")
-    ws_revert.set_defaults(func=cmd_workspace)
-    ws_edit = ws_sub.add_parser("edit-mode", help="Enter/leave edit mode")
-    ws_edit.add_argument("--state", choices=["on", "off"], default="on")
-    ws_edit.set_defaults(func=cmd_workspace)
+    _add_spec_cli_parser(subparsers, WORKSPACE_DRAFT_SET_COMMAND, handler=cmd_workspace)
+    _add_spec_cli_parser(subparsers, WORKSPACE_DRAFT_SAVE_COMMAND, handler=cmd_workspace)
+    _add_spec_cli_parser(subparsers, WORKSPACE_DRAFT_REVERT_COMMAND, handler=cmd_workspace)
+    _add_spec_cli_parser(subparsers, WORKSPACE_EDIT_MODE_COMMAND, handler=cmd_workspace)
+    ws_sub = subparsers._portskill_spec_groups[("workspace",)]
     ws_cap = ws_sub.add_parser(
         "capture-defaults",
         help="Alias: set default_state from current active/inactive states",
@@ -1194,28 +1171,10 @@ def parser():
     ws_cap.add_argument("--environment", default=None, help="History env scope")
     ws_cap.set_defaults(func=cmd_workspace)
 
-    history = subparsers.add_parser(
-        "history",
-        help="Photoshop-style environment undo stack (per focused env)",
-    )
-    history_sub = history.add_subparsers(dest="history_command", required=True)
-
-    history_list = history_sub.add_parser("list", help="List Original + steps for an environment")
-    history_list.add_argument("--environment", default=None, help="Env name (default: focused or __all__)")
-    history_list.set_defaults(func=cmd_history)
-
-    history_restore = history_sub.add_parser("restore", help="Restore snapshot at index (0=Original)")
-    history_restore.add_argument("--index", type=int, required=True)
-    history_restore.add_argument("--environment", default=None)
-    history_restore.set_defaults(func=cmd_history)
-
-    history_reset = history_sub.add_parser("reset", help="Restore Original (index 0)")
-    history_reset.add_argument("--environment", default=None)
-    history_reset.set_defaults(func=cmd_history)
-
-    history_clear = history_sub.add_parser("clear", help="Drop stack; keep live state; re-baseline")
-    history_clear.add_argument("--environment", default=None)
-    history_clear.set_defaults(func=cmd_history)
+    _add_spec_cli_parser(subparsers, HISTORY_LIST_COMMAND, handler=cmd_history)
+    _add_spec_cli_parser(subparsers, HISTORY_RESTORE_COMMAND, handler=cmd_history)
+    _add_spec_cli_parser(subparsers, HISTORY_RESET_COMMAND, handler=cmd_history)
+    _add_spec_cli_parser(subparsers, HISTORY_CLEAR_COMMAND, handler=cmd_history)
 
 
     discover = subparsers.add_parser(
