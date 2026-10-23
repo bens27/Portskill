@@ -16,6 +16,8 @@ from .command_specs import (
     EXIT_HOUSE_COMMAND,
     MISSING,
     PATH_COMMAND,
+    PORTS_DISCOVER_COMMAND,
+    PORTS_IMPORT_COMMAND,
     PORTSKILL_TOOL_DESCRIPTION,
     PORTSKILL_TOOL_PITCH,
     PRESET_APPLY_COMMAND,
@@ -27,9 +29,12 @@ from .command_specs import (
     SET_DEFAULT_COMMAND,
     SETTINGS_GET_COMMAND,
     SETTINGS_SET_COMMAND,
+    SET_TAILNET_COMMAND,
     START_COMMAND,
     STATUS_COMMAND,
     STOP_COMMAND,
+    TAILSCALE_LOGIN_COMMAND,
+    TAILSCALE_STATUS_COMMAND,
     CommandSpec,
 )
 from .handoff import HANDOFF_TOOL_DEFS
@@ -130,81 +135,11 @@ TOOL_DEFS = [
     _mcp_tool_definition(PRESET_DELETE_COMMAND),
     _mcp_tool_definition(SETTINGS_GET_COMMAND),
     _mcp_tool_definition(SETTINGS_SET_COMMAND),
-    {
-        "name": "set_tailnet",
-        "description": "Set Tailscale mode for a range: serve|none|funnel. UI toggles Serve on/off; Funnel is CLI-only. Requires Browser Login when enabling serve/funnel.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "range_id": {"type": "string"},
-                "mode": {"type": "string", "enum": ["serve", "none", "funnel"]},
-                "project": {"type": "string"},
-            },
-            "required": ["range_id", "mode"],
-        },
-    },
-    {
-        "name": "tailscale_status",
-        "description": "Tailscale status JSON wrapper (BackendState, Self, chip Connected|Needs login|Binary missing).",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "tailscale_login",
-        "description": "Browser Login: harvest Tailscale auth URL, optionally open the system browser, poll until Connected.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "no_open": {"type": "boolean", "description": "If true, do not open the system browser"},
-                "wait": {"type": "integer", "description": "Seconds to poll for Connected (0 = return URL immediately)"},
-            },
-        },
-    },
-    {
-        "name": "ports_discover",
-        "description": "Poll local TCP listeners + Tailscale Serve mappings; diff against non-released registry ranges (missing vs claimed).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {},
-        },
-    },
-    {
-        "name": "ports_import",
-        "description": (
-            "Import missing listening/Serve ports into the workspace by claiming the exact start port "
-            "(allocate --start N; never silently reallocates from the 20xxx pool). "
-            "Tailnet mode serve only if already Serving or user opts in; default none. Never Funnel."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "ports": {
-                    "type": "array",
-                    "items": {"type": "integer"},
-                    "description": "Exact port numbers to import (preferred)",
-                },
-                "port": {
-                    "type": "integer",
-                    "description": "Single port alias when ports[] omitted",
-                },
-                "all_missing": {
-                    "type": "boolean",
-                    "description": "If true, import every missing discovery (use with care)",
-                },
-                "notes": {
-                    "type": "object",
-                    "additionalProperties": {"type": "string"},
-                    "description": "Optional map of port(string|int) -> note",
-                },
-                "note": {"type": "string", "description": "Note applied when importing a single port"},
-                "tailnet": {
-                    "type": "string",
-                    "enum": ["serve", "none"],
-                    "description": "serve|none (default: serve if already Serving, else none). Never Funnel.",
-                },
-                "project": {"type": "string", "description": "Project path (default: guess or .)"},
-            },
-        },
-    },
+    _mcp_tool_definition(SET_TAILNET_COMMAND),
+    _mcp_tool_definition(TAILSCALE_STATUS_COMMAND),
+    _mcp_tool_definition(TAILSCALE_LOGIN_COMMAND),
+    _mcp_tool_definition(PORTS_DISCOVER_COMMAND),
+    _mcp_tool_definition(PORTS_IMPORT_COMMAND),
     _mcp_tool_definition(HISTORY_LIST_COMMAND),
     _mcp_tool_definition(HISTORY_RESTORE_COMMAND),
     _mcp_tool_definition(HISTORY_RESET_COMMAND),

@@ -113,18 +113,24 @@ class CallableDomainSlice6Tests(unittest.TestCase):
         self.assertEqual(responses[99], {"jsonrpc": "2.0", "id": 99, "result": {}})
 
     def test_mcp_tailscale_login_needs_input_maps_to_error_envelope(self) -> None:
-        from portskill import mcp
-        from portskill.domain import DomainError
+        from portskill import mcp, tailscale_commands
 
-        needs = {"status": "needs_input", "reason": "tailscale_auth_pending", "needs_input": True,
-                 "auth_url": "https://login.example/x", "resume_hint": "tailscale login"}
+        needs_login = {
+            "state": "needs_login",
+            "logged_in": False,
+            "AuthURL": "https://login.example/x",
+        }
         with mock.patch.object(
             mcp, "run_cli", side_effect=AssertionError("subprocess used")
         ), mock.patch.object(
-            mcp, "tailscale_login_result",
-            side_effect=DomainError("tailscale_auth_pending", exit_code=3, payload=needs),
+            tailscale_commands, "probe_tailscale_status", return_value=needs_login
+        ) as probe, mock.patch.object(
+            tailscale_commands,
+            "obtain_tailscale_auth_url",
+            return_value=("https://login.example/x", []),
         ):
             result = mcp.call_tool("tailscale_login", {"no_open": True, "wait": 0})
+        self.assertEqual(probe.call_count, 2)
         self.assertTrue(result["isError"])
         body = result["structuredContent"]
         self.assertFalse(body["ok"])

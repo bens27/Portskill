@@ -32,6 +32,8 @@ from .command_specs import (
     HISTORY_RESTORE_COMMAND,
     MISSING,
     PATH_COMMAND,
+    PORTS_DISCOVER_COMMAND,
+    PORTS_IMPORT_COMMAND,
     PRESET_APPLY_COMMAND,
     PRESET_CHECK_COMMAND,
     PRESET_DELETE_COMMAND,
@@ -44,9 +46,14 @@ from .command_specs import (
     SET_DEFAULTS_FROM_CURRENT_COMMAND,
     SETTINGS_GET_COMMAND,
     SETTINGS_SET_COMMAND,
+    SET_TAILNET_COMMAND,
     START_COMMAND,
     STATUS_COMMAND,
     STOP_COMMAND,
+    TAILSCALE_LOGIN_COMMAND,
+    TAILSCALE_LOGOUT_COMMAND,
+    TAILSCALE_SERVE_PORTSKILL_COMMAND,
+    TAILSCALE_STATUS_COMMAND,
     WORKSPACE_DRAFT_REVERT_COMMAND,
     WORKSPACE_DRAFT_SAVE_COMMAND,
     WORKSPACE_DRAFT_SET_COMMAND,
@@ -749,37 +756,26 @@ def cmd_compat(args):
 
 def cmd_set_tailnet(args):
     """Update recorded tailnet mode; apply/tear down Serve when range is active."""
-    return set_tailnet_result({
-        "mode": args.mode,
-        "range_id": args.range_id,
-        "project": args.project,
-        "environment": getattr(args, "environment", None),
-    })
+    return execute_command(SET_TAILNET_COMMAND, vars(args))
 
 
 def cmd_tailscale_serve_portskill(args):
     """Serve (or stop serving) the Portskill listen port via Tailscale Serve — never Funnel."""
-    return serve_portskill_result({
-        "state": getattr(args, "state", None),
-        "no_persist": bool(getattr(args, "no_persist", False)),
-    })
+    return execute_command(TAILSCALE_SERVE_PORTSKILL_COMMAND, vars(args))
 
 
 def cmd_tailscale_status(args):
-    return tailscale_status_result()
+    return execute_command(TAILSCALE_STATUS_COMMAND, vars(args))
 
 
 def cmd_tailscale_login(args):
     """Browser Login flow; exit 3 with a needs-input payload when login is incomplete."""
-    return tailscale_login_result({
-        "no_open": bool(getattr(args, "no_open", False)),
-        "wait": getattr(args, "wait", None),
-    })
+    return execute_command(TAILSCALE_LOGIN_COMMAND, vars(args))
 
 
 def cmd_tailscale_logout(args):
     """Log out of Tailscale (CLI wrapper around `tailscale logout`)."""
-    return tailscale_logout_result()
+    return execute_command(TAILSCALE_LOGOUT_COMMAND, vars(args))
 
 
 def cmd_workspace_draft_set(args):
@@ -893,18 +889,12 @@ def cmd_status(args):
 
 def cmd_discover_ports(args):
     """Poll local listeners + Tailscale Serve; diff vs non-released registry ranges."""
-    return discover_ports_result()
+    return execute_command(PORTS_DISCOVER_COMMAND, vars(args))
 
 
 def cmd_discover_import(args):
     """Claim exact listening/Serve ports into the workspace via allocate --start N."""
-    return discover_import_result({
-        "port": getattr(args, "port", None),
-        "all_missing": bool(getattr(args, "all_missing", False)),
-        "tailnet": getattr(args, "tailnet", None),
-        "note": getattr(args, "note", None),
-        "project": getattr(args, "project", None),
-    })
+    return execute_command(PORTS_IMPORT_COMMAND, vars(args))
 
 
 def cmd_discover(args):
@@ -1101,63 +1091,13 @@ def parser():
     _add_spec_cli_parser(subparsers, SETTINGS_GET_COMMAND, handler=cmd_settings)
     _add_spec_cli_parser(subparsers, SETTINGS_SET_COMMAND, handler=cmd_settings)
 
-    set_tailnet = subparsers.add_parser(
-        "set-tailnet",
-        help="Set recorded Tailscale mode (serve|none|funnel); apply when range is active",
+    _add_spec_cli_parser(subparsers, SET_TAILNET_COMMAND, handler=cmd_set_tailnet)
+    _add_spec_cli_parser(subparsers, TAILSCALE_STATUS_COMMAND, handler=cmd_tailscale)
+    _add_spec_cli_parser(subparsers, TAILSCALE_LOGIN_COMMAND, handler=cmd_tailscale)
+    _add_spec_cli_parser(subparsers, TAILSCALE_LOGOUT_COMMAND, handler=cmd_tailscale)
+    _add_spec_cli_parser(
+        subparsers, TAILSCALE_SERVE_PORTSKILL_COMMAND, handler=cmd_tailscale
     )
-    set_tailnet.add_argument("--range-id", required=True)
-    set_tailnet.add_argument("--mode", required=True, choices=["serve", "none", "funnel"])
-    set_tailnet.add_argument("--project", default=None)
-    set_tailnet.add_argument("--environment", default=None, help="History env scope")
-    set_tailnet.set_defaults(func=cmd_set_tailnet)
-
-    tailscale = subparsers.add_parser(
-        "tailscale",
-        help="Tailscale helpers (status JSON, login). Funnel remains CLI --mode funnel.",
-    )
-    ts_sub = tailscale.add_subparsers(dest="tailscale_command", required=True)
-    ts_status = ts_sub.add_parser("status", help="Wrap tailscale status --json")
-    ts_status.set_defaults(func=cmd_tailscale)
-    ts_login = ts_sub.add_parser(
-        "login",
-        help="Browser Login: open Tailscale auth URL and poll until Connected",
-    )
-    ts_login.add_argument(
-        "--no-open",
-        action="store_true",
-        help="Do not open the system browser (still returns auth_url)",
-    )
-    ts_login.add_argument(
-        "--wait",
-        type=int,
-        default=90,
-        help="Seconds to poll status --json for BackendState Running (default 90)",
-    )
-    ts_login.set_defaults(func=cmd_tailscale)
-    ts_logout = ts_sub.add_parser(
-        "logout",
-        help="Log out of Tailscale (tailscale logout)",
-    )
-    ts_logout.set_defaults(func=cmd_tailscale)
-    ts_serve_ps = ts_sub.add_parser(
-        "serve-portskill",
-        help=(
-            "Tailscale Serve the Portskill listen port from listen.json (never Funnel). "
-            "New installs default off."
-        ),
-    )
-    ts_serve_ps.add_argument(
-        "--state",
-        choices=["on", "off", "status"],
-        default="status",
-        help="on=configure Serve, off=teardown, status=report (default)",
-    )
-    ts_serve_ps.add_argument(
-        "--no-persist",
-        action="store_true",
-        help="Do not write settings.serve_portskill_on_tailscale",
-    )
-    ts_serve_ps.set_defaults(func=cmd_tailscale)
 
     _add_spec_cli_parser(subparsers, WORKSPACE_DRAFT_SET_COMMAND, handler=cmd_workspace)
     _add_spec_cli_parser(subparsers, WORKSPACE_DRAFT_SAVE_COMMAND, handler=cmd_workspace)
@@ -1177,35 +1117,8 @@ def parser():
     _add_spec_cli_parser(subparsers, HISTORY_CLEAR_COMMAND, handler=cmd_history)
 
 
-    discover = subparsers.add_parser(
-        "discover",
-        help="Poll occupied local ports + Tailscale Serve; import missing into workspace",
-    )
-    discover_sub = discover.add_subparsers(dest="discover_command", required=True)
-    disc_ports = discover_sub.add_parser(
-        "ports",
-        help="JSON: listeners + serve mappings + missing vs registry",
-    )
-    disc_ports.set_defaults(func=cmd_discover)
-    disc_import = discover_sub.add_parser(
-        "import",
-        help="Claim exact port(s) via allocate --start N (never silent 20xxx realloc)",
-    )
-    disc_import.add_argument("--port", type=int, default=None, help="Exact start port to claim")
-    disc_import.add_argument(
-        "--all-missing",
-        action="store_true",
-        help="Import every missing discovery (use with care)",
-    )
-    disc_import.add_argument("--note", default=None)
-    disc_import.add_argument(
-        "--tailnet",
-        choices=["serve", "none"],
-        default=None,
-        help="serve|none (default: serve if already Serving, else none). Never Funnel.",
-    )
-    disc_import.add_argument("--project", default=None, help="Project path (default: guess or .)")
-    disc_import.set_defaults(func=cmd_discover)
+    _add_spec_cli_parser(subparsers, PORTS_DISCOVER_COMMAND, handler=cmd_discover)
+    _add_spec_cli_parser(subparsers, PORTS_IMPORT_COMMAND, handler=cmd_discover)
 
     machine = subparsers.add_parser(
         "machine",

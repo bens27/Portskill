@@ -1024,6 +1024,350 @@ SETTINGS_SET_COMMAND = CommandSpec(
 )
 
 
+SET_TAILNET_COMMAND = CommandSpec(
+    id="set_tailnet",
+    handler=HandlerRef("portskill.tailscale_commands", "set_tailnet_result"),
+    params=(
+        ParamSpec(
+            key="range_id",
+            cli=CLIParamBinding(flags=("--range-id",), required=True),
+            mcp=MCPParamBinding(required=True, order=0),
+            ui=UIParamBinding(("rangeId",), required=True),
+        ),
+        ParamSpec(
+            key="mode",
+            cli=CLIParamBinding(
+                flags=("--mode",),
+                required=True,
+                choices=("serve", "none", "funnel"),
+            ),
+            mcp=MCPParamBinding(
+                required=True,
+                enum=("serve", "none", "funnel"),
+                order=1,
+            ),
+            ui=UIParamBinding(("mode",), required=True),
+        ),
+        ParamSpec(
+            key="project",
+            cli=CLIParamBinding(flags=("--project",), default=None),
+            mcp=MCPParamBinding(order=2),
+            ui=UIParamBinding(
+                ("project",), coercion="nonempty_string_or_none"
+            ),
+        ),
+        ParamSpec(
+            key="environment",
+            cli=CLIParamBinding(
+                flags=("--environment",),
+                default=None,
+                help="History env scope",
+            ),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("set-tailnet",),
+        help=(
+            "Set recorded Tailscale mode (serve|none|funnel); apply when range "
+            "is active"
+        ),
+    ),
+    mcp=MCPCommandBinding(
+        name="set_tailnet",
+        description=(
+            "Set Tailscale mode for a range: serve|none|funnel. UI toggles Serve "
+            "on/off; Funnel is CLI-only. Requires Browser Login when enabling "
+            "serve/funnel."
+        ),
+        catalog_position=21,
+    ),
+    ui=UICommandBinding(actions=("set-tailnet",), binder="declared_params"),
+)
+
+
+TAILSCALE_STATUS_COMMAND = CommandSpec(
+    id="tailscale_status",
+    handler=HandlerRef(
+        "portskill.tailscale_commands", "tailscale_status_result", binder="none"
+    ),
+    cli=CLICommandBinding(
+        path=("tailscale", "status"),
+        help="Wrap tailscale status --json",
+        parent_destinations=("tailscale_command",),
+        parent_required=(True,),
+        parent_helps=(
+            "Tailscale helpers (status JSON, login). Funnel remains CLI --mode funnel.",
+        ),
+    ),
+    mcp=MCPCommandBinding(
+        name="tailscale_status",
+        description=(
+            "Tailscale status JSON wrapper (BackendState, Self, chip "
+            "Connected|Needs login|Binary missing)."
+        ),
+        catalog_position=22,
+    ),
+    ui=UICommandBinding(actions=("tailscale-status",), binder="none"),
+)
+
+
+TAILSCALE_LOGIN_COMMAND = CommandSpec(
+    id="tailscale_login",
+    handler=HandlerRef("portskill.tailscale_commands", "tailscale_login_result"),
+    params=(
+        ParamSpec(
+            key="no_open",
+            kind="boolean",
+            cli=CLIParamBinding(
+                flags=("--no-open",),
+                action="store_true",
+                help="Do not open the system browser (still returns auth_url)",
+            ),
+            mcp=MCPParamBinding(
+                description="If true, do not open the system browser", order=0
+            ),
+        ),
+        ParamSpec(
+            key="wait",
+            kind="integer",
+            cli=CLIParamBinding(
+                flags=("--wait",),
+                type_name="integer",
+                default=90,
+                help=(
+                    "Seconds to poll status --json for BackendState Running "
+                    "(default 90)"
+                ),
+            ),
+            mcp=MCPParamBinding(
+                description="Seconds to poll for Connected (0 = return URL immediately)",
+                order=1,
+            ),
+            ui=UIParamBinding(("wait",), coercion="integer_or_zero"),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("tailscale", "login"),
+        help="Browser Login: open Tailscale auth URL and poll until Connected",
+        parent_destinations=("tailscale_command",),
+        parent_required=(True,),
+        parent_helps=(
+            "Tailscale helpers (status JSON, login). Funnel remains CLI --mode funnel.",
+        ),
+    ),
+    mcp=MCPCommandBinding(
+        name="tailscale_login",
+        description=(
+            "Browser Login: harvest Tailscale auth URL, optionally open the system "
+            "browser, poll until Connected."
+        ),
+        catalog_position=23,
+    ),
+    ui=UICommandBinding(actions=("tailscale-login",), binder="tailscale_login"),
+)
+
+
+TAILSCALE_LOGOUT_COMMAND = CommandSpec(
+    id="tailscale_logout",
+    handler=HandlerRef(
+        "portskill.tailscale_commands", "tailscale_logout_result", binder="none"
+    ),
+    cli=CLICommandBinding(
+        path=("tailscale", "logout"),
+        help="Log out of Tailscale (tailscale logout)",
+        parent_destinations=("tailscale_command",),
+        parent_required=(True,),
+        parent_helps=(
+            "Tailscale helpers (status JSON, login). Funnel remains CLI --mode funnel.",
+        ),
+    ),
+    ui=UICommandBinding(actions=("tailscale-logout",), binder="none"),
+)
+
+
+TAILSCALE_SERVE_PORTSKILL_COMMAND = CommandSpec(
+    id="tailscale_serve_portskill",
+    handler=HandlerRef("portskill.tailscale_commands", "serve_portskill_result"),
+    params=(
+        ParamSpec(
+            key="state",
+            cli=CLIParamBinding(
+                flags=("--state",),
+                choices=("on", "off", "status"),
+                default="status",
+                help="on=configure Serve, off=teardown, status=report (default)",
+            ),
+            ui=UIParamBinding(("enabled",), coercion="parsed_boolean"),
+        ),
+        ParamSpec(
+            key="no_persist",
+            kind="boolean",
+            cli=CLIParamBinding(
+                flags=("--no-persist",),
+                action="store_true",
+                help="Do not write settings.serve_portskill_on_tailscale",
+            ),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("tailscale", "serve-portskill"),
+        help=(
+            "Tailscale Serve the Portskill listen port from listen.json (never "
+            "Funnel). New installs default off."
+        ),
+        parent_destinations=("tailscale_command",),
+        parent_required=(True,),
+        parent_helps=(
+            "Tailscale helpers (status JSON, login). Funnel remains CLI --mode funnel.",
+        ),
+    ),
+    ui=UICommandBinding(actions=("serve-portskill",), binder="serve_portskill"),
+)
+
+
+PORTS_DISCOVER_COMMAND = CommandSpec(
+    id="ports_discover",
+    handler=HandlerRef(
+        "portskill.port_discovery", "discover_ports_result", binder="none"
+    ),
+    cli=CLICommandBinding(
+        path=("discover", "ports"),
+        help="JSON: listeners + serve mappings + missing vs registry",
+        parent_destinations=("discover_command",),
+        parent_required=(True,),
+        parent_helps=(
+            "Poll occupied local ports + Tailscale Serve; import missing into workspace",
+        ),
+    ),
+    mcp=MCPCommandBinding(
+        name="ports_discover",
+        description=(
+            "Poll local TCP listeners + Tailscale Serve mappings; diff against "
+            "non-released registry ranges (missing vs claimed)."
+        ),
+        catalog_position=24,
+    ),
+    ui=UICommandBinding(actions=("discover-ports",), binder="none"),
+)
+
+
+PORTS_IMPORT_COMMAND = CommandSpec(
+    id="ports_import",
+    handler=HandlerRef("portskill.port_discovery", "discover_import_result"),
+    params=(
+        ParamSpec(
+            key="ports",
+            kind="array",
+            mcp=MCPParamBinding(
+                items_type="integer",
+                description="Exact port numbers to import (preferred)",
+                order=0,
+            ),
+            ui=UIParamBinding(("ports",)),
+        ),
+        ParamSpec(
+            key="port",
+            kind="integer",
+            cli=CLIParamBinding(
+                flags=("--port",),
+                type_name="integer",
+                default=None,
+                help="Exact start port to claim",
+            ),
+            mcp=MCPParamBinding(
+                description="Single port alias when ports[] omitted", order=1
+            ),
+            ui=UIParamBinding(("port",)),
+        ),
+        ParamSpec(
+            key="all_missing",
+            kind="boolean",
+            cli=CLIParamBinding(
+                flags=("--all-missing",),
+                action="store_true",
+                help="Import every missing discovery (use with care)",
+            ),
+            mcp=MCPParamBinding(
+                description="If true, import every missing discovery (use with care)",
+                order=2,
+            ),
+            ui=UIParamBinding(("all_missing",)),
+        ),
+        ParamSpec(
+            key="notes",
+            kind="object",
+            mcp=MCPParamBinding(
+                additional_properties_type="string",
+                description="Optional map of port(string|int) -> note",
+                order=3,
+            ),
+            ui=UIParamBinding(("notes",)),
+        ),
+        ParamSpec(
+            key="note",
+            cli=CLIParamBinding(flags=("--note",), default=None),
+            mcp=MCPParamBinding(
+                description="Note applied when importing a single port", order=4
+            ),
+            ui=UIParamBinding(("note",), coercion="stripped_or_none"),
+        ),
+        ParamSpec(
+            key="tailnet",
+            cli=CLIParamBinding(
+                flags=("--tailnet",),
+                choices=("serve", "none"),
+                default=None,
+                help=(
+                    "serve|none (default: serve if already Serving, else none). "
+                    "Never Funnel."
+                ),
+            ),
+            mcp=MCPParamBinding(
+                enum=("serve", "none"),
+                description=(
+                    "serve|none (default: serve if already Serving, else none). "
+                    "Never Funnel."
+                ),
+                order=5,
+            ),
+            ui=UIParamBinding(("tailnet",), coercion="import_tailnet_mode"),
+        ),
+        ParamSpec(
+            key="project",
+            cli=CLIParamBinding(
+                flags=("--project",),
+                default=None,
+                help="Project path (default: guess or .)",
+            ),
+            mcp=MCPParamBinding(
+                description="Project path (default: guess or .)", order=6
+            ),
+            ui=UIParamBinding(("project",)),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("discover", "import"),
+        help="Claim exact port(s) via allocate --start N (never silent 20xxx realloc)",
+        parent_destinations=("discover_command",),
+        parent_required=(True,),
+        parent_helps=(
+            "Poll occupied local ports + Tailscale Serve; import missing into workspace",
+        ),
+    ),
+    mcp=MCPCommandBinding(
+        name="ports_import",
+        description=(
+            "Import missing listening/Serve ports into the workspace by claiming "
+            "the exact start port (allocate --start N; never silently reallocates "
+            "from the 20xxx pool). Tailnet mode serve only if already Serving or "
+            "user opts in; default none. Never Funnel."
+        ),
+        catalog_position=25,
+    ),
+    ui=UICommandBinding(actions=("discover-import",), binder="declared_params"),
+)
+
+
 HISTORY_LIST_COMMAND = CommandSpec(
     id="history_list",
     handler=HandlerRef("portskill.history", "history_list_result"),
@@ -1296,6 +1640,13 @@ COMMAND_SPECS = (
     PRESET_CHECK_COMMAND,
     SETTINGS_GET_COMMAND,
     SETTINGS_SET_COMMAND,
+    SET_TAILNET_COMMAND,
+    TAILSCALE_STATUS_COMMAND,
+    TAILSCALE_LOGIN_COMMAND,
+    TAILSCALE_LOGOUT_COMMAND,
+    TAILSCALE_SERVE_PORTSKILL_COMMAND,
+    PORTS_DISCOVER_COMMAND,
+    PORTS_IMPORT_COMMAND,
     HISTORY_LIST_COMMAND,
     HISTORY_RESTORE_COMMAND,
     HISTORY_RESET_COMMAND,

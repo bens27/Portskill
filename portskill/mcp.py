@@ -24,6 +24,8 @@ from .command_specs import (
     HISTORY_RESTORE_COMMAND,
     EXIT_HOUSE_COMMAND,
     PATH_COMMAND,
+    PORTS_DISCOVER_COMMAND,
+    PORTS_IMPORT_COMMAND,
     PRESET_APPLY_COMMAND,
     PRESET_DELETE_COMMAND,
     PRESET_LIST_COMMAND,
@@ -33,9 +35,12 @@ from .command_specs import (
     SET_DEFAULT_COMMAND,
     SETTINGS_GET_COMMAND,
     SETTINGS_SET_COMMAND,
+    SET_TAILNET_COMMAND,
     START_COMMAND,
     STATUS_COMMAND,
     STOP_COMMAND,
+    TAILSCALE_LOGIN_COMMAND,
+    TAILSCALE_STATUS_COMMAND,
 )
 from .handoff import HANDOFF_TOOL_NAMES, call_handoff_tool, handoff_enabled
 from .mcp_catalog import (
@@ -581,15 +586,14 @@ def _tailscale_or_discovery_options(name: str, args: dict) -> dict:
 
 def _tailscale_or_discovery_result(name: str, options: dict) -> dict:
     """In-process Tailscale / discovery tools; DomainError maps via tool_error_result."""
-    if name == "set_tailnet":
-        return set_tailnet_result(options)
-    if name == "tailscale_status":
-        return tailscale_status_result()
-    if name == "tailscale_login":
-        return tailscale_login_result(options)
-    if name == "ports_discover":
-        return discover_ports_result()
-    return discover_import_result(options)
+    spec = {
+        "set_tailnet": SET_TAILNET_COMMAND,
+        "tailscale_status": TAILSCALE_STATUS_COMMAND,
+        "tailscale_login": TAILSCALE_LOGIN_COMMAND,
+        "ports_discover": PORTS_DISCOVER_COMMAND,
+        "ports_import": PORTS_IMPORT_COMMAND,
+    }[name]
+    return execute_command(spec, options)
 
 
 def call_tool(name: str, arguments: dict) -> dict:

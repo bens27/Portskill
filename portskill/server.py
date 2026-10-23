@@ -34,7 +34,18 @@ from .auth import (
     http_bearer_matches,
 )
 from .command_runtime import execute_command
-from .command_specs import ALLOCATE_COMMAND, COMMAND_SPECS, CommandSpec
+from .command_specs import (
+    ALLOCATE_COMMAND,
+    COMMAND_SPECS,
+    PORTS_DISCOVER_COMMAND,
+    PORTS_IMPORT_COMMAND,
+    SET_TAILNET_COMMAND,
+    TAILSCALE_LOGIN_COMMAND,
+    TAILSCALE_LOGOUT_COMMAND,
+    TAILSCALE_SERVE_PORTSKILL_COMMAND,
+    TAILSCALE_STATUS_COMMAND,
+    CommandSpec,
+)
 from .http_cookies import HTTP_AUTH_COOKIE_NAME, HTTP_SESSION_COOKIE_NAME
 from .domain import DomainError
 from .apply_defaults import apply_defaults_result  # noqa: F401 - compatibility reexport
@@ -162,6 +173,13 @@ def _coerce_ui_integer(value):
     return int(value)
 
 
+def _coerce_ui_integer_or_zero(value):
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _coerce_ui_string_or_dot(value):
     return str(value or ".")
 
@@ -178,6 +196,16 @@ def _coerce_ui_boolean(value):
     return bool(value)
 
 
+def _coerce_ui_parsed_boolean(value):
+    return parse_bool(value)
+
+
+def _coerce_ui_import_tailnet_mode(value):
+    if value == "funnel":
+        return "none"
+    return value if value in ("serve", "none") else None
+
+
 def _coerce_ui_nonempty_string_or_none(value):
     return value if isinstance(value, str) and value else None
 
@@ -191,10 +219,13 @@ _UI_VALUE_COERCERS = {
     "identity": _coerce_ui_identity,
     "integer_or_one": _coerce_ui_integer_or_one,
     "integer": _coerce_ui_integer,
+    "integer_or_zero": _coerce_ui_integer_or_zero,
     "string_or_dot": _coerce_ui_string_or_dot,
     "tailnet_mode_or_none": _coerce_ui_tailnet_mode_or_none,
     "stripped_or_none": _coerce_ui_stripped_or_none,
     "boolean": _coerce_ui_boolean,
+    "parsed_boolean": _coerce_ui_parsed_boolean,
+    "import_tailnet_mode": _coerce_ui_import_tailnet_mode,
     "nonempty_string_or_none": _coerce_ui_nonempty_string_or_none,
     "environment_name": _coerce_ui_environment_name,
 }
@@ -210,6 +241,11 @@ def _bind_ui_declared_params(spec: CommandSpec, payload: dict) -> dict:
             _ui_field_value(binding, payload)
         )
     return options
+
+
+def _ui_raw_declared_value(spec: CommandSpec, key: str, payload: dict):
+    parameter = next(parameter for parameter in spec.params if parameter.key == key)
+    return _ui_field_value(parameter.ui, payload)
 
 
 def _bind_ui_settings_save(spec: CommandSpec, payload: dict) -> dict:
@@ -245,6 +281,19 @@ def _bind_ui_fixed(spec: CommandSpec, payload: dict, **fixed) -> dict:
 def _bind_ui_reclaim_start(spec: CommandSpec, payload: dict) -> dict:
     options = _bind_ui_declared_params(spec, payload)
     options["reclaim"] = True
+    return options
+
+
+def _bind_ui_tailscale_login(spec: CommandSpec, payload: dict) -> dict:
+    options = _bind_ui_declared_params(spec, payload)
+    # The browser UI opens the auth URL itself.
+    options["no_open"] = True
+    return options
+
+
+def _bind_ui_serve_portskill(spec: CommandSpec, payload: dict) -> dict:
+    options = _bind_ui_declared_params(spec, payload)
+    options["state"] = "on" if options["state"] else "off"
     return options
 
 
@@ -354,6 +403,8 @@ _UI_PAYLOAD_BINDERS = {
     "declared_params": _bind_ui_declared_params,
     "none": _bind_ui_none,
     "reclaim_start": _bind_ui_reclaim_start,
+    "tailscale_login": _bind_ui_tailscale_login,
+    "serve_portskill": _bind_ui_serve_portskill,
     "start_all": lambda spec, payload: _bind_ui_fixed(spec, payload, all=True),
     "stop_all": lambda spec, payload: _bind_ui_fixed(spec, payload, all=True),
     "stop_non_default": lambda spec, payload: _bind_ui_fixed(spec, payload, non_default=True),
@@ -375,13 +426,18 @@ _UI_PAYLOAD_BINDERS = {
 }
 
 
-def _execute_ui_command(action: str, payload: dict) -> dict:
+def _ui_command_options(action: str, payload: dict) -> tuple[CommandSpec, dict]:
     try:
         spec = UI_COMMAND_SPECS[action]
         binder = _UI_PAYLOAD_BINDERS[UI_COMMAND_BINDERS[action]]
     except KeyError as exc:
         raise ValueError(f"unknown declarative UI command action: {action}") from exc
-    return execute_command(spec, binder(spec, payload))
+    return spec, binder(spec, payload)
+
+
+def _execute_ui_command(action: str, payload: dict) -> dict:
+    spec, options = _ui_command_options(action, payload)
+    return execute_command(spec, options)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765  # historical default only; launch prefers sticky/allocate
@@ -1903,7 +1959,9 @@ document.getElementById('use-bearer').addEventListener('click', async function()
 
 def probe_tailscale_for_ui() -> dict:
     """Best-effort Tailscale chip for the toolbar (Connected / Needs login / Binary missing)."""
-    code, payload, _stdout = _run_domain(tailscale_status_result)
+    code, payload, _stdout = _run_domain(
+        lambda: execute_command(TAILSCALE_STATUS_COMMAND, {})
+    )
     if isinstance(payload, dict):
         chip = payload.get("chip") or ("Connected" if payload.get("logged_in") else "Needs login")
         state = payload.get("state") or ("connected" if payload.get("logged_in") else "needs_login")
@@ -4515,9 +4573,12 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             )
 
     if action == "serve-portskill":
-        enabled = parse_bool(body.get("enabled"))
+        serve_spec, serve_options = _ui_command_options(action, body)
+        enabled = serve_options["state"] == "on"
         if enabled:
-            code, payload, stdout = _run_domain(tailscale_status_result)
+            code, payload, stdout = _run_domain(
+                lambda: execute_command(TAILSCALE_STATUS_COMMAND, {})
+            )
             logged = isinstance(payload, dict) and payload.get("logged_in")
             if isinstance(payload, dict) and payload.get("state") == "binary_missing":
                 return 400, {
@@ -4541,7 +4602,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
                     "pendingPortskillServe": True,
                 }
         code, payload, stdout = _run_domain(
-            lambda: serve_portskill_result({"state": "on" if enabled else "off"})
+            lambda: execute_command(serve_spec, serve_options)
         )
         if code != 0:
             body_out = {"ok": False, "result": payload}
@@ -4723,13 +4784,19 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         return 422, result
 
     if action == "set-tailnet":
-        project = body.get("project")
-        range_id = body.get("rangeId")
-        mode = body.get("mode")
+        set_tailnet_spec, set_tailnet_options = _ui_command_options(action, body)
+        pending_project = _ui_raw_declared_value(
+            set_tailnet_spec, "project", body
+        )
+        project = set_tailnet_options.get("project")
+        range_id = set_tailnet_options.get("range_id")
+        mode = set_tailnet_options.get("mode")
         if not isinstance(range_id, str) or mode not in ("serve", "none", "funnel"):
             return 400, {"ok": False, "message": "expected rangeId and mode serve|none|funnel"}
         if mode == "serve":
-            code, payload, stdout = _run_domain(tailscale_status_result)
+            code, payload, stdout = _run_domain(
+                lambda: execute_command(TAILSCALE_STATUS_COMMAND, {})
+            )
             logged = isinstance(payload, dict) and payload.get("logged_in")
             if not logged:
                 msg = "Tailscale Serve needs Browser Login first."
@@ -4742,30 +4809,27 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
                     "message": msg,
                     "chip": (payload or {}).get("chip") if isinstance(payload, dict) else "Needs login",
                     "auth_url": (payload or {}).get("AuthURL") if isinstance(payload, dict) else None,
-                    "pendingServe": {"project": project, "rangeId": range_id},
+                    "pendingServe": {
+                        "project": pending_project,
+                        "rangeId": range_id,
+                    },
                 }
-        code, payload, stdout = _run_domain(lambda: set_tailnet_result({
-            "mode": mode,
-            "range_id": range_id,
-            "project": project if isinstance(project, str) and project else None,
-        }))
+        code, payload, stdout = _run_domain(
+            lambda: execute_command(set_tailnet_spec, set_tailnet_options)
+        )
         return _cli_result(code, payload, stdout)
     if action == "tailscale-status":
-        code, payload, stdout = _run_domain(tailscale_status_result)
+        code, payload, stdout = _run_domain(
+            lambda: _execute_ui_command(action, body)
+        )
         if isinstance(payload, dict):
             body_out = dict(payload)
             body_out["ok"] = True
             return 0, body_out
         return _cli_result(code, payload, stdout)
     if action == "tailscale-login":
-        wait = body.get("wait", 0)
-        try:
-            wait = int(wait)
-        except (TypeError, ValueError):
-            wait = 0
-        # UI opens the URL itself; avoid a double-open from the domain flow.
         code, payload, stdout = _run_domain(
-            lambda: tailscale_login_result({"wait": wait, "no_open": True})
+            lambda: _execute_ui_command(action, body)
         )
         if isinstance(payload, dict):
             out = dict(payload)
@@ -4824,19 +4888,21 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         )
         return _cli_result(code, payload, stdout)
     if action == "discover-ports":
-        code, payload, stdout = _run_domain(discover_ports_result)
+        code, payload, stdout = _run_domain(
+            lambda: _execute_ui_command(action, body)
+        )
         if code == 0 and isinstance(payload, dict):
             out = dict(payload)
             out["ok"] = True
             return 0, out
         return _cli_result(code, payload, stdout)
     if action == "discover-import":
-        ports = body.get("ports")
-        notes = body.get("notes") if isinstance(body.get("notes"), dict) else {}
-        tailnet = body.get("tailnet")
-        if tailnet == "funnel":
-            tailnet = "none"
-        project = body.get("project")
+        import_spec, import_options = _ui_command_options(action, body)
+        ports = import_options.get("ports")
+        notes = import_options.get("notes")
+        notes = notes if isinstance(notes, dict) else {}
+        tailnet = import_options.get("tailnet")
+        project = import_options.get("project")
         results_imported = []
         results_skipped = []
         results_errors = []
@@ -4847,32 +4913,42 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
                     port_list.append(int(p))
                 except (TypeError, ValueError):
                     results_errors.append({"port": p, "reason": "invalid_port"})
-        elif body.get("port") is not None:
+        elif import_options.get("port") is not None:
             try:
-                port_list.append(int(body.get("port")))
+                port_list.append(int(import_options["port"]))
             except (TypeError, ValueError):
                 return 400, {"ok": False, "message": "invalid port"}
-        elif body.get("all_missing"):
-            code, payload, stdout = _run_domain(lambda: discover_import_result({
+        elif import_options.get("all_missing"):
+            code, payload, stdout = _run_domain(lambda: execute_command(import_spec, {
                 "all_missing": True,
-                "tailnet": tailnet if tailnet in ("serve", "none") else None,
-                "project": str(project) if isinstance(project, str) and project.strip() else None,
+                "tailnet": tailnet,
+                "project": (
+                    str(project)
+                    if isinstance(project, str) and project.strip()
+                    else None
+                ),
             }))
             return _cli_result(code, payload, stdout)
         else:
             return 400, {"ok": False, "message": "expected ports[] or port"}
         for p in port_list:
             if isinstance(notes, dict):
-                note = notes.get(str(p)) or notes.get(p) or body.get("note")
+                note = notes.get(str(p)) or notes.get(p) or import_options.get("note")
             else:
-                note = body.get("note")
+                note = import_options.get("note")
             options = {
                 "port": p,
                 "note": note.strip() if isinstance(note, str) and note.strip() else None,
-                "tailnet": tailnet if tailnet in ("serve", "none") else None,
-                "project": project.strip() if isinstance(project, str) and project.strip() else None,
+                "tailnet": tailnet,
+                "project": (
+                    project.strip()
+                    if isinstance(project, str) and project.strip()
+                    else None
+                ),
             }
-            code, payload, stdout = _run_domain(lambda options=options: discover_import_result(options))
+            code, payload, stdout = _run_domain(
+                lambda options=options: execute_command(import_spec, options)
+            )
             if code == 0 and isinstance(payload, dict):
                 results_imported.extend(payload.get("imported") or [])
                 results_skipped.extend(payload.get("skipped") or [])
@@ -4912,7 +4988,9 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
     if action in ("set-defaults-from-current", "capture-defaults"):
         return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action == "tailscale-logout":
-        code, payload, stdout = _run_domain(tailscale_logout_result)
+        code, payload, stdout = _run_domain(
+            lambda: _execute_ui_command(action, body)
+        )
         if isinstance(payload, dict):
             out = dict(payload)
             out["ok"] = code == 0
