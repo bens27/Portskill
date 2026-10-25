@@ -18,6 +18,7 @@ import signal
 import socket
 import sys
 import time
+import traceback
 import uuid
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -4978,6 +4979,7 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
     def _send(self, status: int, body: bytes, content_type: str, extra_headers=None) -> None:
+        self._response_started = True
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -5437,15 +5439,26 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(action, str) or not action.strip():
             self._send_json(400, {"ok": False, "message": "expected action"})
             return
-        code, result = dispatch_ui_action(body)
-        if code == 0:
-            self._send_json(200, result)
-        elif code == 400:
-            self._send_json(400, result)
-        elif code == 401:
-            self._send_json(401, result)
-        else:
-            self._send_json(422, result)
+        # Handler instances are reused across keep-alive requests: reset per request.
+        self._response_started = False
+        try:
+            code, result = dispatch_ui_action(body)
+            if code == 0:
+                self._send_json(200, result)
+            elif code == 400:
+                self._send_json(400, result)
+            elif code == 401:
+                self._send_json(401, result)
+            else:
+                self._send_json(422, result)
+        except Exception:  # noqa: BLE001 - last resort: answer instead of dropping the connection
+            # The traceback goes to the server log only, never to the client.
+            sys.stderr.write(f"portskill: action {action.strip()!r} failed\n{traceback.format_exc()}")
+            if self._response_started:
+                # Headers or body already went out: a second response would corrupt the stream.
+                self.close_connection = True
+                return
+            self._send_json(500, {"ok": False, "message": "internal error while running the action"})
 
 
 # Back-compat alias used by older imports
