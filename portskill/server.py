@@ -1083,6 +1083,7 @@ def build_view(raw: dict) -> dict:
                     "allocationState": observed["allocation_state"],
                     "reachable": observed["reachable"],
                     "processAlive": observed.get("process_alive"),
+                    "drift": observed.get("drift"),
                     "note": item.get("note"),
                     "tailnetMode": tailnet,
                     "pid": lifecycle.get("pid"),
@@ -1307,6 +1308,8 @@ def range_html(project: str, rng: dict) -> str:
             f'Also used in: {esc(label)}</span>'
         )
     is_remote = machine_kind == "remote"
+    drift = rng.get("drift") or {}
+    drift_title = f' title="{esc(drift["hint"])}"' if drift.get("hint") else ""
     can_start = state != "active" and rng.get("processAlive") is not True and not is_remote
     can_stop = (state == "active" or rng.get("processAlive") is True) and not is_remote
     can_release = state != "released"
@@ -1341,7 +1344,7 @@ def range_html(project: str, rng: dict) -> str:
   <div class="pr-range-top">
     {port_link}
     {local_link}
-    <span class="badge {state_class(state)}" data-service-status>{esc(state)}</span>
+    <span class="badge {state_class(state)}" data-service-status{drift_title}>{esc(state)}</span>
     {tailnet_badge}
     {machine_badge}
     <span class="badge {default_badge}">{esc(default_label)}</span>
@@ -2819,6 +2822,7 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
     <button type="button" class="pr-btn" data-pr-action="stop-non-default" title="Stop running services that are Default Off">Stop non-Default Services</button>
     <button type="button" class="pr-btn" data-pr-action="stop-all" title="Stop all active services">Stop All Services</button>
     <button type="button" class="pr-btn" data-pr-action="set-defaults-from-current" title="Set Default On for active services, Default Off otherwise">Set current states as default</button>
+    <button type="button" class="pr-btn" data-pr-action="sweep" title="List services recorded as active whose process is gone and whose ports have no listener, then optionally release them">Sweep stale ranges…</button>
     <div class="pr-wsp-section">Workspace</div>
     <button type="button" class="pr-btn" data-pr-action="compat-check" title="Check port conflicts in this workspace">Check compatibility</button>
     <button type="button" class="pr-btn" data-pr-action="export-environment">Export Workspace</button>
@@ -2906,7 +2910,7 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
         if(badge){{
           badge.textContent=service.state;
           badge.className='badge '+(service.state==='active'?'b-exec':service.state==='reserved'?'b-onb':'b-term');
-          badge.title=service.reachable===false?'No local listener is responding':'';
+          badge.title=service.drift&&service.drift.hint?service.drift.hint:(service.reachable===false?'No local listener is responding':'');
         }}
         var local=service.state!=='unknown';
         var start=card.querySelector('[data-pr-action="start"]');
@@ -3426,6 +3430,34 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
       }} else {{
         prompt('Copy', text);
       }}
+      return;
+    }}
+    if(action==='sweep'){{
+      btn.disabled=true;
+      var sweepLine=function(r){{return (r.project||'')+' :'+(r.start==null?r.range_id:r.start)+' ('+(r.reasons||[]).join(', ')+')';}};
+      postAction({{action:'sweep'}}).then(function(result){{
+        btn.disabled=false;
+        if(!result.ok){{handleResult(result,btn);return;}}
+        var report=result.body.result||{{}};
+        var stale=report.stale||[];
+        var skipped=report.skipped||[];
+        var text='';
+        if(skipped.length)text+='\\n\\nDrifted but not stale (left alone):\\n'+skipped.map(sweepLine).join('\\n');
+        if(!stale.length){{alert('No stale ranges.'+text);return;}}
+        if(!confirm('Stale ranges (active, no live process, no listener on any port):\\n'+stale.map(sweepLine).join('\\n')+text+'\\n\\nRelease these '+stale.length+' range(s)?'))return;
+        btn.disabled=true;
+        // Release exactly the ranges shown; anything that changed since is skipped server-side.
+        var ids=stale.map(function(r){{return r.range_id;}});
+        postAction({{action:'sweep', release:true, range_ids:ids}}).then(function(next){{
+          var done=(next.ok&&next.body&&next.body.result)||{{}};
+          var notes=[];
+          if((done.failed||[]).length)notes.push('Not released (teardown failed, range kept reserved):\\n'+done.failed.map(function(r){{return sweepLine(r)+': '+(r.message||r.reason);}}).join('\\n'));
+          var moved=(done.skipped||[]).filter(function(r){{return r.skip_reason;}});
+          if(moved.length)notes.push('Skipped (changed since the review):\\n'+moved.map(function(r){{return sweepLine(r)+' '+r.skip_reason;}}).join('\\n'));
+          if(notes.length)alert(notes.join('\\n\\n'));
+          handleResult(next,btn);
+        }}).catch(function(){{btn.disabled=false;}});
+      }}).catch(function(){{btn.disabled=false;}});
       return;
     }}
     if(action==='handoff-codex-install'){{
@@ -4350,6 +4382,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         "capture-defaults",
         "draft-save",
         "draft-revert",
+        "sweep",
     ):
         return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action == "set-default":

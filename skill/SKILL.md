@@ -49,6 +49,28 @@ unused range and refuses a live process with `process_still_running`.
 for an externally started service. Repeated start/stop calls are safe no-ops
 when already in the requested state.
 
+## Drift and stale ranges
+
+`status` never repairs the registry. Every range carries `drift` (null when
+consistent); a local active range whose recorded state disagrees with reality
+gets `{reasons, stale, hint}`, and the result gets a top-level `drift` summary.
+Reasons: `pid_dead` (recorded process gone), `no_pid` (nothing tracked),
+`port_unbound` (no listener on any port of the range), `untracked_listener`
+(recorded process gone but something still holds a port). A range is `stale`
+when it has no live process and no listener on any port of the range, on any
+local address.
+
+Run `sweep` (MCP `sweep`) to review drift; it is read-only. To free stale
+ranges, pass the reviewed ids: `sweep --release --range-id ID` (repeatable; MCP
+`release: true, range_ids: [...]`). Release re-checks under the registry lock
+and frees only ranges that are confirmed and still stale; others are listed in
+`skipped` with `skip_reason` `no_longer_stale` or `not_confirmed`. Without
+range ids, release frees every currently stale range. Freeing uses the normal
+stop teardown; a failed Tailscale teardown leaves the range reserved (see
+`failed`/`warnings`). `untracked_listener` is never swept: stop that process or
+restart the service. A live process with no listener: check
+`.portskill/start.log` or restart.
+
 ## Exposure and missing input
 
 Use `--tailnet serve` for private Tailnet exposure, `funnel` for public internet

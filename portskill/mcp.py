@@ -45,6 +45,7 @@ from .command_specs import (
     START_COMMAND,
     STATUS_COMMAND,
     STOP_COMMAND,
+    SWEEP_COMMAND,
     TAILSCALE_LOGIN_COMMAND,
     TAILSCALE_STATUS_COMMAND,
 )
@@ -416,6 +417,13 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "history_reset": HISTORY_RESET_COMMAND,
         }[name]
         body = execute_command(operation, args)
+        return {
+            "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
+            "structuredContent": body,
+            "isError": False,
+        }
+    if name == "sweep":
+        body = execute_command(SWEEP_COMMAND, args)
         return {
             "content": [{"type": "text", "text": json.dumps(body, sort_keys=True)}],
             "structuredContent": body,

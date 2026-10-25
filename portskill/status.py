@@ -7,6 +7,7 @@ import socket
 from typing import Any
 
 from .domain import DomainError, pid_alive, pool_bounds_from_environment
+from .drift import drift_summary, range_drift
 from .registry import CorruptRegistryError, mutate_registry
 from .registry_domain import (
     default_machines,
@@ -40,7 +41,7 @@ def project_from_context(project: str | None, *, cwd: pathlib.Path | None = None
 def observed_range_status(registry: dict, item: dict) -> dict[str, Any]:
     """Keep saved allocation state separate from a current local TCP observation."""
     saved = item.get("state") or "reserved"
-    result: dict[str, Any] = {"allocation_state": saved, "state": saved, "reachable": None}
+    result: dict[str, Any] = {"allocation_state": saved, "state": saved, "reachable": None, "drift": None}
     if saved == "released":
         return result
     if is_remote_range(registry, item):
@@ -60,6 +61,8 @@ def observed_range_status(registry: dict, item: dict) -> dict[str, Any]:
     pid = (item.get("lifecycle") or {}).get("pid")
     result["process_alive"] = pid_alive(pid) if pid else None
     result["state"] = "active" if reachable and result["process_alive"] is not False else "inactive"
+    # Drift uses a bind test over the whole range; ``reachable`` stays a display probe.
+    result["drift"] = range_drift(item)
     return result
 
 
@@ -120,13 +123,18 @@ def status_result(project: str | None = None) -> dict[str, Any]:
                 for item in (entry.get("ranges") or [])
             ]
             projects_out[project_path] = {**entry, "ranges": project_ranges}
-        return {
+        payload = {
             "status": "ok",
             "ranges": enriched,
             "pool": registry["pool"],
             "projects": projects_out,
             "machines": normalize_machines(registry.get("machines")),
-        }, False, []
+        }
+        summary = drift_summary(enriched)
+        if summary["count"]:
+            # Only when something drifted (each range always carries "drift").
+            payload["drift"] = summary
+        return payload, False, []
 
     try:
         return mutate_registry(

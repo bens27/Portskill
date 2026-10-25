@@ -1878,6 +1878,74 @@ SCHEDULE_COMMAND = CommandSpec(
 )
 
 
+SWEEP_COMMAND = CommandSpec(
+    id="sweep",
+    handler=HandlerRef("portskill.sweep", "sweep_result"),
+    params=(
+        ParamSpec(
+            key="project",
+            cli=CLIParamBinding(flags=("--project",), default=None, help="Only sweep this project"),
+            mcp=MCPParamBinding(description="Optional project filter", order=0),
+            ui=UIParamBinding(("project",), coercion="nonempty_string_or_none"),
+        ),
+        ParamSpec(
+            key="release",
+            kind="boolean",
+            cli=CLIParamBinding(
+                flags=("--release",),
+                action="store_true",
+                help="Release the stale ranges (default only reports them)",
+            ),
+            mcp=MCPParamBinding(
+                description="If true, release the stale ranges through the normal teardown (default false: report only)",
+                order=1,
+            ),
+            ui=UIParamBinding(("release",), coercion="boolean"),
+        ),
+        ParamSpec(
+            key="range_ids",
+            kind="array",
+            cli=CLIParamBinding(
+                flags=("--range-id",),
+                dest="range_ids",
+                metavar="ID",
+                action="append",
+                default=None,
+                help="With --release, free only these reviewed ranges (repeatable)",
+            ),
+            mcp=MCPParamBinding(
+                items_type="string",
+                description=(
+                    "With release, free only these reviewed range ids; a confirmed range that is no "
+                    "longer stale, or a stale range not listed, is skipped (default: all currently stale)"
+                ),
+                order=2,
+            ),
+            ui=UIParamBinding(("range_ids",)),
+        ),
+        ParamSpec(
+            key="environment",
+            cli=CLIParamBinding(flags=("--environment",), default=None, help="History env scope"),
+        ),
+    ),
+    cli=CLICommandBinding(
+        path=("sweep",),
+        help="List stale ranges (active, no live process, no listener on its ports); --release frees them",
+    ),
+    mcp=MCPCommandBinding(
+        name="sweep",
+        description=(
+            "List stale ranges: saved active, but no tracked process is alive and no listener on "
+            "any port of the range. Read-only unless release=true, which frees them through the "
+            "normal teardown (Tailscale mappings removed; a failed teardown leaves the range "
+            "reserved). Pass range_ids to free only the ranges you reviewed."
+        ),
+        catalog_position=38,
+    ),
+    ui=UICommandBinding(actions=("sweep",), binder="declared_params"),
+)
+
+
 MACHINE_COMMAND = CommandSpec(
     id="machine",
     handler=HandlerRef("portskill.machine_commands", "machine_unavailable_result"),
@@ -1955,6 +2023,7 @@ COMMAND_SPECS = (
     HANDOFF_SUPERSEDE_COMMAND,
     HANDOFF_INSTALL_HELP_COMMAND,
     SCHEDULE_COMMAND,
+    SWEEP_COMMAND,
     MACHINE_COMMAND,
 )
 

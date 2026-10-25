@@ -42,6 +42,7 @@ from .command_specs import (
     START_COMMAND,
     STATUS_COMMAND,
     STOP_COMMAND,
+    SWEEP_COMMAND,
     TAILSCALE_LOGIN_COMMAND,
     TAILSCALE_STATUS_COMMAND,
     CommandSpec,
@@ -160,6 +161,7 @@ TOOL_DEFS = [
     _mcp_tool_definition(HANDOFF_RESUME_COMMAND),
     _mcp_tool_definition(HANDOFF_SUPERSEDE_COMMAND),
     _mcp_tool_definition(HANDOFF_INSTALL_HELP_COMMAND),
+    _mcp_tool_definition(SWEEP_COMMAND),
 ]
 
 

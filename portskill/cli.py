@@ -56,6 +56,7 @@ from .command_specs import (
     START_COMMAND,
     STATUS_COMMAND,
     STOP_COMMAND,
+    SWEEP_COMMAND,
     TAILSCALE_LOGIN_COMMAND,
     TAILSCALE_LOGOUT_COMMAND,
     TAILSCALE_SERVE_PORTSKILL_COMMAND,
@@ -820,6 +821,11 @@ def cmd_status(args):
     return execute_command(STATUS_COMMAND, vars(args))
 
 
+def cmd_sweep(args):
+    """Report stale ranges; release them only with --release."""
+    return execute_command(SWEEP_COMMAND, vars(args))
+
+
 def cmd_discover_ports(args):
     """Poll local listeners + Tailscale Serve; diff vs non-released registry ranges."""
     return execute_command(PORTS_DISCOVER_COMMAND, vars(args))
@@ -956,6 +962,8 @@ def parser():
     _add_spec_cli_parser(subparsers, PATH_COMMAND, handler=cmd_path)
 
     _add_spec_cli_parser(subparsers, DOCTOR_COMMAND, handler=cmd_doctor)
+
+    _add_spec_cli_parser(subparsers, SWEEP_COMMAND, handler=cmd_sweep)
 
     _add_spec_cli_parser(subparsers, HANDOFF_FETCH_COMMAND, handler=cmd_handoff_fetch)
     _add_spec_cli_parser(subparsers, HTTP_AUTH_SHOW_COMMAND, handler=cmd_http_auth)

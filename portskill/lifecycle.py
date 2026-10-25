@@ -415,8 +415,11 @@ def park_item_for_exit(item, project, also_release=False):
     """
     if item.get("state") == "released":
         return True, {"action": "already_released", "range": item}
-    life = lifecycle(item)
     has_live = range_has_live_process(item)
+    # lifecycle() swaps in a fresh normalized dict on every call, so take the
+    # reference only after the liveness probe (which calls it too); otherwise
+    # the writes below land on an orphaned dict and the dead pid stays recorded.
+    life = lifecycle(item)
     if has_live:
         run_stop_script_if_ready(item, project)
         terminate_lifecycle_processes(item)

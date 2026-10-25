@@ -54,6 +54,7 @@ failed. Inspect reported failures: corrupt state, missing runtime files, a
 recorded listener that is unreachable, an unauthorized non-loopback bind, or an
 invalid enabled/explicitly configured Handoff kit. Placeholder hooks and absent
 Tailscale are informational, so doctor success alone does not prove a service ran.
+For registry drift (dead pids, unbound ports), use `status` and `sweep`.
 
 Tailscale binary resolution: `PORTSKILL_TAILSCALE_BIN`, then `tailscale` on
 PATH, then the Mac app bundle. Remote-machine management is not implemented.
