@@ -2,42 +2,21 @@
 from __future__ import annotations
 
 from .compatibility import enforce_compatibility
-from .domain import utc_now
-from .lifecycle import (
-    lifecycle,
-    pid_alive,
-    process_group_pids,
-    range_has_live_process,
-    release_item,
-    run_stop_script_if_ready,
-    terminate_lifecycle_processes,
-)
+from .lifecycle import park_item_for_exit, range_has_live_process
 from .process_commands import iter_project_ranges, start_item_for_apply
 from .registry_domain import normalize_default_state, project_path
 from .registry_operations import locked_registry
 from .sessions import begin_active_session
-from .domain import DomainError
 
 
 def stop_item_for_apply(item, project):
-    if item.get("state") == "released":
-        return True, {"action": "already_released", "range": item}
-    life = lifecycle(item)
-    has_live_pid = pid_alive(life.get("pid"))
-    live_group_pids = process_group_pids(life.get("pgid")) if life.get("pgid") else []
-    has_live_group = any(pid_alive(pid) for pid in live_group_pids)
-    if has_live_pid or has_live_group:
-        run_stop_script_if_ready(item, project)
-        terminate_lifecycle_processes(item)
-    else:
-        life["pid"] = None
-        life["pgid"] = None
-        life["stopped_at"] = utc_now()
-    try:
-        release_item(item)
-    except DomainError:
-        return False, {"reason": "release_failed", "range_id": item.get("id")}
-    return True, {"action": "stopped", "range": item}
+    """Stop and release, with stop's teardown contract: on a Tailscale teardown
+    failure the process is gone, so the range is parked reserved with the
+    mapping recorded and the detail carries it so the caller commits."""
+    ok, detail = park_item_for_exit(item, project, also_release=True)
+    if ok and detail.get("action") == "stopped_released":
+        detail = {**detail, "action": "stopped"}
+    return ok, detail
 
 
 def apply_defaults_result(
@@ -99,6 +78,8 @@ def apply_defaults_result(
                     changed.add(project)
                 else:
                     errors.append(detail)
+                    if "range" in detail:
+                        changed.add(project)
         payload = {
             "status": "ok",
             "started": started,

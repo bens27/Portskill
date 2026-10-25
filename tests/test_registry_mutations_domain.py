@@ -263,7 +263,8 @@ class RegistryMutationDomainTests(unittest.TestCase):
         from portskill import lifecycle as lifecycle_module
         from portskill.domain import DomainError
 
-        for also_release, helper in ((False, "run_tailnet"), (True, "release_item")):
+        # Both policies tear the mapping down through run_tailnet first.
+        for also_release in (False, True):
             with self.subTest(also_release=also_release), IsolatedConfig() as iso:
                 project = str((iso.root / "project").resolve())
                 (iso.root / "project").mkdir()
@@ -275,7 +276,7 @@ class RegistryMutationDomainTests(unittest.TestCase):
                     ranges.append(item)
                 iso.write_registry({"projects": {project: {"ranges": ranges}}})
                 with mock.patch.object(
-                    lifecycle_module, helper, side_effect=[DomainError("tailnet_command_failed", "failed"), None]
+                    lifecycle_module, "run_tailnet", side_effect=[DomainError("tailnet_command_failed", "failed"), None]
                 ):
                     payload = cli.run_exit_house(also_release=also_release, clear_session=False)
                 self.assertEqual(payload["error_count"], 1)

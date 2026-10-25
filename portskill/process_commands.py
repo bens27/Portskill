@@ -288,10 +288,16 @@ def stop_result(options: dict) -> dict:
             return {"status": "ok", "range": item, "also_release": resolve_stop_also_release(registry, override=override), "action": "already_released"}, []
         also = resolve_stop_also_release(registry, override=override)
         ok, detail = park_item_for_exit(item, project, also_release=also)
-        if not ok:
+        if not ok and "range" not in detail:
             raise DomainError(detail.get("reason") or "stop_failed", detail.get("message") or "stop failed", **{k:v for k,v in detail.items() if k not in ("reason","message")})
         maybe_push_history(registry, "stop", history)
+        if not ok:
+            # The process is gone: commit the parked range, report after the lock.
+            return {**detail, "status": "error", "also_release": also}, [project]
         payload={"status":"ok","range":item,"also_release":also}
         if detail.get("action"): payload["action"]=detail["action"]
         return payload,[project]
-    return locked_registry(mutate)
+    payload = locked_registry(mutate)
+    if payload.get("status") == "error":
+        raise DomainError(payload.get("reason") or "stop_failed", payload.get("message"), payload=payload)
+    return payload

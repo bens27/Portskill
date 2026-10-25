@@ -155,6 +155,7 @@ class PathRestartTailnetTests(unittest.TestCase):
         self.assertIn("--tailnet serve", payload["prompt"])
         self.assertEqual(payload["options"], ["serve", "none"])
         self.assertEqual(payload["resume_hint"], "--tailnet")
+        self.assertNotIn("source", payload["tailnet_restore"])
         stored = self._registry_range(before["id"])
         self.assertEqual(stored["tailnet"]["mode"], "serve")
         self.assertIsNone(stored["tailnet"]["configured_at"])
@@ -246,6 +247,8 @@ class PathRestartTailnetTests(unittest.TestCase):
         self.assertEqual(self.ts.calls(), [f"serve --bg --https={port} localhost:{port} off"])
         stored = self._registry_range(before["id"])
         self.assertIsNone(stored["tailnet"]["configured_at"])
+        # The stop phase marks the mapping pending; declining clears it after.
+        self.assertNotIn("restore_pending", stored["tailnet"])
 
     def test_restart_unapplied_recorded_mode_is_not_restored(self) -> None:
         # Login skipped at start: mode recorded, never configured.
@@ -263,10 +266,9 @@ class PathRestartTailnetTests(unittest.TestCase):
         payload = parse_cli_json(restarted)
         self.assertNotIn("tailnet_restore", payload)
         self.assertEqual(_phase(payload.get("skipped"), "tailnet")["reason"], "not_requested")
-        port = stored["start"]
-        # Characterization, flips on purpose with ticket 9f2e4ada:
-        # park_item_for_exit sends `off` though this mapping was never configured.
-        self.assertEqual(self.ts.calls(), [f"serve --bg --https={port} localhost:{port} off"])
+        # Never configured, so the stop phase sends no `off` either.
+        self.assertEqual(self.ts.calls(), [])
+        self.assertNotIn("restore_pending", self._registry_range(rid)["tailnet"])
 
     def test_plain_stop_default_releases(self) -> None:
         before = self._start_served()
@@ -289,8 +291,144 @@ class PathRestartTailnetTests(unittest.TestCase):
         self.assertEqual(stored["state"], "reserved")
         self.assertEqual(stored["tailnet"]["mode"], "serve")
         self.assertIsNone(stored["tailnet"]["configured_at"])
+        self.assertIs(stored["tailnet"]["restore_pending"], True)
         port = before["start"]
         self.assertEqual(self.ts.calls(), [f"serve --bg --https={port} localhost:{port} off"])
+
+    def test_stop_without_release_then_restart_restores(self) -> None:
+        self._cli(["settings", "set", "--stop-also-release", "off"])
+        before = self._start_served()
+        stopped = self._path("stop")
+        self.assertEqual(stopped.returncode, 0, stopped.stderr or stopped.stdout)
+        self.ts.reset_calls()
+        restarted = self._path("restart")
+        self._assert_reapplied(restarted, before["id"], before["start"])
+        self.assertEqual(self._registry_range(before["id"])["state"], "active")
+        # Already torn down by the stop: the restart's stop phase sends no `off`.
+        port = before["start"]
+        self.assertNotIn(f"serve --bg --https={port} localhost:{port} off", self.ts.calls())
+
+    def test_release_drops_pending_restore(self) -> None:
+        before = self._restart_logged_out()
+        self.ts.set_state("Running")
+        stopped = self._path("stop")
+        self.assertEqual(stopped.returncode, 0, stopped.stderr or stopped.stdout)
+        stored = self._registry_range(before["id"])
+        self.assertEqual(stored["state"], "released")
+        self.assertNotIn("restore_pending", stored["tailnet"])
+
+    def _assert_parked_after_teardown_failure(self, before: dict, old_pid: int) -> dict:
+        stored = self._registry_range(before["id"])
+        self.assertEqual(stored["state"], "reserved")
+        self.assertIsNone(stored["lifecycle"]["pid"])
+        self.assertTrue(stored["lifecycle"]["stopped_at"])
+        self.assertEqual(stored["tailnet"]["mode"], "serve")
+        # The mapping may still be live: it stays recorded.
+        self.assertEqual(stored["tailnet"]["configured_at"], before["tailnet"]["configured_at"])
+        self.assertIs(stored["tailnet"]["restore_pending"], True)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(int(old_pid), 0)
+        return stored
+
+    def _stop_with_failing_teardown(self, *argv: str, release: bool):
+        if not release:
+            self._cli(["settings", "set", "--stop-also-release", "off"])
+        before = self._start_served()
+        old_pid = self._registry_range(before["id"])["lifecycle"]["pid"]
+        self.ts.set_exit(1)
+        if argv:
+            proc = self._cli([*argv, before["id"], "--project", str(self.proj)])
+        else:
+            proc = self._path("stop")
+        self.assertEqual(proc.returncode, 2, proc.stderr or proc.stdout)
+        text = (proc.stdout or "") + (proc.stderr or "")
+        self.assertIn("tailnet_teardown_failed", text)
+        self.assertIn("could not remove the Tailscale serve mapping", text)
+        port = before["start"]
+        self.assertIn(f"serve --bg --https={port} localhost:{port} off", self.ts.calls())
+        return self._assert_parked_after_teardown_failure(before, old_pid)
+
+    def test_path_stop_teardown_failure_commits_reserved(self) -> None:
+        self._stop_with_failing_teardown(release=False)
+
+    def test_path_stop_release_teardown_failure_does_not_release(self) -> None:
+        self._stop_with_failing_teardown(release=True)
+
+    def test_stop_range_id_teardown_failure_commits_reserved(self) -> None:
+        self._stop_with_failing_teardown("stop", "--range-id", release=True)
+
+    def _assert_declined_and_torn_down(self, proc, before: dict, mode: str) -> None:
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        port = before["start"]
+        self.assertIn(f"serve --bg --https={port} localhost:{port} off", self.ts.calls())
+        stored = self._registry_range(before["id"])
+        self.assertEqual(stored["tailnet"]["mode"], mode)
+        self.assertIsNone(stored["tailnet"]["configured_at"])
+        self.assertNotIn("restore_pending", stored["tailnet"])
+        # A later plain restart leaves the declined mapping off.
+        self.ts.reset_calls()
+        again = self._path("restart")
+        self.assertEqual(again.returncode, 0, again.stderr or again.stdout)
+        self.assertNotIn("tailnet_restore", parse_cli_json(again))
+        self.assertEqual(self.ts.calls(), [])
+
+    def test_restart_none_after_failed_stop_teardown_takes_mapping_down(self) -> None:
+        self._stop_with_failing_teardown(release=False)
+        before = self._registry_range(self._only_range_id())
+        self.ts.set_exit(0)
+        self.ts.reset_calls()
+        declined = self._path("restart", "--tailnet", "none")
+        # Torn down by the decline itself: the mapping record is cleared.
+        self._assert_declined_and_torn_down(declined, before, "none")
+
+    def test_restart_none_with_failing_tailscale_warns_then_retry_takes_down(self) -> None:
+        before = self._start_served()
+        old_pid = self._registry_range(before["id"])["lifecycle"]["pid"]
+        self.ts.set_exit(1)
+        declined = self._path("restart", "--tailnet", "none")
+        self.assertEqual(declined.returncode, 0, declined.stderr or declined.stdout)
+        payload = parse_cli_json(declined)
+        self.assertEqual(
+            [w["reason"] for w in payload["warnings"]],
+            ["tailnet_teardown_failed", "tailnet_teardown_failed"],
+        )
+        self.assertIn("--tailnet none", payload["warnings"][1]["message"])
+        stored = self._registry_range(before["id"])
+        self.assertEqual(stored["state"], "active")
+        self.assertNotEqual(stored["lifecycle"]["pid"], old_pid)
+        # Possibly still live: kept recorded, but no pending restore.
+        self.assertEqual(stored["tailnet"]["mode"], "serve")
+        self.assertEqual(stored["tailnet"]["configured_at"], before["tailnet"]["configured_at"])
+        self.assertNotIn("restore_pending", stored["tailnet"])
+        self.ts.set_exit(0)
+        self.ts.reset_calls()
+        retried = self._path("restart", "--tailnet", "none")
+        # Torn down by the stop phase, as in a plain `--tailnet none` restart:
+        # the mode stays recorded but unapplied and nothing is pending.
+        self._assert_declined_and_torn_down(retried, before, "serve")
+
+    def test_restart_with_failed_teardown_still_served_clears_pending(self) -> None:
+        before = self._start_served()
+        self.ts.set_exit(1)
+        restarted = self._path("restart")
+        self.assertEqual(restarted.returncode, 0, restarted.stderr or restarted.stdout)
+        payload = parse_cli_json(restarted)
+        self.assertEqual(payload["warnings"][0]["reason"], "tailnet_teardown_failed")
+        self.assertEqual(_phase(payload.get("skipped"), "tailnet")["reason"], "already_served")
+        stored = self._registry_range(before["id"])
+        self.assertEqual(stored["state"], "active")
+        self.assertTrue(stored["tailnet"]["configured_at"])
+        self.assertNotIn("restore_pending", stored["tailnet"])
+
+    def _only_range_id(self) -> str:
+        data = json.loads(self.iso.registry_path.read_text(encoding="utf-8"))
+        ids = [
+            item["id"]
+            for proj in (data.get("projects") or {}).values()
+            for item in proj.get("ranges") or []
+        ]
+        self.assertEqual(len(ids), 1, ids)
+        return ids[0]
 
     def test_restart_funnel_of_listen_port_is_skipped_not_asked(self) -> None:
         before = self._start_served("funnel")
@@ -305,24 +443,31 @@ class PathRestartTailnetTests(unittest.TestCase):
         port = before["start"]
         self.assertNotIn(f"funnel --bg --https={port} localhost:{port}", self.ts.calls())
 
-    def test_restart_with_tailscale_missing_fails_in_stop_phase(self) -> None:
-        # Characterization, flips on purpose with ticket 9f2e4ada:
-        # park_item_for_exit tears Serve down without the configured_at guard
-        # and fails before the restore can ask.
+    def test_restart_with_tailscale_missing_asks_and_keeps_new_process(self) -> None:
         before = self._start_served()
+        old_pid = self._registry_range(before["id"])["lifecycle"]["pid"]
         restarted = self._path(
             "restart", PORTSKILL_TAILSCALE_BIN=str(self.iso.root / "no-tailscale"),
         )
-        self.assertNotEqual(restarted.returncode, 0, restarted.stdout)
-        text = (restarted.stdout or "") + (restarted.stderr or "")
-        self.assertIn("tailnet_teardown_failed", text)
+        self.assertEqual(restarted.returncode, 3, restarted.stderr or restarted.stdout)
+        payload = parse_cli_json(restarted)
+        self.assertEqual(payload["reason"], "tailscale_bin_missing")
+        self.assertEqual(payload["input"], "tailscale_install")
+        self.assertEqual(payload["tailnet_restore"]["mode"], "serve")
+        warning = payload["warnings"][0]
+        self.assertEqual(warning["reason"], "tailnet_teardown_failed")
+        self.assertEqual(warning["error"]["reason"], "tailscale_missing")
         stored = self._registry_range(before["id"])
+        # Committed, never rolled back to the dead pid.
+        self.assertEqual(stored["state"], "active")
+        self.assertTrue(stored["lifecycle"]["pid"])
+        self.assertNotEqual(stored["lifecycle"]["pid"], old_pid)
         self.assertEqual(stored["tailnet"]["mode"], "serve")
+        self.assertIs(stored["tailnet"]["restore_pending"], True)
 
 
 class TailnetRestoreNeedsInputTests(unittest.TestCase):
-    """Payload builder; tailscale_bin_missing is not reachable through run_path
-    until 9f2e4ada (the stop phase fails first), so it is pinned here."""
+    """Payload builder, pinned directly for every reason."""
 
     RESTORE = {"mode": "serve", "port": 20000, "previous_configured_at": None}
 

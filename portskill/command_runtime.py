@@ -67,6 +67,13 @@ def _bind_path(handler: Callable[..., dict], options: dict[str, Any]) -> dict:
         from .domain import DomainError
 
         raise DomainError("needs_input", exit_code=3, payload=payload)
+    if payload.get("status") == "error":
+        from .domain import DomainError
+
+        # Raised after the lock: the registry change is already committed.
+        raise DomainError(
+            payload.get("reason") or "path_failed", payload.get("message"), payload=payload
+        )
     return payload
 
 

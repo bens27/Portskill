@@ -308,6 +308,7 @@ def activate_item(item, project, range_id, tailnet_arg):
     else:
         item["tailnet"]["port"] = None
         item["tailnet"]["configured_at"] = None
+    item["tailnet"].pop(RESTORE_PENDING_KEY, None)
     mark_item_active(item, now)
 
 
@@ -318,16 +319,51 @@ def mark_item_active(item, now=None):
     item["activated_at"] = now
 
 
-def release_item(item):
-    tailnet = item.setdefault("tailnet", {"mode": None, "port": None, "configured_at": None})
+# Set on tailnet when an applied Serve/Funnel mapping was taken down without
+# releasing the range (stop without release, a restart's stop phase, or a
+# restart that could not re-apply it), so the next restart brings it back.
+RESTORE_PENDING_KEY = "restore_pending"
+
+
+def _tailnet_record(item):
+    return item.setdefault("tailnet", {"mode": None, "port": None, "configured_at": None})
+
+
+def teardown_applied_tailnet(item):
+    """Remove the range's Serve/Funnel mapping if one was actually applied.
+
+    Returns None on success or when nothing was applied (mode recorded but
+    login skipped, or never configured). On failure returns the error dict and
+    leaves configured_at set: the mapping may still be live on the tailnet.
+    """
+    tailnet = _tailnet_record(item)
     mode = tailnet.get("mode")
-    # Only tear down Serve/Funnel that was actually configured (login may have skipped it).
-    if item.get("state") == "active" and mode in ("serve", "funnel") and tailnet.get("configured_at"):
-        port = tailnet.get("port") or item["start"]
+    if mode not in ("serve", "funnel") or not tailnet.get("configured_at"):
+        return None
+    port = tailnet.get("port") or item["start"]
+    try:
         run_tailnet(mode, port, off=True)
+    except DomainError as exc:
+        return exc.as_dict()
+    tailnet["configured_at"] = None
+    return None
+
+
+def release_item(item):
+    """Tear down any applied mapping, then release. Raises DomainError on teardown failure."""
+    tailnet = _tailnet_record(item)
+    if item.get("state") != "released":
+        failure = teardown_applied_tailnet(item)
+        if failure is not None:
+            raise DomainError(
+                failure.get("reason") or "tailnet_command_failed",
+                failure.get("message"),
+                payload=failure,
+            )
     item["state"] = "released"
     item["released_at"] = utc_now()
     tailnet["configured_at"] = None
+    tailnet.pop(RESTORE_PENDING_KEY, None)
 
 
 def range_has_live_process(item):
@@ -366,10 +402,16 @@ def resolve_stop_also_release(registry_or_settings=None, override=None) -> bool:
 
 
 def park_item_for_exit(item, project, also_release=False):
-    """Stop.sh + tracked pgid terminate + tailnet off.
+    """Stop.sh + tracked pgid terminate, then tear down an applied mapping.
 
-    When also_release is false, the range stays reserved (deactivate / Stop
-    without Release). When true, fully release via release_item.
+    Only a mapping with configured_at set is torn down. When also_release is
+    false the range stays reserved with restore_pending set, so a later
+    restart brings the mapping back; when true it is released.
+
+    A failed teardown returns (False, detail with "range") for the caller to
+    commit: the process is already gone, so the range is parked reserved with
+    the mapping still recorded (configured_at kept, restore_pending set) and
+    is never released, even when also_release is true.
     """
     if item.get("state") == "released":
         return True, {"action": "already_released", "range": item}
@@ -383,21 +425,38 @@ def park_item_for_exit(item, project, also_release=False):
         life["pgid"] = None
         if not life.get("stopped_at"):
             life["stopped_at"] = utc_now()
-    if also_release:
-        try:
-            release_item(item)
-        except DomainError:
-            return False, {"reason": "release_failed", "range_id": item.get("id")}
-        return True, {"action": "stopped_released", "range": item}
-    # Tear down tailnet but keep allocation reserved
-    tailnet = item.setdefault("tailnet", {"mode": None, "port": None, "configured_at": None})
-    mode = tailnet.get("mode")
-    if item.get("state") == "active" and mode in ("serve", "funnel"):
+    # Only a mapping that was actually applied is torn down. The process is
+    # already gone at this point, so a teardown failure must still be
+    # committed (never leave state active with a dead pid): the range stays
+    # reserved, configured_at is kept because the mapping may still be live,
+    # and it is never released (its port could be reallocated under a live
+    # mapping).
+    tailnet = _tailnet_record(item)
+    was_applied = tailnet.get("mode") in ("serve", "funnel") and bool(tailnet.get("configured_at"))
+    failure = teardown_applied_tailnet(item)
+    if failure is not None:
+        item["state"] = "reserved"
+        tailnet[RESTORE_PENDING_KEY] = True
+        mode = tailnet.get("mode")
         port = tailnet.get("port") or item["start"]
-        try:
-            run_tailnet(mode, port, off=True)
-        except DomainError:
-            return False, {"reason": "tailnet_teardown_failed", "range_id": item.get("id")}
-        tailnet["configured_at"] = None
+        why = failure.get("message") or failure.get("reason") or "tailscale command failed"
+        return False, {
+            "reason": "tailnet_teardown_failed",
+            "message": (
+                f"Stopped range {item.get('id')} but could not remove the Tailscale "
+                f"{mode} mapping for port {port} ({why}). The range stays reserved "
+                "with the mapping recorded; fix Tailscale, then stop or release it again."
+            ),
+            "range_id": item.get("id"),
+            "action": "stopped_reserved",
+            "also_release": bool(also_release),
+            "error": failure,
+            "range": item,
+        }
+    if also_release:
+        release_item(item)
+        return True, {"action": "stopped_released", "range": item}
+    if was_applied:
+        tailnet[RESTORE_PENDING_KEY] = True
     item["state"] = "reserved"
     return True, {"action": "stopped_reserved", "range": item}

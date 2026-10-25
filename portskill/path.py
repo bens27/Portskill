@@ -16,8 +16,10 @@ from typing import Any
 
 from .domain import DomainError
 from .lifecycle import (
+    RESTORE_PENDING_KEY,
     activate_item,
     park_item_for_exit,
+    teardown_applied_tailnet,
     range_has_live_process,
     read_listen_port_from_disk,
     refuse_remote_process,
@@ -170,18 +172,17 @@ def _tailnet_needs_input(ran: list, skipped: list, result: dict) -> dict:
     }
 
 
-# Set on tailnet when a restart could not re-apply the mapping, so the next
-# restart (or the advertised resume) still brings it back. configured_at stays
-# None meanwhile: nothing is applied on the tailnet until the re-apply succeeds.
-RESTORE_PENDING_KEY = "restore_pending"
+# RESTORE_PENDING_KEY (lifecycle) marks a mapping that a stop without release
+# took down, or that a restart could not re-apply, so the next restart (or the
+# advertised resume) still brings it back.
 
 
 def _recorded_tailnet(item: dict | None) -> dict | None:
     """Serve/Funnel mapping a restart must bring back, or None.
 
-    Only a mapping that was actually configured counts, or one a failed
-    restart left pending: a mode recorded at allocate time but never applied
-    (login skipped, then declined) stays off.
+    Only a mapping that was actually configured counts, or one a stop without
+    release or a failed restart left pending: a mode recorded at allocate time
+    but never applied (login skipped, then declined) stays off.
     """
     if not isinstance(item, dict) or item.get("state") == "released":
         return None
@@ -249,7 +250,7 @@ def _tailnet_restore_needs_input(
         ),
         "options": [mode, "none"],
         "resume_hint": "--tailnet",
-        "tailnet_restore": dict(restore),
+        "tailnet_restore": {k: v for k, v in restore.items() if k != "source"},
         "ran": ran,
         "skipped": skipped,
         "result": result,
@@ -414,9 +415,11 @@ def run_path(
     needs_input = False
     restore_tailnet: dict | None = None
     restore_failure: dict | None = None
+    stop_failure: dict | None = None
+    path_warnings: list[dict] = []
 
     def mutate(registry):
-        nonlocal needs_input, requested, restore_tailnet, restore_failure
+        nonlocal needs_input, requested, restore_tailnet, restore_failure, stop_failure
         hist_key = resolve_history_env_name(registry, environment)
         ensure_baseline(registry, hist_key)
         changed: list[str] = []
@@ -434,9 +437,6 @@ def run_path(
                 if requested is None:
                     restore_tailnet["source"] = "recorded"
                 requested = recorded["mode"]
-        # Declining the mapping drops a pending restore.
-        if requested == "none" and item is not None and _set_restore_pending(item, False):
-            changed.append(project)
         if requested is None and mode in ("start", "restart"):
             if normalize_settings(registry.get("settings")).get("default_tailnet") == "serve":
                 requested = "serve"
@@ -493,6 +493,10 @@ def run_path(
                     needs_input = True
                     if restore_tailnet is not None and item is not None:
                         _set_restore_pending(item, True)
+                        changed.append(project)
+                elif phase == "tailnet" and reason == SKIP_TAILNET_ALREADY and item is not None:
+                    # Still applied (e.g. the stop phase's `off` failed): nothing to restore.
+                    if _set_restore_pending(item, False):
                         changed.append(project)
                 continue
 
@@ -567,12 +571,23 @@ def run_path(
                 # Mode stop honors settings.stop_also_release (default true).
                 also = False if mode == "restart" else resolve_stop_also_release(registry)
                 ok, detail = park_item_for_exit(item, project, also_release=also)
-                if not ok:
+                if not ok and "range" not in detail:
                     raise DomainError(detail.get("reason") or "stop_failed", detail.get("message"), **{
                         k: v for k, v in detail.items() if k not in ("reason", "message")
                     })
                 changed.append(project)
-                ran.append(_phase_entry(phase, detail=detail))
+                if ok:
+                    ran.append(_phase_entry(phase, detail=detail))
+                    continue
+                # The process is gone: commit the parked range instead of
+                # rolling back to a dead pid. Restart carries on (its tailnet
+                # phase re-applies or asks); stop reports the error.
+                stop_failure = {k: v for k, v in detail.items() if k != "range"}
+                ran.append(_phase_entry(phase, detail={
+                    k: detail[k] for k in ("action", "reason", "range_id") if k in detail
+                }))
+                if mode != "restart":
+                    break
             elif phase == "release":
                 if item is None:
                     skipped.append(_phase_entry(phase, skipped=SKIP_RELEASE_ALREADY))
@@ -586,6 +601,30 @@ def run_path(
                 changed.append(project)
                 ran.append(_phase_entry(phase, detail={"range_id": item.get("id")}))
 
+        # Declining the mapping (after the phases: a restart's stop phase marks
+        # it pending again) drops a pending restore and takes down a mapping
+        # a failed teardown left applied, so no later restart re-applies it.
+        if requested == "none" and item is not None and item.get("state") != "released":
+            if _set_restore_pending(item, False):
+                changed.append(project)
+            tailnet_record = item.get("tailnet")
+            if isinstance(tailnet_record, dict) and tailnet_record.get("configured_at"):
+                failure = teardown_applied_tailnet(item)
+                if failure is None:
+                    tailnet_record["mode"] = "none"
+                    tailnet_record["port"] = None
+                    changed.append(project)
+                else:
+                    path_warnings.append({
+                        "reason": "tailnet_teardown_failed",
+                        "message": (
+                            f"Could not remove the Tailscale {tailnet_record.get('mode')} mapping "
+                            f"for port {tailnet_record.get('port') or item.get('start')}; it stays "
+                            "recorded. Fix Tailscale, then run again with `--tailnet none`."
+                        ),
+                        "range_id": item.get("id"),
+                        "error": failure,
+                    })
         if changed:
             maybe_push_history(registry, f"path-{mode}", hist_key)
         rid = range_id or (item.get("id") if isinstance(item, dict) else None)
@@ -609,6 +648,20 @@ def run_path(
             )
         elif needs_input:
             payload = _tailnet_needs_input(ran, skipped, result)
+        if stop_failure is not None:
+            if mode == "restart":
+                path_warnings.insert(0, stop_failure)
+            else:
+                payload = {
+                    **stop_failure,
+                    "status": "error",
+                    "mode": mode,
+                    "ran": ran,
+                    "skipped": skipped,
+                    "result": result,
+                }
+        if path_warnings:
+            payload.setdefault("warnings", []).extend(path_warnings)
         return payload, sorted(set(changed))
 
     return locked_registry(mutate)
@@ -630,4 +683,7 @@ def cmd_path_from_args(args) -> dict:
     )
     if payload.get("needs_input") or payload.get("status") == "needs_input":
         raise DomainError("needs_input", exit_code=3, payload=payload)
+    if payload.get("status") == "error":
+        # Raised after the lock: the registry change is already committed.
+        raise DomainError(payload.get("reason") or "path_failed", payload.get("message"), payload=payload)
     return payload
