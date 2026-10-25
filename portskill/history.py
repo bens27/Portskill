@@ -114,7 +114,13 @@ def restore_history(registry, env_name, index):
     current_refs = _cohort_range_refs(registry, key)
     current_by_id = {item.get("id"): (proj, item) for proj, item in current_refs if item.get("id")}
     changed_projects = set()
-    teardown_failures = []
+    failures = []
+    stuck = None
+
+    # Everything that can refuse the snapshot (ports busy, bad rows) is checked
+    # on a copy BEFORE any process is killed: a raise after a kill would roll
+    # the killed ranges back to active with dead pids.
+    _preflight_apply_snapshot(registry, current_by_id, key, snap, desired)
 
     # Release ranges present now in cohort but not in snapshot
     for rid, (proj, item) in list(current_by_id.items()):
@@ -131,10 +137,15 @@ def restore_history(registry, env_name, index):
             except Exception:
                 pass
             if range_has_live_process(item):
-                raise DomainError(
-                    "process_still_running",
-                    f"cannot restore: range {rid} still has a live process; stop it first",
-                )
+                # Kill no further ranges; commit those already parked.
+                stuck = {
+                    "project": proj,
+                    "reason": "process_still_running",
+                    "message": f"range {rid} still has a live process; stop it first",
+                    "range_id": rid,
+                }
+                failures.append(stuck)
+                break
         # Same teardown-then-release contract as stop: a failed teardown parks
         # the range reserved with the mapping recorded (never released, never
         # left active with a dead pid) and is committed below.
@@ -147,30 +158,76 @@ def restore_history(registry, env_name, index):
             )
         changed_projects.add(proj)
         if not ok:
-            teardown_failures.append(
+            failures.append(
                 {"project": proj, **{k: v for k, v in detail.items() if k != "range"}}
             )
 
-    if teardown_failures:
+    if failures:
         # Abort before applying the snapshot (cursor unchanged), but commit the
-        # parked ranges: the processes are already gone. Retrying the restore
-        # once Tailscale works tears the mappings down and finishes it.
-        count = len(teardown_failures)
-        return {
-            "status": "error",
-            "reason": "tailnet_teardown_failed",
-            "message": (
-                f"History restore stopped {count} range(s) but could not remove their "
+        # parked ranges: their processes are already gone. Retrying the restore
+        # once the cause is fixed finishes it.
+        if stuck is not None:
+            reason = "process_still_running"
+            teardowns = len(failures) - 1
+            also = (
+                f", and {teardowns} range(s) could not remove their Tailscale mappings"
+                if teardowns else ""
+            )
+            message = (
+                f"History restore could not stop range {stuck['range_id']} (its process "
+                f"is still running){also}; ranges already stopped stay stopped and the "
+                "snapshot was not applied. Stop it, then restore again."
+            )
+        else:
+            reason = "tailnet_teardown_failed"
+            message = (
+                f"History restore stopped {len(failures)} range(s) but could not remove their "
                 "Tailscale mappings; they stay reserved with the mapping recorded and "
                 "the snapshot was not applied. Fix Tailscale, then restore again."
-            ),
+            )
+        return {
+            "status": "error",
+            "reason": reason,
+            "message": message,
             "environment": key,
             "index": int(index),
             "cursor": entry.get("cursor"),
-            "failures": teardown_failures,
+            "failures": failures,
         }, sorted(changed_projects)
 
-    # Update existing or re-add missing from snapshot
+    _apply_snapshot(registry, key, snap, desired, changed_projects)
+
+    entry["cursor"] = int(index)
+    hist[key] = entry
+    registry["environment_history"] = hist
+    return {
+        "status": "ok",
+        "environment": key,
+        "index": int(index),
+        "modified": history_is_modified(entry),
+        "cursor": entry["cursor"],
+        "step_count": len(entry.get("steps") or []),
+    }, sorted(changed_projects)
+
+
+def _preflight_apply_snapshot(registry, current_by_id, key, snap, desired):
+    """Raise whatever _apply_snapshot would, without touching the registry.
+
+    Runs the apply on a copy in which exactly the ranges the release loop
+    parks (current_by_id entries missing from the snapshot, so not id-less
+    ranges and only one per duplicate id) are released: the state the real
+    apply sees once the release loop succeeds.
+    """
+    # One deepcopy memo keeps the refs pointing into the copied registry.
+    trial, trial_refs = copy.deepcopy((registry, current_by_id))
+    for rid, (_proj, item) in trial_refs.items():
+        if rid not in desired:
+            item["state"] = "released"
+    _apply_snapshot(trial, key, snap, desired, set())
+
+
+def _apply_snapshot(registry, key, snap, desired, changed_projects):
+    """Update existing or re-add missing ranges, then the preset services."""
     for rid, (project, snap_range) in desired.items():
         existing_proj, existing = find_range_anywhere(registry, rid, None)
         start = int(snap_range.get("start") or 0)
@@ -242,18 +299,6 @@ def restore_history(registry, env_name, index):
                 "updated_at": utc_now(),
                 "services": services,
             })
-
-    entry["cursor"] = int(index)
-    hist[key] = entry
-    registry["environment_history"] = hist
-    return {
-        "status": "ok",
-        "environment": key,
-        "index": int(index),
-        "modified": history_is_modified(entry),
-        "cursor": entry["cursor"],
-        "step_count": len(entry.get("steps") or []),
-    }, sorted(changed_projects)
 
 
 def reset_history(registry, env_name):
