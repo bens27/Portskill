@@ -109,9 +109,7 @@ class CallableDomainSlice2Tests(unittest.TestCase):
     def test_mcp_doctor_and_settings_never_spawn_cli(self) -> None:
         from portskill import mcp
 
-        with mock.patch.object(
-            mcp, "run_cli", side_effect=AssertionError("subprocess used")
-        ), mock.patch(
+        with mock.patch(
             "portskill.doctor.doctor_result",
             return_value={"status": "ok", "checks": []},
         ) as doctor, mock.patch(
@@ -208,9 +206,7 @@ class CallableDomainSlice2Tests(unittest.TestCase):
         from portskill import server
 
         expected = {"status": "ok", "settings": {"stop_also_release": False}}
-        with mock.patch.object(
-            server, "run_cli", side_effect=AssertionError("subprocess used")
-        ), mock.patch(
+        with mock.patch(
             "portskill.settings.settings_set", return_value=expected
         ) as set_settings:
             code, body = server.dispatch_ui_action(
@@ -228,7 +224,7 @@ class CallableDomainSlice2Tests(unittest.TestCase):
         )
 
     def test_server_mcp_doctor_uses_domain_path_in_process(self) -> None:
-        from portskill import mcp, server
+        from portskill import server
 
         expected = {"status": "ok", "checks": []}
         message = {
@@ -237,9 +233,7 @@ class CallableDomainSlice2Tests(unittest.TestCase):
             "method": "tools/call",
             "params": {"name": "doctor", "arguments": {}},
         }
-        with mock.patch.object(
-            mcp, "run_cli", side_effect=AssertionError("subprocess used")
-        ), mock.patch(
+        with mock.patch(
             "portskill.doctor.doctor_result", return_value=expected
         ) as doctor:
             response = server.mcp_handle(message)

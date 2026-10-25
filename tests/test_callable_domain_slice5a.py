@@ -102,10 +102,7 @@ class CallableDomainSlice5ATests(unittest.TestCase):
                 ("preset_apply", {"name": "empty"}),
                 ("preset_delete", {"name": "empty"}),
             )
-            with mock.patch.object(
-                mcp, "run_cli", side_effect=AssertionError("subprocess used")
-            ):
-                results = [mcp.call_tool(name, args) for name, args in calls]
+            results = [mcp.call_tool(name, args) for name, args in calls]
 
         self.assertTrue(all(not result["isError"] for result in results), results)
 
@@ -120,9 +117,7 @@ class CallableDomainSlice5ATests(unittest.TestCase):
         stdout = io.StringIO()
         with IsolatedConfig() as iso:
             iso.write_registry()
-            with mock.patch.object(
-                mcp, "run_cli", side_effect=AssertionError("subprocess used")
-            ), mock.patch.object(mcp.sys, "stdin", stdin), mock.patch.object(
+            with mock.patch.object(mcp.sys, "stdin", stdin), mock.patch.object(
                 mcp.sys, "stdout", stdout
             ):
                 self.assertEqual(mcp.mcp_stdio_loop(), 0)
@@ -201,10 +196,7 @@ class CallableDomainSlice5ATests(unittest.TestCase):
                 {"action": "preset-apply", "name": "empty"},
                 {"action": "preset-delete", "name": "empty"},
             )
-            with mock.patch.object(
-                server, "run_cli", side_effect=AssertionError("subprocess used")
-            ):
-                results = [server.dispatch_ui_action(action) for action in actions]
+            results = [server.dispatch_ui_action(action) for action in actions]
 
         for code, body in results:
             self.assertEqual(code, 0, body)

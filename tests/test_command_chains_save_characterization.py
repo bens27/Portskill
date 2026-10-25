@@ -121,7 +121,7 @@ class SaveChainCharacterizationTests(unittest.TestCase):
         self.assertEqual(self.rejected([{"tool": "a"}, {"tool": "b"}]), UNKNOWN.format({"tool": "a"}))
 
     def test_unhashable_tool_raises(self) -> None:
-        # Pinned quirk: set membership on a list/dict tool raises TypeError.
+        # Pinned quirk: dict-key lookup on a list/dict tool raises TypeError.
         self.settings()
         for tool in (["status"], {"a": 1}):
             with self.subTest(tool=tool), self.assertRaises(TypeError):

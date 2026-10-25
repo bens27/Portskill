@@ -21,7 +21,7 @@ class ProcessDomainTests(unittest.TestCase):
         stdout = io.StringIO()
         with IsolatedConfig() as iso:
             iso.write_registry()
-            with mock.patch.object(mcp, "run_cli", side_effect=AssertionError("subprocess used")), mock.patch.object(
+            with mock.patch.object(
                 mcp.sys, "stdin", stdin
             ), mock.patch.object(mcp.sys, "stdout", stdout):
                 self.assertEqual(mcp.mcp_stdio_loop(), 0)
@@ -36,13 +36,12 @@ class ProcessDomainTests(unittest.TestCase):
             project = iso.root / "project"
             project.mkdir()
             iso.write_registry()
-            with mock.patch.object(server, "run_cli", side_effect=AssertionError("subprocess used")):
-                failed_code, failed = server.run_cli_action(str(project), "missing", "start")
-                allocated_code, allocated = server.dispatch_ui_action({
-                    "action": "allocate", "project": str(project), "count": 1, "tailnet": "none",
-                })
-                range_id = allocated["result"]["range"]["id"]
-                success_code, success = server.run_cli_action(str(project), range_id, "stop")
+            failed_code, failed = server.run_cli_action(str(project), "missing", "start")
+            allocated_code, allocated = server.dispatch_ui_action({
+                "action": "allocate", "project": str(project), "count": 1, "tailnet": "none",
+            })
+            range_id = allocated["result"]["range"]["id"]
+            success_code, success = server.run_cli_action(str(project), range_id, "stop")
         self.assertEqual(failed_code, 2)
         self.assertFalse(failed["ok"])
         self.assertEqual(allocated_code, 0)
@@ -67,13 +66,10 @@ class ProcessDomainTests(unittest.TestCase):
 
         with IsolatedConfig() as iso:
             iso.write_registry()
-            with mock.patch.object(
-                server, "run_cli", side_effect=AssertionError("subprocess used")
-            ):
-                results = {
-                    action: server.dispatch_ui_action({"action": action})
-                    for action in ("start-all", "stop-all", "stop-non-default")
-                }
+            results = {
+                action: server.dispatch_ui_action({"action": action})
+                for action in ("start-all", "stop-all", "stop-non-default")
+            }
 
         for action, (code, body) in results.items():
             with self.subTest(action=action):

@@ -3,9 +3,6 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
-import os
-import pathlib
-import subprocess
 import sys
 from typing import Any
 
@@ -106,8 +103,6 @@ SERVER_NAME = "portskill"
 SERVER_VERSION = __version__
 PROTOCOL_VERSION = "2024-11-05"
 
-PACKAGE_ROOT = pathlib.Path(__file__).resolve().parent.parent
-
 HANDOFF_COMMANDS = {
     spec.mcp.name: spec
     for spec in (
@@ -190,240 +185,6 @@ def enabled_tool_defs(registry_or_settings=None) -> list:
             continue
         out.append(user_command_tool_def(cmd))
     return out
-
-
-def _cli_env() -> dict:
-    env = os.environ.copy()
-    root = str(PACKAGE_ROOT)
-    existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = root if not existing else root + os.pathsep + existing
-    return env
-
-
-def run_cli(argv: list[str]) -> tuple[int, Any, str]:
-    """Invoke portskill.cli; return (exit_code, parsed_json_or_None, raw_stdout)."""
-    cmd = [sys.executable, "-m", "portskill.cli", *argv]
-    try:
-        completed = subprocess.run(
-            cmd, capture_output=True, text=True, env=_cli_env(), check=False
-        )
-    except OSError as exc:
-        return 2, {"status": "error", "reason": "cli_exec_failed", "message": str(exc)}, ""
-    stdout = (completed.stdout or "").strip()
-    payload: Any = None
-    if stdout:
-        try:
-            payload = json.loads(stdout.splitlines()[-1])
-        except json.JSONDecodeError:
-            payload = None
-    return completed.returncode, payload, stdout
-
-
-def tool_argv(name: str, arguments: dict) -> list[str]:
-    args = arguments or {}
-    if name == "allocate":
-        argv = ["allocate", "--count", str(int(args["count"]))]
-        if args.get("project"):
-            argv += ["--project", str(args["project"])]
-        if args.get("note"):
-            argv += ["--note", str(args["note"])]
-        if args.get("tailnet"):
-            argv += ["--tailnet", str(args["tailnet"])]
-        if args.get("machine"):
-            argv += ["--machine", str(args["machine"])]
-        if args.get("host"):
-            argv += ["--host", str(args["host"])]
-        if args.get("scheme"):
-            argv += ["--scheme", str(args["scheme"])]
-        return argv
-    if name == "activate":
-        argv = ["activate", "--range-id", str(args["range_id"])]
-        if args.get("project"):
-            argv += ["--project", str(args["project"])]
-        if args.get("tailnet"):
-            argv += ["--tailnet", str(args["tailnet"])]
-        return argv
-    if name == "start":
-        argv = ["start", "--range-id", str(args["range_id"])]
-        if args.get("project"):
-            argv += ["--project", str(args["project"])]
-        if args.get("tailnet"):
-            argv += ["--tailnet", str(args["tailnet"])]
-        return argv
-    if name == "stop":
-        argv = ["stop", "--range-id", str(args["range_id"])]
-        if args.get("project"):
-            argv += ["--project", str(args["project"])]
-        if "also_release" in args and args.get("also_release") is not None:
-            argv += ["--also-release", "on" if args.get("also_release") else "off"]
-        return argv
-    if name == "release":
-        argv = ["release", "--range-id", str(args["range_id"])]
-        if args.get("project"):
-            argv += ["--project", str(args["project"])]
-        return argv
-    if name == "status":
-        argv = ["status"]
-        if args.get("project"):
-            argv += ["--project", str(args["project"])]
-        return argv
-    if name in (PORTSKILL_TOOL_NAME, *sorted(PORTSKILL_TOOL_ALIASES)):
-        argv = ["path", "--mode", str(args["mode"])]
-        if args.get("project"):
-            argv += ["--project", str(args["project"])]
-        if args.get("count") is not None:
-            argv += ["--count", str(int(args["count"]))]
-        if args.get("range_id"):
-            argv += ["--range-id", str(args["range_id"])]
-        if args.get("note"):
-            argv += ["--note", str(args["note"])]
-        if args.get("tailnet"):
-            argv += ["--tailnet", str(args["tailnet"])]
-        if args.get("command"):
-            argv += ["--command", str(args["command"])]
-        if args.get("cwd"):
-            argv += ["--cwd", str(args["cwd"])]
-        if args.get("default_state"):
-            argv += ["--default-state", str(args["default_state"])]
-        if args.get("start") is not None:
-            argv += ["--start", str(int(args["start"]))]
-        return argv
-    if name == "doctor":
-        argv = ["doctor"]
-        if args.get("project"):
-            argv += ["--project", str(args["project"])]
-        return argv
-    if name == "environment_export":
-        argv = ["environment", "export", "--name", str(args["name"])]
-        if args.get("out"):
-            argv += ["--out", str(args["out"])]
-        if args.get("description"):
-            argv += ["--description", str(args["description"])]
-        projects = args.get("project")
-        if isinstance(projects, str) and projects:
-            argv += ["--project", projects]
-        elif isinstance(projects, list):
-            for p in projects:
-                argv += ["--project", str(p)]
-        return argv
-    if name == "environment_import":
-        argv = ["environment", "import", "--file", str(args["file"])]
-        if args.get("apply_defaults"):
-            argv.append("--apply-defaults")
-        return argv
-    if name == "set_default":
-        argv = ["set-default", "--range-id", str(args["range_id"]), "--state", str(args["state"])]
-        if args.get("project"):
-            argv += ["--project", str(args["project"])]
-        return argv
-    if name == "apply_defaults":
-        argv = ["apply-defaults"]
-        projects = args.get("project")
-        if isinstance(projects, str) and projects:
-            argv += ["--project", projects]
-        elif isinstance(projects, list):
-            for p in projects:
-                argv += ["--project", str(p)]
-        if args.get("also_stop_off"):
-            argv.append("--also-stop-off")
-        return argv
-    if name in ("deactivate", "exit_house"):
-        argv = ["deactivate"]
-        projects = args.get("project")
-        if isinstance(projects, str) and projects:
-            argv += ["--project", projects]
-        elif isinstance(projects, list):
-            for p in projects:
-                argv += ["--project", str(p)]
-        if args.get("preset"):
-            argv += ["--preset", str(args["preset"])]
-        if args.get("also_release"):
-            argv.append("--also-release")
-        return argv
-    if name == "compat_check":
-        argv = ["compat", "check"]
-        presets = args.get("presets") or args.get("preset") or []
-        if isinstance(presets, str):
-            presets = [presets]
-        for p in presets:
-            if p:
-                argv += ["--preset", str(p)]
-        if args.get("file"):
-            argv += ["--file", str(args["file"])]
-        if args.get("include_default_on"):
-            argv.append("--include-default-on")
-        if len([a for a in argv if a == "--preset"]) == 0 and not args.get("file"):
-            argv.append("--include-default-on")
-        return argv
-    if name == "preset_save":
-        argv = ["preset", "save", "--name", str(args["name"])]
-        if args.get("description"):
-            argv += ["--description", str(args["description"])]
-        if args.get("from_file"):
-            argv += ["--from-file", str(args["from_file"])]
-        projects = args.get("project")
-        if isinstance(projects, str) and projects:
-            argv += ["--project", projects]
-        elif isinstance(projects, list):
-            for p in projects:
-                argv += ["--project", str(p)]
-        return argv
-    if name == "preset_list":
-        return ["preset", "list"]
-    if name == "preset_apply":
-        argv = ["preset", "apply", "--name", str(args["name"])]
-        if args.get("also_stop_off"):
-            argv.append("--also-stop-off")
-        return argv
-    if name == "preset_delete":
-        return ["preset", "delete", "--name", str(args["name"])]
-    if name == "settings_get":
-        return ["settings", "get"]
-    if name == "settings_set":
-        argv = ["settings", "set"]
-        if args.get("auto_apply") is not None:
-            argv += ["--auto-apply", str(args["auto_apply"])]
-        if args.get("auto_apply_preset") is not None:
-            argv += ["--auto-apply-preset", str(args["auto_apply_preset"])]
-        if "auto_apply_on_launch" in args and args.get("auto_apply_on_launch") is not None:
-            argv += ["--auto-apply-on-launch", "on" if args.get("auto_apply_on_launch") else "off"]
-        if "auto_exit_on_shutdown" in args and args.get("auto_exit_on_shutdown") is not None:
-            argv += ["--auto-exit-on-shutdown", "on" if args.get("auto_exit_on_shutdown") else "off"]
-        if "require_compat" in args and args.get("require_compat") is not None:
-            argv += ["--require-compat", "on" if args.get("require_compat") else "off"]
-        if args.get("overlap_policy") is not None:
-            argv += ["--overlap-policy", str(args["overlap_policy"])]
-        if args.get("open_environment_tabs") is not None:
-            argv += ["--open-environment-tabs", str(args["open_environment_tabs"])]
-        if args.get("focused_environment") is not None:
-            argv += ["--focused-environment", str(args["focused_environment"])]
-        if args.get("open_tab") is not None:
-            argv += ["--open-tab", str(args["open_tab"])]
-        if args.get("close_tab") is not None:
-            argv += ["--close-tab", str(args["close_tab"])]
-        if args.get("mcp_tools_profile") is not None:
-            argv += ["--mcp-tools-profile", str(args["mcp_tools_profile"])]
-        if args.get("default_tailnet"):
-            argv += ["--default-tailnet", str(args["default_tailnet"])]
-        if "stop_also_release" in args and args.get("stop_also_release") is not None:
-            argv += ["--stop-also-release", "on" if args.get("stop_also_release") else "off"]
-        return argv
-    if name == "history_list":
-        argv = ["history", "list"]
-        if args.get("environment"):
-            argv += ["--environment", str(args["environment"])]
-        return argv
-    if name == "history_restore":
-        argv = ["history", "restore", "--index", str(int(args["index"]))]
-        if args.get("environment"):
-            argv += ["--environment", str(args["environment"])]
-        return argv
-    if name == "history_reset":
-        argv = ["history", "reset"]
-        if args.get("environment"):
-            argv += ["--environment", str(args["environment"])]
-        return argv
-    raise ValueError(f"unknown tool: {name}")
 
 
 def _run_one_chain_step(step: dict, prefs: dict, system_names) -> dict:
@@ -519,10 +280,11 @@ def _import_tailnet_mode(value: Any) -> str | None:
 
 
 def _tailscale_or_discovery_options(name: str, args: dict) -> dict:
-    """Normalize MCP arguments in the legacy tool_argv order.
+    """Normalize MCP arguments in the legacy argument-check order.
 
-    Raises KeyError/TypeError/ValueError exactly where tool_argv did, so callers
-    keep the legacy ``{ok: false, message}`` argument-error envelope.
+    Raises KeyError/TypeError/ValueError at the same argument as the removed
+    CLI translator did, so callers keep the legacy ``{ok: false, message}``
+    argument-error envelope.
     """
     if name == "set_tailnet":
         range_id = str(args["range_id"])
@@ -765,18 +527,8 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "structuredContent": body,
             "isError": False,
         }
-    try:
-        tool_argv(name, arguments or {})
-    except (KeyError, TypeError, ValueError) as exc:
-        return {
-            "content": [{"type": "text", "text": json.dumps({"ok": False, "message": str(exc)})}],
-            "isError": True,
-        }
     return {
-        "content": [{"type": "text", "text": json.dumps({
-            "ok": False,
-            "message": f"in-process route missing for tool: {name}",
-        })}],
+        "content": [{"type": "text", "text": json.dumps({"ok": False, "message": f"unknown tool: {name}"})}],
         "isError": True,
     }
 

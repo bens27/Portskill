@@ -132,31 +132,23 @@ def _ran_phases(payload: dict) -> list[str]:
 
 class PathCliMcpTests(unittest.TestCase):
     def test_mcp_allocate_forwards_targets_while_path_drops_them(self) -> None:
-        from portskill.mcp import mcp_handle, tool_argv
+        from portskill.command_specs import ALLOCATE_COMMAND, MISSING, PATH_COMMAND
+        from portskill.mcp import mcp_handle
+
+        def mcp_param_names(spec) -> set[str]:
+            return {
+                param.key if param.mcp.name is MISSING else param.mcp.name
+                for param in spec.params
+                if param.mcp is not None
+            }
 
         target_args = {
             "machine": "missing-remote",
             "host": "remote.example",
             "scheme": "https",
         }
-        allocate_argv = tool_argv("allocate", {"count": 1, **target_args})
-        self.assertEqual(
-            allocate_argv,
-            [
-                "allocate",
-                "--count",
-                "1",
-                "--machine",
-                "missing-remote",
-                "--host",
-                "remote.example",
-                "--scheme",
-                "https",
-            ],
-        )
-        path_argv = tool_argv("portskill", {"mode": "start", **target_args})
-        for unsupported_flag in ("--machine", "--host", "--scheme"):
-            self.assertNotIn(unsupported_flag, path_argv)
+        self.assertLessEqual(set(target_args), mcp_param_names(ALLOCATE_COMMAND))
+        self.assertFalse(set(target_args) & mcp_param_names(PATH_COMMAND))
 
         with IsolatedConfig() as iso:
             proj = iso.root / "proj"

@@ -95,8 +95,6 @@ class CallableDomainSlice6Tests(unittest.TestCase):
         with IsolatedConfig() as iso:
             iso.write_registry()
             with mock.patch.object(
-                mcp, "run_cli", side_effect=AssertionError("subprocess used")
-            ), mock.patch.object(
                 tailscale_commands, "probe_tailscale_status", return_value=dict(BINARY_MISSING)
             ), mock.patch.object(
                 port_discovery.discover_ports_mod, "build_ports_discovery", return_value=_discovery()
@@ -121,8 +119,6 @@ class CallableDomainSlice6Tests(unittest.TestCase):
             "AuthURL": "https://login.example/x",
         }
         with mock.patch.object(
-            mcp, "run_cli", side_effect=AssertionError("subprocess used")
-        ), mock.patch.object(
             tailscale_commands, "probe_tailscale_status", return_value=needs_login
         ) as probe, mock.patch.object(
             tailscale_commands,
@@ -143,8 +139,6 @@ class CallableDomainSlice6Tests(unittest.TestCase):
         with IsolatedConfig() as iso:
             iso.write_registry()
             with mock.patch.object(
-                server, "run_cli", side_effect=AssertionError("subprocess used")
-            ), mock.patch.object(
                 port_discovery.discover_ports_mod, "build_ports_discovery", return_value=_discovery()
             ):
                 with mock.patch.object(
@@ -179,8 +173,6 @@ class CallableDomainSlice6Tests(unittest.TestCase):
             project.mkdir()
             iso.write_registry()
             with mock.patch.object(
-                server, "run_cli", side_effect=AssertionError("subprocess used")
-            ), mock.patch.object(
                 port_discovery.discover_ports_mod, "build_ports_discovery",
                 return_value=_discovery(21060, 21061),
             ):
@@ -222,9 +214,7 @@ class CallableDomainSlice6Tests(unittest.TestCase):
         stdout = io.StringIO()
         with IsolatedConfig() as iso:
             iso.write_registry()
-            with mock.patch.object(
-                mcp, "run_cli", side_effect=AssertionError("subprocess used")
-            ), mock.patch.object(mcp.sys, "stdin", stdin), mock.patch.object(mcp.sys, "stdout", stdout):
+            with mock.patch.object(mcp.sys, "stdin", stdin), mock.patch.object(mcp.sys, "stdout", stdout):
                 self.assertEqual(mcp.mcp_stdio_loop(), 0)
 
         responses = {r["id"]: r for r in map(json.loads, stdout.getvalue().splitlines())}
@@ -268,8 +258,6 @@ class CallableDomainSlice6Tests(unittest.TestCase):
             existing = cli.range_record("r1", 24567, 24567, "busy", "none")
             iso.write_registry({"projects": {str(project.resolve()): {"ranges": [existing]}}})
             with mock.patch.object(
-                server, "run_cli", side_effect=AssertionError("subprocess used")
-            ), mock.patch.object(
                 port_discovery.discover_ports_mod, "build_ports_discovery",
                 return_value=_discovery(24567, 24568),
             ):

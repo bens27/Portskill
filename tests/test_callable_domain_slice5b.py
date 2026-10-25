@@ -96,10 +96,7 @@ class CallableDomainSlice5BTests(unittest.TestCase):
                     "state": "on",
                 }),
             )
-            with mock.patch.object(
-                mcp, "run_cli", side_effect=AssertionError("subprocess used")
-            ):
-                results = [mcp.call_tool(name, arguments) for name, arguments in calls]
+            results = [mcp.call_tool(name, arguments) for name, arguments in calls]
 
         self.assertTrue(all(not result["isError"] for result in results), results)
 
@@ -163,9 +160,7 @@ class CallableDomainSlice5BTests(unittest.TestCase):
             ("portskill.defaults.set_defaults_from_current_result", {"action": "capture-defaults"}),
         )
         for operation_path, body in cases:
-            with self.subTest(action=body["action"]), mock.patch.object(
-                server, "run_cli", side_effect=AssertionError("subprocess used")
-            ), mock.patch(
+            with self.subTest(action=body["action"]), mock.patch(
                 operation_path,
                 side_effect=[RuntimeError("boom"), {"status": "ok"}],
             ):
@@ -184,69 +179,66 @@ class CallableDomainSlice5BTests(unittest.TestCase):
         from portskill.history import history_clear_result
         from portskill.registry_operations import range_record
 
-        with mock.patch.object(
-            server, "run_cli", side_effect=AssertionError("subprocess used")
-        ):
-            with IsolatedConfig() as iso:
-                project = iso.root / "project"
-                project.mkdir()
-                item = range_record(
-                    "r1", 22120, 22120, None, "none", default_state="off"
-                )
-                iso.write_registry({
-                    "projects": {str(project.resolve()): {"ranges": [item]}},
-                })
-                failed = server.dispatch_ui_action({
-                    "action": "set-default",
-                    "rangeId": "missing",
-                    "state": "on",
-                })
-                succeeded = server.dispatch_ui_action({
-                    "action": "set-default",
-                    "rangeId": "r1",
-                    "state": "on",
-                })
-                self.assertFalse(failed[1]["ok"])
-                self.assertTrue(succeeded[1]["ok"])
+        with IsolatedConfig() as iso:
+            project = iso.root / "project"
+            project.mkdir()
+            item = range_record(
+                "r1", 22120, 22120, None, "none", default_state="off"
+            )
+            iso.write_registry({
+                "projects": {str(project.resolve()): {"ranges": [item]}},
+            })
+            failed = server.dispatch_ui_action({
+                "action": "set-default",
+                "rangeId": "missing",
+                "state": "on",
+            })
+            succeeded = server.dispatch_ui_action({
+                "action": "set-default",
+                "rangeId": "r1",
+                "state": "on",
+            })
+            self.assertFalse(failed[1]["ok"])
+            self.assertTrue(succeeded[1]["ok"])
 
-            with IsolatedConfig() as iso:
+        with IsolatedConfig() as iso:
+            iso.write_registry()
+            with mock.patch.dict(os.environ, {"PORTSKILL_POOL_START": "bad"}):
+                failed = server.dispatch_ui_action({"action": "apply-defaults"})
+            succeeded = server.dispatch_ui_action({"action": "apply-defaults"})
+            self.assertFalse(failed[1]["ok"])
+            self.assertTrue(succeeded[1]["ok"])
+
+        with IsolatedConfig() as iso:
+            iso.write_registry()
+            failed = server.dispatch_ui_action({
+                "action": "deactivate",
+                "preset": "missing",
+            })
+            succeeded = server.dispatch_ui_action({"action": "deactivate"})
+            self.assertFalse(failed[1]["ok"])
+            self.assertTrue(succeeded[1]["ok"])
+
+        for action in ("history-restore", "history-reset"):
+            with self.subTest(action=action), IsolatedConfig() as iso:
                 iso.write_registry()
-                with mock.patch.dict(os.environ, {"PORTSKILL_POOL_START": "bad"}):
-                    failed = server.dispatch_ui_action({"action": "apply-defaults"})
-                succeeded = server.dispatch_ui_action({"action": "apply-defaults"})
+                body = {"action": action}
+                if action == "history-restore":
+                    body["index"] = 0
+                failed = server.dispatch_ui_action(body)
+                history_clear_result()
+                succeeded = server.dispatch_ui_action(body)
                 self.assertFalse(failed[1]["ok"])
                 self.assertTrue(succeeded[1]["ok"])
 
-            with IsolatedConfig() as iso:
+        for action in ("history-clear", "set-defaults-from-current"):
+            with self.subTest(action=action), IsolatedConfig() as iso:
+                iso.write_registry_raw("{broken")
+                failed = server.dispatch_ui_action({"action": action})
                 iso.write_registry()
-                failed = server.dispatch_ui_action({
-                    "action": "deactivate",
-                    "preset": "missing",
-                })
-                succeeded = server.dispatch_ui_action({"action": "deactivate"})
+                succeeded = server.dispatch_ui_action({"action": action})
                 self.assertFalse(failed[1]["ok"])
                 self.assertTrue(succeeded[1]["ok"])
-
-            for action in ("history-restore", "history-reset"):
-                with self.subTest(action=action), IsolatedConfig() as iso:
-                    iso.write_registry()
-                    body = {"action": action}
-                    if action == "history-restore":
-                        body["index"] = 0
-                    failed = server.dispatch_ui_action(body)
-                    history_clear_result()
-                    succeeded = server.dispatch_ui_action(body)
-                    self.assertFalse(failed[1]["ok"])
-                    self.assertTrue(succeeded[1]["ok"])
-
-            for action in ("history-clear", "set-defaults-from-current"):
-                with self.subTest(action=action), IsolatedConfig() as iso:
-                    iso.write_registry_raw("{broken")
-                    failed = server.dispatch_ui_action({"action": action})
-                    iso.write_registry()
-                    succeeded = server.dispatch_ui_action({"action": action})
-                    self.assertFalse(failed[1]["ok"])
-                    self.assertTrue(succeeded[1]["ok"])
 
     def test_cli_slice5b_error_and_history_list_contracts(self) -> None:
         with IsolatedConfig() as iso:

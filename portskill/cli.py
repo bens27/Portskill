@@ -284,15 +284,6 @@ def fail(reason, message=None, exit_code=2, **extra):
     raise SystemExit(exit_code)
 
 
-
-
-
-
-
-
-MCP_USER_COMMAND_TOOL_NAMES = None  # filled lazily from mcp.TOOL_DEFS when validating
-
-
 def overlap_denied_payload(active):
     label = (active or {}).get("preset") or "(ad-hoc)"
     return {
@@ -913,6 +904,9 @@ def _add_spec_cli_parser(subparsers, spec: CommandSpec, *, handler):
         command_subparsers = parent_parser.add_subparsers(
             dest=destination, required=required
         )
+        if binding.parent_runs_command:
+            _add_spec_cli_arguments(parent_parser, spec)
+            parent_parser.set_defaults(func=handler)
         group_cache[prefix] = command_subparsers
     parser_kwargs = {}
     if binding.aliases:
@@ -927,6 +921,23 @@ def _add_spec_cli_parser(subparsers, spec: CommandSpec, *, handler):
     _add_spec_cli_arguments(command_parser, spec)
     command_parser.set_defaults(func=handler)
     return command_parser
+
+
+def _add_spec_cli_alternate_parsers(subparsers, spec: CommandSpec, *, handler):
+    """Register a spec's alternate CLI paths under groups that already exist."""
+    group_cache = getattr(subparsers, "_portskill_spec_groups", {})
+    for alternate in spec.cli.alternate_paths:
+        group_subparsers = (
+            subparsers if len(alternate.path) == 1 else group_cache[alternate.path[:-1]]
+        )
+        parser_kwargs = {}
+        if alternate.help is not MISSING:
+            parser_kwargs["help"] = alternate.help
+        alternate_parser = group_subparsers.add_parser(
+            alternate.path[-1], **parser_kwargs
+        )
+        _add_spec_cli_arguments(alternate_parser, spec)
+        alternate_parser.set_defaults(func=handler)
 
 
 def parser():
@@ -959,15 +970,7 @@ def parser():
 
     _add_spec_cli_parser(subparsers, SCHEDULE_COMMAND, handler=cmd_schedule)
 
-    compat = subparsers.add_parser(
-        "compat",
-        help="Check whether selected environments can share ports safely",
-    )
-    compat_sub = compat.add_subparsers(dest="compat_command")
-    compat_check = compat_sub.add_parser("check", help="Report port conflicts (default)")
-    for p in (compat, compat_check):
-        _add_spec_cli_arguments(p, COMPAT_COMMAND)
-        p.set_defaults(func=cmd_compat)
+    _add_spec_cli_parser(subparsers, COMPAT_COMMAND, handler=cmd_compat)
 
     _add_spec_cli_parser(subparsers, ENVIRONMENT_EXPORT_COMMAND, handler=cmd_environment)
     _add_spec_cli_parser(subparsers, ENVIRONMENT_IMPORT_COMMAND, handler=cmd_environment)
@@ -995,13 +998,9 @@ def parser():
     _add_spec_cli_parser(subparsers, WORKSPACE_DRAFT_SAVE_COMMAND, handler=cmd_workspace)
     _add_spec_cli_parser(subparsers, WORKSPACE_DRAFT_REVERT_COMMAND, handler=cmd_workspace)
     _add_spec_cli_parser(subparsers, WORKSPACE_EDIT_MODE_COMMAND, handler=cmd_workspace)
-    ws_sub = subparsers._portskill_spec_groups[("workspace",)]
-    ws_cap = ws_sub.add_parser(
-        "capture-defaults",
-        help="Alias: set default_state from current active/inactive states",
+    _add_spec_cli_alternate_parsers(
+        subparsers, SET_DEFAULTS_FROM_CURRENT_COMMAND, handler=cmd_workspace
     )
-    ws_cap.add_argument("--environment", default=None, help="History env scope")
-    ws_cap.set_defaults(func=cmd_workspace)
 
     _add_spec_cli_parser(subparsers, HISTORY_LIST_COMMAND, handler=cmd_history)
     _add_spec_cli_parser(subparsers, HISTORY_RESTORE_COMMAND, handler=cmd_history)

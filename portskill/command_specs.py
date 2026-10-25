@@ -73,6 +73,14 @@ class ParamSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class CLIAlternatePath:
+    """An extra CLI path that runs the same command (for example a group alias)."""
+
+    path: tuple[str, ...]
+    help: str | _Missing = MISSING
+
+
+@dataclass(frozen=True, slots=True)
 class CLICommandBinding:
     path: tuple[str, ...]
     aliases: tuple[str, ...] = ()
@@ -81,6 +89,9 @@ class CLICommandBinding:
     parent_destinations: tuple[str, ...] = ()
     parent_required: tuple[bool, ...] = ()
     parent_helps: tuple[str | _Missing, ...] = ()
+    # The parent group also runs this command when no subcommand is given.
+    parent_runs_command: bool = False
+    alternate_paths: tuple[CLIAlternatePath, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -499,7 +510,7 @@ COMPAT_COMMAND = CommandSpec(
         ParamSpec(key="file", cli=CLIParamBinding(flags=("--file",), default=None, help="Environment JSON file"), mcp=MCPParamBinding(description="Optional environment JSON path", order=1)),
         ParamSpec(key="include_default_on", kind="boolean", cli=CLIParamBinding(flags=("--include-default-on",), action="store_true", help="Include live Default On ranges"), mcp=MCPParamBinding(description="Include live Default On ranges", order=2)),
     ),
-    cli=CLICommandBinding(path=("compat", "check"), help="Report port conflicts (default)", parent_destinations=("compat_command",), parent_required=(False,)),
+    cli=CLICommandBinding(path=("compat", "check"), help="Report port conflicts (default)", parent_destinations=("compat_command",), parent_required=(False,), parent_helps=("Check whether selected environments can share ports safely",), parent_runs_command=True),
     mcp=MCPCommandBinding(name="compat_check", description="Check whether selected presets/environments can share ports safely. Returns conflicts JSON; non-compatible is an error when used as a gate.", catalog_position=14),
     ui=UICommandBinding(actions=("compat-check",), binder="compat"),
 )
@@ -594,7 +605,16 @@ SET_DEFAULTS_FROM_CURRENT_COMMAND = CommandSpec(
     params=(
         ParamSpec(key="environment", cli=CLIParamBinding(flags=("--environment",), default=None, help="History env scope")),
     ),
-    cli=CLICommandBinding(path=("set-defaults-from-current",), help="Set default_state on/off from each local range's current active/inactive state"),
+    cli=CLICommandBinding(
+        path=("set-defaults-from-current",),
+        help="Set default_state on/off from each local range's current active/inactive state",
+        alternate_paths=(
+            CLIAlternatePath(
+                path=("workspace", "capture-defaults"),
+                help="Alias: set default_state from current active/inactive states",
+            ),
+        ),
+    ),
     ui=UICommandBinding(actions=("set-defaults-from-current", "capture-defaults"), binder="none"),
 )
 

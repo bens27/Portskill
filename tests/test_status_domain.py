@@ -89,7 +89,7 @@ class StatusDomainTests(unittest.TestCase):
         from portskill import mcp
 
         expected = {"status": "ok", "ranges": []}
-        with mock.patch.object(mcp, "run_cli", side_effect=AssertionError("subprocess used")), mock.patch(
+        with mock.patch(
             "portskill.status.status_result", return_value=expected
         ) as status:
             result = mcp.call_tool("status", {"project": "/tmp/example"})

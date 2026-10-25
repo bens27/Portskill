@@ -91,7 +91,6 @@ from .mcp import (
     discovery_payload,
     mcp_handle,
     mcp_stdio_loop,
-    run_cli,
 )
 from .port_discovery import discover_import_result, discover_ports_result
 from .tailscale_commands import (
@@ -4337,19 +4336,27 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         return _domain_cli_result(
             lambda: _execute_ui_command(action, {**body, "index": index})
         )
-    if action == "history-reset":
-        return _domain_cli_result(lambda: _execute_ui_command(action, body))
-    if action == "history-clear":
+    if action in (
+        "history-reset",
+        "history-clear",
+        "apply-defaults",
+        "exit-house",
+        "deactivate",
+        "handoff-fetch",
+        "start-all",
+        "stop-all",
+        "stop-non-default",
+        "set-defaults-from-current",
+        "capture-defaults",
+        "draft-save",
+        "draft-revert",
+    ):
         return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action == "set-default":
         range_id = body.get("rangeId")
         state = body.get("state")
         if not isinstance(range_id, str) or state not in ("on", "off"):
             return 400, {"ok": False, "message": "expected rangeId and state on|off"}
-        return _domain_cli_result(lambda: _execute_ui_command(action, body))
-    if action == "apply-defaults":
-        return _domain_cli_result(lambda: _execute_ui_command(action, body))
-    if action in ("exit-house", "deactivate"):
         return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action == "compat-check":
         presets = body.get("presets") or body.get("names") or []
@@ -4399,21 +4406,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
                     pathlib.Path(tmp_path).unlink(missing_ok=True)
                 except OSError:
                     pass
-    if action == "preset-save":
-        name = body.get("name")
-        if not isinstance(name, str) or not name.strip():
-            return 400, {"ok": False, "message": "expected name"}
-        return _domain_cli_result(
-            lambda: _execute_ui_command(action, {**body, "name": name.strip()})
-        )
-    if action == "preset-apply":
-        name = body.get("name")
-        if not isinstance(name, str) or not name.strip():
-            return 400, {"ok": False, "message": "expected name"}
-        return _domain_cli_result(
-            lambda: _execute_ui_command(action, {**body, "name": name.strip()})
-        )
-    if action == "preset-delete":
+    if action in ("preset-save", "preset-apply", "preset-delete", "new-environment"):
         name = body.get("name")
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
@@ -4548,9 +4541,6 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             lambda: _execute_ui_command("handoff-set-kit", {"path": path})
         )
 
-    if action == "handoff-fetch":
-        return _domain_cli_result(lambda: _execute_ui_command(action, body))
-
     if action == "handoff-skill-download":
         result = _execute_ui_command(action, body)
         if not result.get("ok"):
@@ -4592,15 +4582,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
     if action in ("handoff-package", "handoff-codex-install") and not handoff_enabled(load_registry().get("settings")):
         return 409, {"ok": False, "error": "handoff_disabled", "message": "Enable Session Handoff under Experimental (Beta) before installing or packaging the kit."}
 
-    if action == "handoff-package":
-        result = _execute_ui_command(action, body)
-        if result.get("ok"):
-            out = dict(result)
-            out["ok"] = True
-            return 0, out
-        return 422, result
-
-    if action == "handoff-codex-install":
+    if action in ("handoff-package", "handoff-codex-install"):
         result = _execute_ui_command(action, body)
         if result.get("ok"):
             out = dict(result)
@@ -4672,27 +4654,12 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
                 return 0, out
             return code if code else 422, out
         return _cli_result(code, payload, stdout)
-    if action == "new-environment":
-        name = body.get("name")
-        if not isinstance(name, str) or not name.strip():
-            return 400, {"ok": False, "message": "expected name"}
-        return _domain_cli_result(
-            lambda: _execute_ui_command(action, {**body, "name": name.strip()})
-        )
-    if action in ("focus-environment", "open-environment-tab"):
+    if action in ("focus-environment", "open-environment-tab", "close-environment-tab"):
         name = body.get("name")
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
         code, payload, stdout = _run_domain(
             lambda: _execute_ui_command(action, body)
-        )
-        return _cli_result(code, payload, stdout)
-    if action == "close-environment-tab":
-        name = body.get("name")
-        if not isinstance(name, str) or not name.strip():
-            return 400, {"ok": False, "message": "expected name"}
-        code, payload, stdout = _run_domain(
-            lambda: _execute_ui_command("close-environment-tab", body)
         )
         return _cli_result(code, payload, stdout)
     if action == "discover-ports":
@@ -4787,14 +4754,6 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
                 "message": str(exc) or exc.__class__.__name__,
             }
             return _cli_result(1, payload, json.dumps(payload, separators=(",", ":"), sort_keys=True))
-    if action == "start-all":
-        return _domain_cli_result(lambda: _execute_ui_command(action, body))
-    if action == "stop-all":
-        return _domain_cli_result(lambda: _execute_ui_command(action, body))
-    if action == "stop-non-default":
-        return _domain_cli_result(lambda: _execute_ui_command(action, body))
-    if action in ("set-defaults-from-current", "capture-defaults"):
-        return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action == "tailscale-logout":
         code, payload, stdout = _run_domain(
             lambda: _execute_ui_command(action, body)
@@ -4822,10 +4781,6 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         )
         if not isinstance(range_id, str) or not range_id.strip():
             return 400, {"ok": False, "message": "expected rangeId"}
-        return _domain_cli_result(lambda: _execute_ui_command(action, body))
-    if action == "draft-save":
-        return _domain_cli_result(lambda: _execute_ui_command(action, body))
-    if action == "draft-revert":
         return _domain_cli_result(lambda: _execute_ui_command(action, body))
     if action in ("machine-list", "machine-add", "machine-remove"):
         return 400, _execute_ui_command(action, body)

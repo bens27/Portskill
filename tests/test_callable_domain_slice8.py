@@ -142,9 +142,7 @@ class CallableDomainSlice8Tests(unittest.TestCase):
             ),
         )
         for operation_name, body in cases:
-            with self.subTest(action=body["action"]), mock.patch.object(
-                server, "run_cli", side_effect=AssertionError("subprocess used")
-            ), mock.patch(
+            with self.subTest(action=body["action"]), mock.patch(
                 operation_name,
                 side_effect=[
                     DomainError("registry_unavailable", "boom", exit_code=1),
@@ -178,25 +176,22 @@ class CallableDomainSlice8Tests(unittest.TestCase):
             iso.write_registry({
                 "projects": {str(project.resolve()): {"ranges": [item]}},
             })
-            with mock.patch.object(
-                server, "run_cli", side_effect=AssertionError("subprocess used")
-            ):
-                created = server.dispatch_ui_action({
-                    "action": "new-environment",
-                    "name": "empty",
-                    "description": "Empty env",
-                })
-                staged = server.dispatch_ui_action({
-                    "action": "draft-stage",
-                    "rangeId": "r1",
-                    "command": "python app.py",
-                    "cwd": str(project),
-                })
-                saved = server.dispatch_ui_action({
-                    "action": "draft-save",
-                    "rangeId": "r1",
-                })
-                reverted = server.dispatch_ui_action({"action": "draft-revert"})
+            created = server.dispatch_ui_action({
+                "action": "new-environment",
+                "name": "empty",
+                "description": "Empty env",
+            })
+            staged = server.dispatch_ui_action({
+                "action": "draft-stage",
+                "rangeId": "r1",
+                "command": "python app.py",
+                "cwd": str(project),
+            })
+            saved = server.dispatch_ui_action({
+                "action": "draft-save",
+                "rangeId": "r1",
+            })
+            reverted = server.dispatch_ui_action({"action": "draft-revert"})
             persisted = json.loads(iso.registry_path.read_text())
 
         for code, body in (created, staged, saved, reverted):
@@ -325,8 +320,6 @@ class CallableDomainSlice8Tests(unittest.TestCase):
 
         stdout = io.StringIO()
         with mock.patch.object(
-            server, "run_cli", side_effect=AssertionError("subprocess used")
-        ), mock.patch.object(
             server, "_portskill_project_path", return_value="/tmp/portskill"
         ), mock.patch(
             "portskill.registry_mutations.allocate_result",

@@ -3,16 +3,45 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import pathlib
 import re
+import subprocess
+import sys
 import unittest
-from unittest import mock
 
-from tests.helpers import IsolatedConfig
+from tests.helpers import IsolatedConfig, ROOT
 
 UPSERT_OK = {"action": "mcp-user-command-save", "name": "deploy", "steps": [{"tool": "status"}]}
 
-# (HTTP body, legacy argv the server used to pass to run_cli)
+
+def _legacy_cli(argv: list[str]):
+    """Run the CLI in a subprocess the way the removed ``mcp.run_cli`` did.
+
+    Returns (exit_code, parsed_json_or_None, raw_stdout). Kept here as the
+    legacy oracle these contracts compare the in-process adapters against.
+    """
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(ROOT) if not existing else str(ROOT) + os.pathsep + existing
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-m", "portskill.cli", *argv],
+            capture_output=True, text=True, env=env, check=False,
+        )
+    except OSError as exc:
+        return 2, {"status": "error", "reason": "cli_exec_failed", "message": str(exc)}, ""
+    stdout = (completed.stdout or "").strip()
+    payload = None
+    if stdout:
+        try:
+            payload = json.loads(stdout.splitlines()[-1])
+        except json.JSONDecodeError:
+            payload = None
+    return completed.returncode, payload, stdout
+
+
+# (HTTP body, legacy argv the server used to pass to the CLI subprocess)
 CASES = [
     ({"action": "mcp-tool-set", "name": "status", "enabled": False},
      ["settings", "set", "--mcp-tool", "status=off"]),
@@ -55,13 +84,12 @@ class CallableDomainSlice7BTests(unittest.TestCase):
     def _http(self, body):
         from portskill import server
 
-        with mock.patch.object(server, "run_cli", side_effect=AssertionError("subprocess used")):
-            return server.dispatch_ui_action(body)
+        return server.dispatch_ui_action(body)
 
     def _legacy(self, argv):
-        from portskill import mcp, server
+        from portskill import server
 
-        return server._cli_result(*mcp.run_cli(argv))
+        return server._cli_result(*_legacy_cli(argv))
 
     def _settings(self, iso):
         return json.loads(iso.registry_path.read_text()).get("settings")

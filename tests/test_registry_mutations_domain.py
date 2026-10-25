@@ -68,19 +68,16 @@ class RegistryMutationDomainTests(unittest.TestCase):
             project = iso.root / "project"
             project.mkdir()
             iso.write_registry()
-            with mock.patch.object(
-                mcp, "run_cli", side_effect=AssertionError("subprocess used")
-            ):
-                allocated = mcp.call_tool("allocate", {
-                    "count": 1, "project": str(project), "tailnet": "none", "start": 21002,
-                })
-                range_id = allocated["structuredContent"]["range"]["id"]
-                activated = mcp.call_tool("activate", {
-                    "project": str(project), "range_id": range_id, "tailnet": "none",
-                })
-                released = mcp.call_tool("release", {
-                    "project": str(project), "range_id": range_id,
-                })
+            allocated = mcp.call_tool("allocate", {
+                "count": 1, "project": str(project), "tailnet": "none", "start": 21002,
+            })
+            range_id = allocated["structuredContent"]["range"]["id"]
+            activated = mcp.call_tool("activate", {
+                "project": str(project), "range_id": range_id, "tailnet": "none",
+            })
+            released = mcp.call_tool("release", {
+                "project": str(project), "range_id": range_id,
+            })
 
         self.assertFalse(allocated["isError"])
         self.assertFalse(activated["isError"])
@@ -153,10 +150,9 @@ class RegistryMutationDomainTests(unittest.TestCase):
             project = iso.root / "project"
             project.mkdir()
             iso.write_registry()
-            with mock.patch.object(server, "run_cli", side_effect=AssertionError("subprocess used")):
-                code, body = server.dispatch_ui_action({
-                    "action": "allocate", "count": 1, "project": str(project), "tailnet": "none",
-                })
+            code, body = server.dispatch_ui_action({
+                "action": "allocate", "count": 1, "project": str(project), "tailnet": "none",
+            })
         self.assertEqual(code, 0)
         self.assertTrue(body["ok"])
 

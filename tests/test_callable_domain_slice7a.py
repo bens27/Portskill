@@ -116,9 +116,7 @@ class CallableDomainSlice7ATests(unittest.TestCase):
             {"action": "handoff-skill-clear"},
         )
         for body in settings_cases:
-            with self.subTest(action=body["action"]), mock.patch.object(
-                server, "run_cli", side_effect=AssertionError("subprocess used")
-            ), mock.patch(
+            with self.subTest(action=body["action"]), mock.patch(
                 "portskill.settings.settings_set",
                 side_effect=[
                     DomainError("settings_unavailable", "boom", exit_code=1),
@@ -139,9 +137,7 @@ class CallableDomainSlice7ATests(unittest.TestCase):
             self.assertEqual(succeeded[0], 0)
             self.assertTrue(succeeded[1]["ok"])
 
-        with mock.patch.object(
-            server, "run_cli", side_effect=AssertionError("subprocess used")
-        ), mock.patch(
+        with mock.patch(
             "portskill.handoff.fetch_kit_result",
             side_effect=[
                 DomainError("fetch_failed", "boom"),
@@ -155,8 +151,6 @@ class CallableDomainSlice7ATests(unittest.TestCase):
         self.assertEqual(succeeded[0], 0)
 
         with mock.patch.object(
-            server, "run_cli", side_effect=AssertionError("subprocess used")
-        ), mock.patch.object(
             server,
             "persist_custom_skill",
             return_value={"ok": True, "path": "/tmp/custom-skill.md"},
@@ -228,14 +222,11 @@ class CallableDomainSlice7ATests(unittest.TestCase):
 
         with IsolatedConfig() as iso:
             iso.write_registry()
-            with mock.patch.object(
-                mcp, "run_cli", side_effect=AssertionError("subprocess used")
-            ):
-                result = mcp.call_tool("settings_set", {
-                    "handoff_enabled": True,
-                    "handoff_kit": "/tmp/kit",
-                    "handoff_skill": "none",
-                })
+            result = mcp.call_tool("settings_set", {
+                "handoff_enabled": True,
+                "handoff_kit": "/tmp/kit",
+                "handoff_skill": "none",
+            })
         self.assertFalse(result["isError"], result)
         settings = result["structuredContent"]["settings"]
         self.assertTrue(settings["handoff_enabled"])
