@@ -40,7 +40,7 @@ class ChainPolicy:
         the settings read) entirely.
     require_string_tool: reject a non-string step tool before the catalog
         lookup. Off, the lookup runs on the raw value, so an unhashable tool
-        (list / dict) raises TypeError.
+        (list / dict) raises TypeError; every shipped policy turns it on.
     forbid_nested: reject a step naming a saved user command (checked after
         the unknown-tool check, so it only fires for system-named commands).
     tolerate_user_command_read_errors: swallow failures while loading saved
@@ -106,8 +106,9 @@ RUN_CHAIN_POLICY = ChainPolicy(
 # UI save: names only. No alias resolution, no prefs or user-command reads, no
 # argument checks; mode kept raw, stop arguments dropped. Known, kept
 # differences: disabled tools save fine, a system-named user command is not
-# treated as nested, and an unhashable step tool raises TypeError. The CLI
-# owner normalizes mode and truncates to 12 steps after this.
+# treated as nested. A non-string step tool (a list or dict included) is
+# rejected as unknown, like any other bad name. The CLI owner normalizes mode
+# and truncates to 12 steps after this.
 SAVE_CHAIN_POLICY = ChainPolicy(
     name="save",
     resolve_aliases=False,
@@ -115,7 +116,7 @@ SAVE_CHAIN_POLICY = ChainPolicy(
     clear_stop_arguments=True,
     enabled_lookup=ENABLED_LOOKUP_NONE,
     tolerate_user_command_read_errors=False,
-    require_string_tool=False,
+    require_string_tool=True,
     forbid_nested=False,
     check_arguments=False,
     include_error_codes=False,

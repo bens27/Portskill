@@ -133,7 +133,7 @@ class Slice6PolicyDifferenceTests(unittest.TestCase):
         expected = {
             DRY_RUN_CHAIN_POLICY: ("dry-run", False, True, True, "exact", True, True, True, True, False),
             RUN_CHAIN_POLICY: ("run", True, False, False, "catalog", False, True, True, False, True),
-            SAVE_CHAIN_POLICY: ("save", False, False, True, "none", False, False, False, False, False),
+            SAVE_CHAIN_POLICY: ("save", False, False, True, "none", False, True, False, False, False),
         }
         for policy, flags in expected.items():
             with self.subTest(policy=policy.name):
@@ -236,12 +236,10 @@ class Slice6PolicyDifferenceTests(unittest.TestCase):
     def test_require_string_tool(self) -> None:
         from portskill.command_chains import DRY_RUN_CHAIN_POLICY, RUN_CHAIN_POLICY, SAVE_CHAIN_POLICY
 
-        for policy in (DRY_RUN_CHAIN_POLICY, RUN_CHAIN_POLICY):
-            with self.subTest(policy=policy.name):
-                self.assertIsNotNone(self.check(policy, {"tool": ["status"]}).rejection)
-        with self.assertRaises(TypeError):
-            self.check(SAVE_CHAIN_POLICY, {"tool": ["status"]})
-        self.assertIsNotNone(self.check(SAVE_CHAIN_POLICY, {"tool": 7}).rejection)
+        for policy in (DRY_RUN_CHAIN_POLICY, RUN_CHAIN_POLICY, SAVE_CHAIN_POLICY):
+            for tool in (["status"], {"status": 1}, 7):
+                with self.subTest(policy=policy.name, tool=tool):
+                    self.assertIsNotNone(self.check(policy, {"tool": tool}).rejection)
 
     def test_save_keeps_raw_mode_and_clears_stop(self) -> None:
         from portskill.command_chains import SAVE_CHAIN_POLICY

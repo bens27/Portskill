@@ -120,12 +120,47 @@ class SaveChainCharacterizationTests(unittest.TestCase):
         self.settings()
         self.assertEqual(self.rejected([{"tool": "a"}, {"tool": "b"}]), UNKNOWN.format({"tool": "a"}))
 
-    def test_unhashable_tool_raises(self) -> None:
-        # Pinned quirk: dict-key lookup on a list/dict tool raises TypeError.
+    def test_unhashable_tool_rejected_with_step_repr(self) -> None:
+        # Ticket 94c619ac: a list/dict tool used to raise TypeError from the
+        # catalog lookup, which dropped the HTTP connection. It is now an
+        # ordinary unknown-tool 400, also when a valid step precedes it.
         self.settings()
+        for tool in (["status"], [], {"a": 1}, {}):
+            step = {"tool": tool, "arguments": {"project": "/p"}}
+            with self.subTest(tool=tool):
+                self.assertEqual(self.rejected([step]), UNKNOWN.format(step))
+                self.assertEqual(self.rejected([{"tool": "preset_list"}, step]), UNKNOWN.format(step))
+
+    def test_unhashable_tool_gets_http_400_not_a_dropped_connection(self) -> None:
+        import json
+        import threading
+        import urllib.error
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+
+        from portskill.registry import read_settings
+        from portskill.server import Handler
+        from tests.helpers import free_loopback_port
+
+        self.settings()
+        httpd = ThreadingHTTPServer(("127.0.0.1", free_loopback_port()), Handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(httpd.shutdown)
+        url = f"http://127.0.0.1:{httpd.server_address[1]}/portskill/actions"
         for tool in (["status"], {"a": 1}):
-            with self.subTest(tool=tool), self.assertRaises(TypeError):
-                self.save([{"tool": tool}])
+            step = {"tool": tool}
+            payload = {"action": "mcp-user-command-save", "name": "chain", "steps": [step]}
+            req = urllib.request.Request(
+                url, data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"}, method="POST")
+            with self.subTest(tool=tool), self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(req, timeout=5)
+            with caught.exception as resp:
+                self.assertEqual(resp.code, 400)
+                self.assertEqual(json.loads(resp.read().decode("utf-8")),
+                                 {"ok": False, "message": UNKNOWN.format(step)})
+        self.assertNotIn("chain", read_settings().get("mcp_user_commands") or {})
 
     def test_disabled_tool_is_accepted(self) -> None:
         self.settings(mcp_tools={"compat_check": False, "portskill_path": False})
