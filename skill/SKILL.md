@@ -49,6 +49,25 @@ unused range and refuses a live process with `process_still_running`.
 for an externally started service. Repeated start/stop calls are safe no-ops
 when already in the requested state.
 
+## Finding registered services
+
+Plain `status` covers the project named by the current directory's
+`.portskill.json`, or every project when there is none. `status --all` (MCP
+`status` with `all: true`) always covers every registered project; it cannot be
+combined with `--project`.
+
+`status --find QUERY` (MCP `find`) searches every project, or only `--project`
+when given. Text matches, case-insensitively, anywhere in the range `note` or
+in its names: the project directory name and the range id. A number from 1 to
+65535 is also a port and matches every range whose `start..end` contains it,
+not only the start port; `--find 2024` therefore finds port 2024 and notes
+mentioning 2024. Digit-only queries skip range ids (they are timestamps), and
+numbers outside 1..65535 search text only. The result is a normal status
+payload holding only the matching ranges; each one also carries `project` and
+`matched` (`note`, `name` or `port`), and the payload adds `query` and
+`matches` (0 when nothing matches). Both options are read-only and observe
+ranges exactly like `status`.
+
 ## Drift and stale ranges
 
 `status` never repairs the registry. Every range carries `drift` (null when

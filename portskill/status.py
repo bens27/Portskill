@@ -87,10 +87,81 @@ def enrich_range(registry: dict, item: Any, *, tailscale_self: dict | None = Non
     return out
 
 
-def status_result(project: str | None = None) -> dict[str, Any]:
-    """Return status as an ordinary dict without emitting output or exiting."""
+def parse_find_query(find: Any) -> dict[str, Any] | None:
+    """Normalize a registry search query; ``None`` when no search was asked for.
+
+    Text is a case-insensitive substring matched against the range note and
+    its names (project directory name and range id). An ASCII-digit query is
+    also a port when it is 1..65535 (kind ``port``): it then matches every range
+    whose ``start..end`` contains it, as well as the note and project name. A
+    digit query does not match range ids, which are timestamps and would match
+    almost every range. Out-of-range digits are a text search only.
+    """
+    if find is None:
+        return None
+    if not isinstance(find, str) or not find.strip():
+        raise DomainError("invalid_args", "find needs a non-empty note, name or port")
+    text = find.strip()
+    query: dict[str, Any] = {"text": text, "kind": "text", "needle": text.casefold(), "port": None}
+    # isdigit() alone accepts "²", "٣" or "８" (int() fails or reads them as ASCII).
+    if text.isascii() and text.isdigit():
+        query["digits"] = True
+        # Too long to be a port; also keeps int() under its digit-length limit.
+        significant = text.lstrip("0")
+        if len(significant) <= 5:
+            port = int(significant or "0")
+            if 0 < port < 65536:
+                query["kind"] = "port"
+                query["port"] = port
+    return query
+
+
+def range_matches(project_path: str, item: Any, query: dict[str, Any]) -> list[str]:
+    """Return which fields of a saved range match ``query`` (empty: no match)."""
+    if not isinstance(item, dict):
+        return []
+    needle = query["needle"]
+    matched = []
+    note = item.get("note")
+    if isinstance(note, str) and needle in note.casefold():
+        matched.append("note")
+    names = [pathlib.PurePath(str(project_path)).name]
+    if not query.get("digits"):
+        names.append(str(item.get("id") or ""))
+    if any(needle in name.casefold() for name in names if name):
+        matched.append("name")
+    port = query["port"]
+    if port is not None:
+        start, end = item.get("start"), item.get("end")
+        if isinstance(start, int):
+            if not isinstance(end, int) or end < start:
+                end = start
+            if start <= port <= end:
+                matched.append("port")
+    return matched
+
+
+def status_result(
+    project: str | None = None,
+    *,
+    all_projects: bool = False,
+    find: str | None = None,
+) -> dict[str, Any]:
+    """Return status as an ordinary dict without emitting output or exiting.
+
+    Scope: an explicit ``project``; otherwise the project of the current
+    directory's ``.portskill.json``; otherwise every project. ``all_projects``
+    and ``find`` both ignore the directory context, so they cover the whole
+    registry unless ``project`` is given. Never writes the registry.
+    """
+    if all_projects and project is not None:
+        raise DomainError("invalid_args", "all and project are mutually exclusive")
+    query = parse_find_query(find)
     try:
-        selected_project = project_from_context(project)
+        if project is None and (all_projects or query is not None):
+            selected_project = None
+        else:
+            selected_project = project_from_context(project)
     except (OSError, TypeError, ValueError) as exc:
         raise DomainError("invalid_project", str(exc)) from exc
     start, end = pool_bounds_from_environment()
@@ -112,6 +183,8 @@ def status_result(project: str | None = None) -> dict[str, Any]:
                 if selected_project in registry["projects"]
                 else {}
             )
+        if query is not None:
+            return _search_payload(registry, projects, query, tailscale_self), False, []
         enriched = [enrich_range(registry, item, tailscale_self=tailscale_self) for item in ranges]
         projects_out = {}
         for project_path, entry in (projects or {}).items():
@@ -147,6 +220,46 @@ def status_result(project: str | None = None) -> dict[str, Any]:
         raise DomainError("corrupt_registry", str(exc)) from exc
     except (OSError, UnicodeError, TypeError, ValueError) as exc:
         raise DomainError("status_unavailable", str(exc)) from exc
+
+
+def _search_payload(
+    registry: dict, projects: dict, query: dict[str, Any], tailscale_self: dict | None
+) -> dict[str, Any]:
+    """Status payload holding only matching ranges.
+
+    Matching reads saved fields only; the existing status probe (connect for
+    live ranges, drift via ``range_drift``) runs on the matches alone.
+    """
+    enriched = []
+    projects_out = {}
+    for project_path, entry in (projects or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        project_ranges = []
+        for item in entry.get("ranges") or []:
+            matched = range_matches(project_path, item, query)
+            if not matched:
+                continue
+            out = enrich_range(registry, item, tailscale_self=tailscale_self)
+            out["project"] = project_path
+            out["matched"] = matched
+            project_ranges.append(out)
+        if project_ranges:
+            projects_out[project_path] = {**entry, "ranges": project_ranges}
+            enriched.extend(project_ranges)
+    payload = {
+        "status": "ok",
+        "query": {"text": query["text"], "kind": query["kind"]},
+        "matches": len(enriched),
+        "ranges": enriched,
+        "pool": registry["pool"],
+        "projects": projects_out,
+        "machines": normalize_machines(registry.get("machines")),
+    }
+    summary = drift_summary(enriched)
+    if summary["count"]:
+        payload["drift"] = summary
+    return payload
 
 
 def service_statuses(registry: dict) -> list[dict[str, Any]]:

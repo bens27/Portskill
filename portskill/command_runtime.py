@@ -33,6 +33,16 @@ def _bind_project(handler: Callable[..., dict], options: dict[str, Any]) -> dict
     return handler(options.get("project"))
 
 
+def _bind_status(handler: Callable[..., dict], options: dict[str, Any]) -> dict:
+    # Plain status keeps the historical one-argument call.
+    extra: dict[str, Any] = {}
+    if options.get("all"):
+        extra["all_projects"] = True
+    if options.get("find") is not None:
+        extra["find"] = options["find"]
+    return handler(options.get("project"), **extra)
+
+
 def _bind_registry_settings(
     handler: Callable[..., dict], options: dict[str, Any]
 ) -> dict:
@@ -117,6 +127,7 @@ _BINDERS = {
     "options": _bind_options,
     "none": _bind_none,
     "project": _bind_project,
+    "status": _bind_status,
     "registry_settings": _bind_registry_settings,
     "http_auth": _bind_http_auth,
     "path": _bind_path,

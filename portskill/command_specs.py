@@ -380,18 +380,55 @@ RELEASE_COMMAND = CommandSpec(
 
 STATUS_COMMAND = CommandSpec(
     id="status",
-    handler=HandlerRef("portskill.status", "status_result", "project"),
+    handler=HandlerRef("portskill.status", "status_result", "status"),
     params=(
         ParamSpec(
             key="project",
             cli=CLIParamBinding(flags=("--project",), default=None),
             mcp=MCPParamBinding(description="Optional project filter"),
         ),
+        ParamSpec(
+            key="all",
+            kind="boolean",
+            cli=CLIParamBinding(
+                flags=("--all",),
+                action="store_true",
+                help="Every registered project, ignoring the current directory's .portskill.json",
+            ),
+            mcp=MCPParamBinding(
+                description=(
+                    "If true, cover every registered project instead of the current "
+                    "directory's project (cannot be combined with project)"
+                ),
+            ),
+        ),
+        ParamSpec(
+            key="find",
+            cli=CLIParamBinding(
+                flags=("--find",),
+                default=None,
+                metavar="QUERY",
+                help=(
+                    "Search every project (or --project) for ranges whose note or name "
+                    "contains QUERY (case-insensitive); a port number also matches any range containing it"
+                ),
+            ),
+            mcp=MCPParamBinding(
+                description=(
+                    "Search the whole registry (or project) for ranges whose note or name "
+                    "(project directory or range id) contains this text, case-insensitive; "
+                    "a port number also matches any range whose start..end contains it"
+                ),
+            ),
+        ),
     ),
     cli=CLICommandBinding(path=("status",)),
     mcp=MCPCommandBinding(
         name="status",
-        description="Inspect registry state (portskill status).",
+        description=(
+            "Inspect registry state (portskill status). Read-only. all=true covers every "
+            "project; find searches ranges by note, name or port."
+        ),
         catalog_position=5,
         lean=True,
     ),
