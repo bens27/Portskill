@@ -170,6 +170,95 @@ def _tailnet_needs_input(ran: list, skipped: list, result: dict) -> dict:
     }
 
 
+# Set on tailnet when a restart could not re-apply the mapping, so the next
+# restart (or the advertised resume) still brings it back. configured_at stays
+# None meanwhile: nothing is applied on the tailnet until the re-apply succeeds.
+RESTORE_PENDING_KEY = "restore_pending"
+
+
+def _recorded_tailnet(item: dict | None) -> dict | None:
+    """Serve/Funnel mapping a restart must bring back, or None.
+
+    Only a mapping that was actually configured counts, or one a failed
+    restart left pending: a mode recorded at allocate time but never applied
+    (login skipped, then declined) stays off.
+    """
+    if not isinstance(item, dict) or item.get("state") == "released":
+        return None
+    tailnet = item.get("tailnet")
+    if not isinstance(tailnet, dict):
+        return None
+    if not tailnet.get("configured_at") and not tailnet.get(RESTORE_PENDING_KEY):
+        return None
+    mode = tailnet.get("mode")
+    if not tailnet_is_requested(mode):
+        return None
+    return {
+        "mode": mode.strip().lower(),
+        "port": tailnet.get("port") or item.get("start"),
+        "previous_configured_at": tailnet.get("configured_at"),
+    }
+
+
+def _set_restore_pending(item: dict, pending: bool) -> bool:
+    """Set or clear the pending-restore marker; True when the item changed."""
+    tailnet = item.get("tailnet")
+    if not isinstance(tailnet, dict):
+        return False
+    if pending:
+        if tailnet.get(RESTORE_PENDING_KEY) is True:
+            return False
+        tailnet[RESTORE_PENDING_KEY] = True
+        return True
+    return tailnet.pop(RESTORE_PENDING_KEY, None) is not None
+
+
+def _tailnet_restore_needs_input(
+    ran: list,
+    skipped: list,
+    result: dict,
+    restore: dict,
+    tailscale: dict,
+    failure: dict | None = None,
+) -> dict:
+    """Restart could not re-apply the recorded mapping: ask, never drop it."""
+    mode = restore["mode"]
+    port = restore.get("port")
+    if failure is not None:
+        reason, needed = "tailnet_restore_failed", "tailnet_restore"
+        why = failure.get("message") or failure.get("reason") or "tailscale command failed"
+        fix = "Fix Tailscale"
+    elif tailscale.get("state") == "binary_missing":
+        reason, needed = "tailscale_bin_missing", "tailscale_install"
+        why = "Tailscale binary not found"
+        fix = "Install Tailscale or set PORTSKILL_TAILSCALE_BIN"
+    else:
+        reason, needed = "tailscale_auth_required", "tailscale_login"
+        why = "Tailscale is not logged in"
+        fix = "Complete Browser Login (or `portskill-cli tailscale login`)"
+    payload = {
+        "status": "needs_input",
+        "input": needed,
+        "needs_input": True,
+        "reason": reason,
+        "prompt": (
+            f"Restart kept the recorded Tailscale {mode} mapping for port {port} "
+            f"but could not re-apply it ({why}). {fix}, then restart again "
+            f"(or resume with `--tailnet {mode}`) to re-apply it, "
+            "or resume with `--tailnet none` to leave it off."
+        ),
+        "options": [mode, "none"],
+        "resume_hint": "--tailnet",
+        "tailnet_restore": dict(restore),
+        "ran": ran,
+        "skipped": skipped,
+        "result": result,
+    }
+    if failure is not None:
+        payload["error"] = failure
+    return payload
+
+
 def _scripts_exist(project: str) -> bool:
     root = pathlib.Path(project)
     return (root / DEFAULT_START_SCRIPT).is_file() and (root / DEFAULT_STOP_SCRIPT).is_file()
@@ -323,19 +412,34 @@ def run_path(
     ran: list[dict] = []
     skipped: list[dict] = []
     needs_input = False
+    restore_tailnet: dict | None = None
+    restore_failure: dict | None = None
 
     def mutate(registry):
-        nonlocal needs_input, requested
-        # Explicit tailnet wins; otherwise start/restart follow settings.default_tailnet.
-        if requested is None and mode in ("start", "restart"):
-            if normalize_settings(registry.get("settings")).get("default_tailnet") == "serve":
-                requested = "serve"
+        nonlocal needs_input, requested, restore_tailnet, restore_failure
         hist_key = resolve_history_env_name(registry, environment)
         ensure_baseline(registry, hist_key)
         changed: list[str] = []
         item = _select_item(registry, project, range_id, note) if mode != "status" else None
         if item is not None and is_remote_range(registry, item):
             refuse_remote_process(registry, item, action=f"path {mode}")
+        # Explicit tailnet wins. Restart then re-applies the range's configured
+        # (or pending) Serve/Funnel mapping, which its stop phase tears down;
+        # otherwise start/restart follow settings.default_tailnet. An explicit
+        # value equal to the recorded mode is the same restore (the resume).
+        if mode == "restart":
+            recorded = _recorded_tailnet(item)
+            if recorded is not None and requested in (None, recorded["mode"]):
+                restore_tailnet = recorded
+                if requested is None:
+                    restore_tailnet["source"] = "recorded"
+                requested = recorded["mode"]
+        # Declining the mapping drops a pending restore.
+        if requested == "none" and item is not None and _set_restore_pending(item, False):
+            changed.append(project)
+        if requested is None and mode in ("start", "restart"):
+            if normalize_settings(registry.get("settings")).get("default_tailnet") == "serve":
+                requested = "serve"
 
         result: dict[str, Any] = {"range": item, "project": project, "mode": mode}
 
@@ -387,6 +491,9 @@ def run_path(
                 skipped.append(_phase_entry(phase, skipped=reason))
                 if phase == "tailnet" and needs_input_for_tailnet_skip(reason, facts):
                     needs_input = True
+                    if restore_tailnet is not None and item is not None:
+                        _set_restore_pending(item, True)
+                        changed.append(project)
                 continue
 
             if phase == "allocate":
@@ -429,9 +536,29 @@ def run_path(
                 if item is None:
                     raise DomainError("not_found", "path tailnet needs an allocated range")
                 applied = requested or "none"
-                activate_item(item, project, item.get("id"), applied)
+                if restore_tailnet is None:
+                    activate_item(item, project, item.get("id"), applied)
+                    _set_restore_pending(item, False)
+                    changed.append(project)
+                    ran.append(_phase_entry(phase, detail={"mode": applied, "port": item.get("start")}))
+                    continue
+                # The service is already back up: a failed re-apply must not
+                # roll the registry back, and the mapping stays pending.
+                try:
+                    activate_item(item, project, item.get("id"), applied)
+                except DomainError as exc:
+                    restore_failure = exc.as_dict()
+                    needs_input = True
+                    _set_restore_pending(item, True)
+                    changed.append(project)
+                    skipped.append(_phase_entry(phase, skipped="restore_failed"))
+                    continue
+                _set_restore_pending(item, False)
                 changed.append(project)
-                ran.append(_phase_entry(phase, detail={"mode": applied, "port": item.get("start")}))
+                detail = {"mode": applied, "port": item.get("start")}
+                if restore_tailnet.get("source"):
+                    detail["source"] = restore_tailnet["source"]
+                ran.append(_phase_entry(phase, detail=detail))
             elif phase == "stop":
                 if item is None:
                     skipped.append(_phase_entry(phase, skipped=SKIP_STOP_NOT_RUNNING))
@@ -476,7 +603,11 @@ def run_path(
             "skipped": skipped,
             "result": result,
         }
-        if needs_input:
+        if needs_input and restore_tailnet is not None:
+            payload = _tailnet_restore_needs_input(
+                ran, skipped, result, restore_tailnet, ts, restore_failure,
+            )
+        elif needs_input:
             payload = _tailnet_needs_input(ran, skipped, result)
         return payload, sorted(set(changed))
 
