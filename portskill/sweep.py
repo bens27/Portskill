@@ -6,7 +6,9 @@ range whose process died but whose ports are still held is drift, not stale:
 it is listed under ``skipped`` and never released, because freeing it would let
 the port be reallocated under a live listener. Reserved and released ranges
 are never touched. There is no age threshold: a dead process is stale however
-recent.
+recent. A range whose tracked process is alive is never stale and is not
+probed here (the scan runs under the registry lock), so sweep does not list
+it; ``status`` still reports its ``port_unbound`` hint.
 
 Release re-checks every candidate under the registry lock. ``range_ids``
 narrows a release to the ranges the caller reviewed: a confirmed range that is
@@ -61,8 +63,9 @@ def _scan(registry: dict, project: str | None) -> tuple[list, list]:
                 continue
             if is_remote_range(registry, item):
                 continue
-            # Bind test only: no connects while the registry lock is held.
-            drift = range_drift(item)
+            # No network I/O under the registry lock: live ranges (never
+            # releasable) are not probed, the rest get the bind test only.
+            drift = range_drift(item, connect=False)
             if not drift:
                 continue
             triple = (proj, item, _row(proj, item, drift))

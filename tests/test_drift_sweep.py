@@ -263,14 +263,133 @@ class DriftSweepTests(unittest.TestCase):
         pid, pgid = self._live_pid()
         self._write([self._range("lan", self._listener(host=address), pid=pid, pgid=pgid)])
         before = self._bytes()
+        from portskill.status import status_result
 
+        hint = {r["id"]: r["drift"] for r in status_result(self.project)["ranges"]}["lan"]
         result = self._sweep(release=True)
 
+        # Status keeps the hint; sweep never probes a live range (388b7f19),
+        # so it neither lists nor releases it.
+        self.assertEqual(hint["reasons"], ["port_unbound"])
+        self.assertFalse(hint["stale"])
         self.assertEqual(result["stale"], [])
         self.assertEqual(result["released"], [])
-        self.assertEqual([row["range_id"] for row in result["skipped"]], ["lan"])
-        self.assertEqual(result["skipped"][0]["reasons"], ["port_unbound"])
+        self.assertEqual(result["skipped"], [])
         self.assertEqual(self._bytes(), before)
+
+    def test_sweep_runs_no_connect_or_bind_under_the_lock_for_live_ranges(self) -> None:
+        # 388b7f19 A: the scan runs inside mutate_registry. A live range can
+        # never be released, so its ports get neither a connect nor a bind
+        # there; only the not-alive range is bind-tested (the stale decider).
+        from portskill import drift as drift_module
+        from portskill import sweep as sweep_module
+
+        live, live_group = self._live_pid()
+        other, other_group = self._live_pid()
+        dead, dead_group = self._dead_pid()
+        serving, starting, stale = self._listener(), _free_port(), _free_port()
+        self._write([
+            self._range("serving", serving, pid=live, pgid=live_group),
+            self._range("starting", starting, pid=other, pgid=other_group),
+            self._range("stale", stale, pid=dead, pgid=dead_group),
+        ])
+        locked = {"held": False}
+        probes: list[tuple[str, int, bool]] = []
+        real_mutate = sweep_module.mutate_registry
+
+        def mutate(fn, *args, **kwargs):
+            def inner(registry):
+                locked["held"] = True
+                try:
+                    return fn(registry)
+                finally:
+                    locked["held"] = False
+            return real_mutate(inner, *args, **kwargs)
+
+        def recorder(kind, real):
+            def probe(port):
+                probes.append((kind, port, locked["held"]))
+                return real(port)
+            return probe
+
+        with mock.patch.object(sweep_module, "mutate_registry", mutate), \
+                mock.patch.object(drift_module, "port_held", recorder("bind", drift_module.port_held)), \
+                mock.patch.object(drift_module, "port_answers", recorder("connect", drift_module.port_answers)), \
+                mock.patch.object(drift_module.socket, "create_connection",
+                                  side_effect=AssertionError("connect under the sweep lock")):
+            result = self._sweep(release=True)
+
+        self.assertEqual(probes, [("bind", stale, True)])
+        self.assertEqual([row["range_id"] for row in result["released"]], ["stale"])
+        self.assertEqual(result["skipped"], [])
+        self.assertEqual(self._stored("serving")["state"], "active")
+        self.assertEqual(self._stored("starting")["state"], "active")
+        self.assertTrue(_alive(live) and _alive(other))
+
+    def test_pid_less_range_with_a_loopback_listener_is_never_bind_tested(self) -> None:
+        # 388b7f19 B: an externally activated range is connect-tested first;
+        # an answer proves the port is held, so the service is never bound.
+        # The listener is on the second port: every port is connected before
+        # any is bound.
+        from portskill import drift as drift_module
+        from portskill import server
+        from portskill.status import service_statuses, status_result
+
+        start = self._pair_with_listener_on_second()
+        self._write([self._range("external", start, end=start + 1)])
+        raw = json.loads(self.iso.registry_path.read_text(encoding="utf-8"))
+
+        with mock.patch("portskill.drift.port_held") as port_held, \
+                mock.patch("portskill.drift.port_answers", wraps=drift_module.port_answers) as answers:
+            result = status_result(self.project)
+            services = service_statuses(raw)
+            view = server.build_view(raw)
+
+        port_held.assert_not_called()
+        answers.assert_any_call(start + 1)
+        self.assertIsNone({r["id"]: r["drift"] for r in result["ranges"]}["external"])
+        self.assertEqual(len(services), 1)
+        self.assertTrue(view)
+
+    def test_pid_less_range_with_nothing_answering_falls_back_to_the_bind_test(self) -> None:
+        # Connect-first never decides "free": with no answer, bind decides.
+        from portskill import drift as drift_module
+        from portskill.status import status_result
+
+        port = _free_port()
+        self._write([self._range("idle", port)])
+        calls: list[tuple[str, int]] = []
+        real_answers, real_held = drift_module.port_answers, drift_module.port_held
+
+        def answers(p):
+            calls.append(("connect", p))
+            return real_answers(p)
+
+        def held(p):
+            calls.append(("bind", p))
+            return real_held(p)
+
+        with mock.patch.object(drift_module, "port_answers", answers), \
+                mock.patch.object(drift_module, "port_held", held):
+            drift = {r["id"]: r["drift"] for r in status_result(self.project)["ranges"]}["idle"]
+
+        # status probes each range more than once; every probe connects first.
+        self.assertTrue(calls)
+        self.assertEqual(calls, [("connect", port), ("bind", port)] * (len(calls) // 2))
+        self.assertEqual(drift["reasons"], ["no_pid", "port_unbound"])
+        self.assertTrue(drift["stale"])
+
+    def test_pid_less_range_on_a_lan_address_stays_held_in_status(self) -> None:
+        # Connect-first misses a LAN-only listener; the bind test still sees
+        # it, so status never calls it stale.
+        address = _lan_ipv4()
+        if address is None:
+            self.skipTest("no non-loopback IPv4 address")
+        from portskill.status import status_result
+
+        self._write([self._range("lan", self._listener(host=address))])
+        drift = {r["id"]: r["drift"] for r in status_result(self.project)["ranges"]}["lan"]
+        self.assertIsNone(drift)
 
     def test_not_live_ranges_still_use_the_bind_test(self) -> None:
         from portskill import drift as drift_module
