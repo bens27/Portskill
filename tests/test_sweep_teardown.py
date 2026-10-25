@@ -119,9 +119,8 @@ class SweepTeardownTests(unittest.TestCase):
         self.assertEqual(self.calls, [
             {"mode": "serve", "port": self.ports["mapped"], "off": True, "locked": False},
         ])
-        # Only the liveness probe (ps) may run under the lock; never a stop
-        # script and never tailscale.
-        self.assertTrue(all(argv[0] == "ps" for argv in under_lock), under_lock)
+        # Nothing runs under the lock: no stop script, no tailscale, no ps.
+        self.assertEqual(under_lock, [])
         self.assertFalse(self.stop_marker.exists())
         mapped = self._stored("mapped")
         self.assertEqual(mapped["state"], "released")
@@ -435,6 +434,109 @@ class SweepTeardownTests(unittest.TestCase):
         skipped = {e.get("phase"): e.get("reason") for e in payload.get("skipped") or []}
         self.assertEqual(skipped.get("tailnet"), SKIP_TAILNET_ALREADY, payload)
         self.assertTrue(self._stored("mapped")["tailnet"].get("restore_pending"))
+
+
+    # -- liveness probe outside the lock (1a99936e) --------------------------
+
+    @staticmethod
+    def _dead_group() -> int:
+        """A reaped session leader: its pid and its pgid are both dead."""
+        proc = subprocess.Popen(["true"], start_new_session=True)
+        proc.wait()
+        return proc.pid
+
+    def _write_with_dead_groups(self) -> None:
+        from portskill.status import status_result
+
+        ranges = []
+        for range_id, mapped in (("mapped", True), ("plain", False)):
+            item = self._range(range_id, mapped=mapped)
+            dead = self._dead_group()
+            item["lifecycle"]["pid"] = dead
+            item["lifecycle"]["pgid"] = dead
+            ranges.append(item)
+        self.iso.write_registry({"projects": {self.project: {"ranges": ranges}}})
+        status_result(None)
+
+    def _sweep_after_probe(self, between) -> dict:
+        """Sweep, running ``between`` after the unlocked probe and before lock 1."""
+        from portskill import sweep
+
+        real_probe = sweep._probe_groups
+
+        def probe_then(project):
+            probes = real_probe(project)
+            self.assertFalse(self._lock_held())
+            between()
+            return probes
+
+        with self._fake_tailnet(), mock.patch.object(sweep, "_probe_groups", side_effect=probe_then):
+            return self._sweep()
+
+    def test_liveness_probe_runs_before_the_lock(self) -> None:
+        self._write_with_dead_groups()
+        real_run = subprocess.run
+        runs: list = []
+
+        def spy(argv, *args, **kwargs):
+            runs.append((argv[0] if isinstance(argv, (list, tuple)) else argv, self._lock_held()))
+            return real_run(argv, *args, **kwargs)
+
+        with self._fake_tailnet(), mock.patch("subprocess.run", side_effect=spy):
+            result = self._sweep()
+
+        self.assertEqual(sorted(r["range_id"] for r in result["released"]), ["mapped", "plain"])
+        self.assertEqual(result["failed"], [])
+        self.assertIn(("ps", False), runs)  # the group probe did run, unlocked
+        self.assertEqual([r for r in runs if r[1]], [])  # nothing at all under the lock
+        self.assertFalse(self.stop_marker.exists())
+
+    def test_range_restarted_between_probe_and_lock_is_not_released(self) -> None:
+        self._write_with_dead_groups()
+
+        def restart(item: dict) -> None:
+            item["lifecycle"]["pid"] = os.getpid()
+            item["lifecycle"]["pgid"] = os.getpgrp()
+
+        result = self._sweep_after_probe(lambda: self._edit("plain", restart))
+
+        self.assertEqual([r["range_id"] for r in result["released"]], ["mapped"])
+        self.assertNotIn("plain", [r["range_id"] for r in result["stale"]])
+        plain = self._stored("plain")
+        self.assertEqual(plain["state"], "active")
+        self.assertEqual(plain["lifecycle"]["pid"], os.getpid())
+
+    def test_row_changed_between_probe_and_lock_is_not_released(self) -> None:
+        self._write_with_dead_groups()
+
+        def new_group(item: dict) -> None:
+            # pid still dead, but the group now names a live one (this test's).
+            item["lifecycle"]["pgid"] = os.getpgrp()
+
+        result = self._sweep_after_probe(lambda: self._edit("plain", new_group))
+
+        self.assertEqual([r["range_id"] for r in result["released"]], ["mapped"])
+        self.assertNotIn("plain", [r["range_id"] for r in result["stale"]])
+        self.assertEqual(self._stored("plain")["state"], "active")
+        self.assertEqual(self._stored("plain")["lifecycle"]["pgid"], os.getpgrp())
+
+    def test_group_alive_again_under_the_lock_is_not_released(self) -> None:
+        # Row unchanged, the probe saw the group dead, but under the lock the
+        # pgid answers again (reused): the fresh killpg check keeps the range.
+        self._write_with_dead_groups()
+        with mock.patch("portskill.sweep.os.killpg", return_value=None):
+            result = self._sweep_after_probe(lambda: None)
+        self.assertEqual(result["released"], [])
+        self.assertEqual(self._stored("plain")["state"], "active")
+        self.assertEqual(self._stored("mapped")["state"], "active")
+
+    def test_group_seen_alive_by_the_probe_is_not_released(self) -> None:
+        self._write_with_dead_groups()
+        with mock.patch("portskill.lifecycle.process_group_pids", return_value=[os.getpid()]):
+            result = self._sweep_after_probe(lambda: None)
+        self.assertEqual(result["released"], [])
+        self.assertEqual(result["stale"], [])
+        self.assertEqual(self._stored("plain")["state"], "active")
 
 
 if __name__ == "__main__":

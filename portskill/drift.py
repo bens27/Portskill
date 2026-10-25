@@ -123,7 +123,7 @@ def _ports_label(item: dict) -> str:
     return f"port {ports[0]}" if ports else "its ports"
 
 
-def range_drift(item: dict, *, connect: bool = True) -> dict[str, Any] | None:
+def range_drift(item: dict, *, connect: bool = True, live: bool | None = None) -> dict[str, Any] | None:
     """Return a drift record for a saved-active LOCAL range, or None.
 
     Callers must skip remote ranges: their process cannot be observed here.
@@ -134,13 +134,15 @@ def range_drift(item: dict, *, connect: bool = True) -> dict[str, Any] | None:
     The bind test runs only in that not-alive case, after a loopback connect
     found nothing; a live range is checked with a loopback connect (see the
     module docstring). ``connect=False`` runs no connect: a live range returns
-    None unprobed and a not-alive range gets the bind test only.
+    None unprobed and a not-alive range gets the bind test only. ``live``
+    overrides the tracked-process check when the caller already decided it.
     """
     if (item.get("state") or "reserved") != "active":
         return None
     life = item.get("lifecycle") or {}
     tracked = bool(life.get("pid") or life.get("pgid"))
-    live = range_has_live_process(item)
+    if live is None:
+        live = range_has_live_process(item)
     if live and not connect:
         return None
     if live:

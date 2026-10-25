@@ -10,6 +10,12 @@ recent. A range whose tracked process is alive is never stale and is not
 probed here (the scan runs under the registry lock), so sweep does not list
 it; ``status`` still reports its ``port_unbound`` hint.
 
+The ``ps`` process-group probe runs before the lock. Under the lock a range
+counts as dead only if its pid is dead and, when it has a pgid, its row is
+unchanged since that probe (same state, pid, pgid), the probe found the group
+dead and ``killpg(pgid, 0)`` still finds no group. A range restarted or edited
+in between counts as alive, so it is never released by that sweep.
+
 Release re-checks every candidate under the registry lock and runs no
 subprocess there (no stop script: a stale range has no live process; no
 Tailscale). A candidate without an applied Serve/Funnel mapping is released in
@@ -43,6 +49,7 @@ Without ``range_ids``, release frees every currently stale range.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import time
 import uuid
@@ -50,7 +57,7 @@ from typing import Any
 
 from .domain import DomainError, utc_now
 from . import lifecycle
-from .registry import CorruptRegistryError, mutate_registry
+from .registry import CorruptRegistryError, mutate_registry, read_registry
 from .drift import range_drift
 from .registry_domain import is_remote_range, normalize_registry, project_path
 from .registry_operations import (
@@ -76,7 +83,68 @@ def _row(project: str, item: dict, drift: dict) -> dict[str, Any]:
     }
 
 
-def _scan(registry: dict, project: str | None) -> tuple[list, list]:
+def _liveness_key(item: dict) -> tuple:
+    """The fields a start or restart changes: a probe is valid only while they match."""
+    life = item.get("lifecycle") or {}
+    return item.get("state"), life.get("pid"), life.get("pgid")
+
+
+def _probe_groups(project: str | None) -> dict[tuple, tuple]:
+    """Unlocked: run the ``ps`` group probe for in-scope active ranges with a pgid.
+
+    Maps (project, range id) to (liveness key, group alive). A registry that
+    cannot be read yields no probes; the locked scan then reports the error.
+    """
+    start, end = pool_bounds()
+    try:
+        registry = read_registry(start=start, end=end, normalizer=normalize_registry)
+    except (CorruptRegistryError, OSError, UnicodeError, ValueError):
+        return {}
+    probes: dict[tuple, tuple] = {}
+    for proj, entry in (registry.get("projects") or {}).items():
+        if (project is not None and proj != project) or not isinstance(entry, dict):
+            continue
+        for item in entry.get("ranges") or []:
+            if not isinstance(item, dict) or item.get("state") != "active":
+                continue
+            pgid = (item.get("lifecycle") or {}).get("pgid")
+            if pgid is None:
+                continue
+            alive = any(lifecycle.pid_alive(pid) for pid in lifecycle.process_group_pids(pgid))
+            probes[(proj, item.get("id"))] = (_liveness_key(item), alive)
+    return probes
+
+
+def _group_gone(pgid: Any) -> bool:
+    """Fresh, subprocess-free check that no process is left in the group."""
+    try:
+        os.killpg(int(pgid), 0)
+    except ProcessLookupError:
+        return True
+    except (OSError, TypeError, ValueError, OverflowError):
+        return False  # unsure (no permission, odd value): count it as alive
+    return False
+
+
+def _tracked_alive(proj: str, item: dict, probes: dict) -> bool:
+    """Under the lock: range_has_live_process without running ``ps``.
+
+    A group seen dead before the lock counts only while the row is unchanged
+    and the group is still gone; restarted, edited or unprobed counts as alive.
+    """
+    life = item.get("lifecycle") or {}
+    if lifecycle.pid_alive(life.get("pid")):
+        return True
+    pgid = life.get("pgid")
+    if pgid is None:
+        return False
+    probe = probes.get((proj, item.get("id")))
+    if probe is None or probe[0] != _liveness_key(item) or probe[1]:
+        return True
+    return not _group_gone(pgid)
+
+
+def _scan(registry: dict, project: str | None, probes: dict) -> tuple[list, list]:
     """Return (stale, skipped) as (project, item, row) triples from a fresh probe."""
     stale, skipped = [], []
     for proj, entry in (registry.get("projects") or {}).items():
@@ -91,7 +159,7 @@ def _scan(registry: dict, project: str | None) -> tuple[list, list]:
                 continue
             # No network I/O under the registry lock: live ranges (never
             # releasable) are not probed, the rest get the bind test only.
-            drift = range_drift(item, connect=False)
+            drift = range_drift(item, connect=False, live=_tracked_alive(proj, item, probes))
             if not drift:
                 continue
             triple = (proj, item, _row(proj, item, drift))
@@ -167,8 +235,8 @@ def _confirmed_ids(raw: Any) -> set[str] | None:
 def _park_for_release(item: dict, project: str, row: dict) -> dict[str, Any] | None:
     """Lock 1: park a stale range for release without running any subprocess.
 
-    A stale range has no live tracked process (checked under this lock by the
-    scan), so no stop script or kill is needed: only the dead pid is cleared.
+    A stale range has no live tracked process (re-checked under this lock by
+    the scan), so no stop script or kill is needed: only the dead pid is cleared.
     Without an applied Serve/Funnel mapping the range is released at once and
     None is returned. With one, the range is parked reserved (never handed out
     again) with the mapping recorded and restore_pending set, which is the
@@ -301,8 +369,10 @@ def sweep_result(options: dict) -> dict[str, Any]:
     release = bool(options.get("release"))
     confirmed = _confirmed_ids(options.get("range_ids"))
 
+    probes = _probe_groups(project)  # `ps` runs here, before the lock
+
     def mutate(registry: dict):
-        stale, skipped = _scan(registry, project)
+        stale, skipped = _scan(registry, project, probes)
         payload: dict[str, Any] = {
             "status": "ok",
             "dry_run": not release,
