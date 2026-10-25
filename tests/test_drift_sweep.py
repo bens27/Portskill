@@ -116,13 +116,19 @@ class DriftSweepTests(unittest.TestCase):
 
     def _pair_with_listener_on_second(self) -> int:
         """Return start where start is free and start+1 has a loopback listener."""
+        # Both ports come from the pool range (see _free_port): ephemeral
+        # ports often sit in TIME_WAIT under the smoke suite's test order.
         from portskill.drift import port_held
 
         for _ in range(50):
-            second = self._listener()
-            if second > 1 and not port_held(second - 1):
-                return second - 1
-        self.skipTest("no free port just below a listener")
+            start = _free_port()
+            if start < 65535 and not port_held(start + 1):
+                try:
+                    self._listener(port=start + 1)
+                except OSError:
+                    continue
+                return start
+        self.fail("no pair of free ports in the pool range")
 
     def _range(self, range_id: str, port: int, *, state: str = "active",
                pid: int | None = None, pgid: int | None = None, tailnet: str = "none",
@@ -218,6 +224,68 @@ class DriftSweepTests(unittest.TestCase):
         registry = {"projects": {self.project: {"ranges": [item]}}, "machines": {}}
         [service] = service_statuses(registry)
         self.assertEqual(service["drift"]["reasons"], ["pid_dead", "port_unbound"])
+
+    def test_live_ranges_are_never_bind_tested_by_status_or_ui(self) -> None:
+        # A lazily-binding dev server that is still starting must not lose its
+        # port to a status poll: live ranges get a loopback connect only.
+        from portskill import server
+        from portskill.status import service_statuses, status_result
+
+        pid, pgid = self._live_pid()
+        other, other_group = self._live_pid()
+        self._write([
+            self._range("serving", self._listener(), pid=pid, pgid=pgid),
+            # Live, nothing listening yet (still starting).
+            self._range("starting", _free_port(), pid=other, pgid=other_group),
+        ])
+        starting = self._stored("starting")
+        raw = json.loads(self.iso.registry_path.read_text(encoding="utf-8"))
+
+        with mock.patch("portskill.drift.port_held") as port_held:
+            result = status_result(self.project)
+            services = service_statuses(raw)
+            view = server.build_view(raw)
+
+        port_held.assert_not_called()
+        drift = {r["id"]: r["drift"] for r in result["ranges"]}
+        self.assertIsNone(drift["serving"])
+        self.assertEqual(drift["starting"]["reasons"], ["port_unbound"])
+        self.assertFalse(drift["starting"]["stale"])
+        self.assertEqual(len(services), 2)
+        self.assertTrue(view)
+        self.assertEqual(starting["state"], "active")
+
+    def test_live_range_listening_on_lan_only_is_a_hint_never_a_release(self) -> None:
+        # Accepted trade-off: loopback-only check for live ranges.
+        address = _lan_ipv4()
+        if address is None:
+            self.skipTest("no non-loopback IPv4 address")
+        pid, pgid = self._live_pid()
+        self._write([self._range("lan", self._listener(host=address), pid=pid, pgid=pgid)])
+        before = self._bytes()
+
+        result = self._sweep(release=True)
+
+        self.assertEqual(result["stale"], [])
+        self.assertEqual(result["released"], [])
+        self.assertEqual([row["range_id"] for row in result["skipped"]], ["lan"])
+        self.assertEqual(result["skipped"][0]["reasons"], ["port_unbound"])
+        self.assertEqual(self._bytes(), before)
+
+    def test_not_live_ranges_still_use_the_bind_test(self) -> None:
+        from portskill import drift as drift_module
+
+        dead, dead_group = self._dead_pid()
+        port = _free_port()
+        self._write([self._range("r1", port, pid=dead, pgid=dead_group)])
+
+        with mock.patch("portskill.drift.port_held", wraps=drift_module.port_held) as port_held, \
+                mock.patch("portskill.drift.port_answers") as port_answers:
+            result = self._sweep(release=True)
+
+        port_held.assert_any_call(port)
+        port_answers.assert_not_called()
+        self.assertEqual([row["range_id"] for row in result["released"]], ["r1"])
 
     # -- sweep: report by default -------------------------------------------
 

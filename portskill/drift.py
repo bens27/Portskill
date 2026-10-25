@@ -5,9 +5,16 @@ disagrees: the recorded process is gone, or nothing listens on any of its
 ports. Nothing here mutates a range; status reports drift, and only ``sweep``
 with an explicit opt-in acts on it.
 
-Listening is decided by a bind test, not a connect: a loopback connect to the
-start port misses a service bound to a LAN address or to another port of the
-range, and a stale verdict must never free a port that is still in use.
+How listening is checked depends on whether the tracked process is alive:
+
+- not alive: a bind test over every port of the range on every local address.
+  Stale (and so release) depends on it, and a loopback connect would miss a
+  service bound to a LAN address, so a stale verdict could free a port that is
+  still in use.
+- alive: a loopback connect only. Binding a live service's ports, on every
+  status call and UI poll, could make a lazily-binding dev server fail with
+  EADDRINUSE while it starts. The cost: a live service listening only on a
+  LAN address shows ``port_unbound``, a hint that never leads to a release.
 """
 from __future__ import annotations
 
@@ -67,6 +74,30 @@ def range_ports_held(item: dict) -> bool:
     return not ports or any(port_held(port) for port in ports)
 
 
+_CONNECT_TIMEOUT = 0.15
+
+
+def port_answers(port: int) -> bool:
+    """True when something accepts a loopback connection on ``port``.
+
+    Side-effect free for the listener (no bind), but blind to services bound
+    to a non-loopback address only.
+    """
+    for host in ("127.0.0.1", "::1"):
+        try:
+            with socket.create_connection((host, port), timeout=_CONNECT_TIMEOUT):
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def range_ports_answer(item: dict) -> bool:
+    """True when any port of the range answers on loopback (or none can be checked)."""
+    ports = range_ports(item)
+    return not ports or any(port_answers(port) for port in ports)
+
+
 def _ports_label(item: dict) -> str:
     ports = range_ports(item)
     if len(ports) > 1:
@@ -82,13 +113,15 @@ def range_drift(item: dict) -> dict[str, Any] | None:
     ``stale`` is true only when no tracked process is alive AND no port of
     the range is held on any local address: the one case where releasing
     cannot pull a port out from under something that still listens on it.
+    The bind test runs only in that not-alive case; a live range is checked
+    with a loopback connect (see the module docstring).
     """
     if (item.get("state") or "reserved") != "active":
         return None
     life = item.get("lifecycle") or {}
     tracked = bool(life.get("pid") or life.get("pgid"))
     live = range_has_live_process(item)
-    held = range_ports_held(item)
+    held = range_ports_answer(item) if live else range_ports_held(item)
     ports = _ports_label(item)
     reasons: list[str] = []
     if tracked and not live:
@@ -113,8 +146,8 @@ def range_drift(item: dict) -> dict[str, Any] | None:
         )
     else:
         hint = (
-            f"The tracked process is alive, but nothing listens on {ports}. It may still be starting "
-            "or listening elsewhere: check its log, or restart it."
+            f"The tracked process is alive, but nothing answers on loopback on {ports}. It may still be "
+            "starting, or listen only on another address: check its log, or restart it."
         )
     return {"reasons": reasons, "stale": stale, "hint": hint}
 

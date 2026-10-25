@@ -58,7 +58,9 @@ Reasons: `pid_dead` (recorded process gone), `no_pid` (nothing tracked),
 `port_unbound` (no listener on any port of the range), `untracked_listener`
 (recorded process gone but something still holds a port). A range is `stale`
 when it has no live process and no listener on any port of the range, on any
-local address.
+local address. For a live process, status only tries loopback connects (it never
+binds a live service's ports), so a service listening only on a LAN address
+shows `port_unbound`; that is a hint, never a release.
 
 Run `sweep` (MCP `sweep`) to review drift; it is read-only. To free stale
 ranges, pass the reviewed ids: `sweep --release --range-id ID` (repeatable; MCP
