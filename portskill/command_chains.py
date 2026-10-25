@@ -38,9 +38,6 @@ class ChainPolicy:
         (missing = enabled); ``catalog`` uses mcp_catalog.tool_enabled, which
         dual-reads portskill / portskill_path; ``none`` skips the check (and
         the settings read) entirely.
-    require_string_tool: reject a non-string step tool before the catalog
-        lookup. Off, the lookup runs on the raw value, so an unhashable tool
-        (list / dict) raises TypeError; every shipped policy turns it on.
     forbid_nested: reject a step naming a saved user command (checked after
         the unknown-tool check, so it only fires for system-named commands).
     tolerate_user_command_read_errors: swallow failures while loading saved
@@ -57,7 +54,6 @@ class ChainPolicy:
     clear_stop_arguments: bool
     enabled_lookup: str
     tolerate_user_command_read_errors: bool
-    require_string_tool: bool
     forbid_nested: bool
     check_arguments: bool
     include_error_codes: bool
@@ -76,7 +72,6 @@ DRY_RUN_CHAIN_POLICY = ChainPolicy(
     clear_stop_arguments=True,
     enabled_lookup=ENABLED_LOOKUP_EXACT,
     tolerate_user_command_read_errors=True,
-    require_string_tool=True,
     forbid_nested=True,
     check_arguments=True,
     include_error_codes=False,
@@ -94,7 +89,6 @@ RUN_CHAIN_POLICY = ChainPolicy(
     clear_stop_arguments=False,
     enabled_lookup=ENABLED_LOOKUP_CATALOG,
     tolerate_user_command_read_errors=False,
-    require_string_tool=True,
     forbid_nested=True,
     check_arguments=False,
     include_error_codes=True,
@@ -116,7 +110,6 @@ SAVE_CHAIN_POLICY = ChainPolicy(
     clear_stop_arguments=True,
     enabled_lookup=ENABLED_LOOKUP_NONE,
     tolerate_user_command_read_errors=False,
-    require_string_tool=True,
     forbid_nested=False,
     check_arguments=False,
     include_error_codes=False,
@@ -314,9 +307,9 @@ def validate_chain_step(
         dispatch = canonical_mcp_tool_name(tool) if isinstance(tool, str) else tool
     else:
         dispatch = tool
-    if (policy.require_string_tool and not isinstance(tool, str)) or (
-        tool not in tools and dispatch not in tools
-    ):
+    # A non-string tool (a list or dict included) is always unknown: checked
+    # first, so an unhashable value never reaches the catalog lookup.
+    if not isinstance(tool, str) or (tool not in tools and dispatch not in tools):
         message = policy.unknown_message.format(tool=tool, step=step)
         return ChainStepCheck(tool, mode, arguments, None, _reject(policy, "unknown", tool, mode, message))
     if policy.forbid_nested and _is_nested(policy, tool, load_user_commands):

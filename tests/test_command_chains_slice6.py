@@ -125,22 +125,21 @@ class Slice6PolicyDifferenceTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [f.name for f in fields(DRY_RUN_CHAIN_POLICY)][1:9],
+            [f.name for f in fields(DRY_RUN_CHAIN_POLICY)][1:8],
             ["resolve_aliases", "normalize_mode", "clear_stop_arguments", "enabled_lookup",
-             "tolerate_user_command_read_errors", "require_string_tool", "forbid_nested",
-             "check_arguments"],
+             "tolerate_user_command_read_errors", "forbid_nested", "check_arguments"],
         )
         expected = {
-            DRY_RUN_CHAIN_POLICY: ("dry-run", False, True, True, "exact", True, True, True, True, False),
-            RUN_CHAIN_POLICY: ("run", True, False, False, "catalog", False, True, True, False, True),
-            SAVE_CHAIN_POLICY: ("save", False, False, True, "none", False, True, False, False, False),
+            DRY_RUN_CHAIN_POLICY: ("dry-run", False, True, True, "exact", True, True, True, False),
+            RUN_CHAIN_POLICY: ("run", True, False, False, "catalog", False, True, False, True),
+            SAVE_CHAIN_POLICY: ("save", False, False, True, "none", False, False, False, False),
         }
         for policy, flags in expected.items():
             with self.subTest(policy=policy.name):
-                self.assertEqual(astuple(policy)[:10], flags)
+                self.assertEqual(astuple(policy)[:9], flags)
         # Save's messages are pinned whole: nested/disabled are inert under the
         # save policy, so only this pin catches a change to them.
-        self.assertEqual(astuple(SAVE_CHAIN_POLICY)[10:], (
+        self.assertEqual(astuple(SAVE_CHAIN_POLICY)[9:], (
             "each step.tool must be a system TOOL_DEFS name (got {step!r})",
             "nested user commands forbidden",
             "tool disabled in settings.mcp_tools: {tool}",
@@ -233,7 +232,7 @@ class Slice6PolicyDifferenceTests(unittest.TestCase):
             policy=command_chains.SAVE_CHAIN_POLICY, load_user_commands=boom)
         self.assertIsNone(check.rejection)
 
-    def test_require_string_tool(self) -> None:
+    def test_non_string_tool_is_always_rejected(self) -> None:
         from portskill.command_chains import DRY_RUN_CHAIN_POLICY, RUN_CHAIN_POLICY, SAVE_CHAIN_POLICY
 
         for policy in (DRY_RUN_CHAIN_POLICY, RUN_CHAIN_POLICY, SAVE_CHAIN_POLICY):

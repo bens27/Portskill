@@ -221,10 +221,15 @@ def settings_set(options: dict[str, Any] | None = None) -> dict:
                 _fail(
                     "invalid_args", "--mcp-user-command-upsert must be a JSON object"
                 )
+            name = parsed.get("name")
+            if name is not None and not isinstance(name, str):
+                # A list or dict name is unhashable as a key: reject it here
+                # instead of letting the TypeError surface as settings_unavailable.
+                _fail(
+                    "invalid_args", "--mcp-user-command-upsert name must be a string"
+                )
             commands = dict(settings.get("mcp_user_commands") or {})
-            one = normalize_mcp_user_commands(
-                {parsed.get("name") or "cmd": parsed}
-            )
+            one = normalize_mcp_user_commands({name or "cmd": parsed})
             if not one:
                 _fail(
                     "invalid_args", "user command needs name + at least one valid step"
