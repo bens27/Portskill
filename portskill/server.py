@@ -31,7 +31,7 @@ from .auth import (
     http_auth_token,
     http_bearer_matches,
 )
-from .command_runtime import execute_command
+from .command_runtime import execute_command, require_boolean_values, ui_boolean_fields
 from .command_specs import (
     ALLOCATE_COMMAND,
     COMMAND_SPECS,
@@ -242,6 +242,7 @@ _UI_VALUE_COERCERS = {
 
 
 def _bind_ui_declared_params(spec: CommandSpec, payload: dict) -> dict:
+    require_boolean_values(payload, ui_boolean_fields(spec))
     options = {}
     for parameter in spec.params:
         binding = parameter.ui
@@ -258,8 +259,12 @@ def _ui_raw_declared_value(spec: CommandSpec, key: str, payload: dict):
     return _ui_field_value(parameter.ui, payload)
 
 
+_UI_SETTINGS_BOOLEAN_FIELDS = ("autoApplyOnLaunch", "autoExitOnShutdown", "stopAlsoRelease")
+
+
 def _bind_ui_settings_save(spec: CommandSpec, payload: dict) -> dict:
     del spec
+    require_boolean_values(payload, _UI_SETTINGS_BOOLEAN_FIELDS)
     options = {}
     if "autoApplyOnLaunch" in payload:
         options["auto_apply_on_launch"] = bool(payload.get("autoApplyOnLaunch"))
@@ -4705,7 +4710,10 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             return 0, out
         return _cli_result(code, payload, stdout)
     if action == "discover-import":
-        import_spec, import_options = _ui_command_options(action, body)
+        try:
+            import_spec, import_options = _ui_command_options(action, body)
+        except DomainError as exc:
+            return _domain_exception_result(exc)
         ports = import_options.get("ports")
         notes = import_options.get("notes")
         notes = notes if isinstance(notes, dict) else {}

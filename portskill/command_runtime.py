@@ -4,7 +4,8 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any, Callable
 
-from .command_specs import COMMAND_SPECS, CommandSpec, HandlerRef
+from .command_specs import COMMAND_SPECS, MISSING, CommandSpec, HandlerRef
+from .domain import DomainError
 
 
 _TRUSTED_HANDLER_REFS = tuple(spec.handler for spec in COMMAND_SPECS)
@@ -134,6 +135,65 @@ _BINDERS = {
     "apply_defaults": _bind_apply_defaults,
     "compatibility": _bind_compatibility,
 }
+
+
+def _boolean_error(name: str) -> DomainError:
+    return DomainError("invalid_args", f"{name} must be a JSON boolean (true or false)")
+
+
+def require_boolean_values(values: Any, names: Any) -> None:
+    """Reject any present key in ``names`` whose value is not a real bool.
+
+    ``bool`` is an int subclass, so only ``type(value) is bool`` passes: the
+    strings "false"/"true", 0/1 and null are refused instead of being truthy.
+    An absent key is left to the command's default.
+    """
+    if not isinstance(values, dict):
+        return
+    for name in names:
+        if name in values and type(values[name]) is not bool:
+            raise _boolean_error(name)
+
+
+def _mcp_boolean_names(spec: CommandSpec) -> tuple[str, ...]:
+    return tuple(
+        param.key if param.mcp.name is MISSING else param.mcp.name
+        for param in spec.params
+        if param.kind == "boolean" and param.mcp is not None
+    )
+
+
+def _mcp_boolean_params() -> dict[str, tuple[str, ...]]:
+    table: dict[str, tuple[str, ...]] = {}
+    for spec in COMMAND_SPECS:
+        if spec.mcp is None:
+            continue
+        names = _mcp_boolean_names(spec)
+        if not names:
+            continue
+        for tool_name in (spec.mcp.name, *spec.mcp.aliases):
+            table[tool_name] = names
+    return table
+
+
+MCP_BOOLEAN_PARAMS = _mcp_boolean_params()
+
+
+def validate_mcp_boolean_args(tool_name: str, arguments: Any) -> None:
+    """Type-check every declared boolean argument of one MCP tool call."""
+    names = MCP_BOOLEAN_PARAMS.get(tool_name)
+    if names:
+        require_boolean_values(arguments, names)
+
+
+def ui_boolean_fields(spec: CommandSpec) -> tuple[str, ...]:
+    """Payload field names of the declared boolean UI params of ``spec``."""
+    return tuple(
+        field
+        for param in spec.params
+        if param.kind == "boolean" and param.ui is not None
+        for field in param.ui.fields
+    )
 
 
 def execute_command(

@@ -500,7 +500,7 @@ class Slice4UIBindingTests(unittest.TestCase):
                 PRESET_APPLY_COMMAND,
                 {"name": ("alternateName",), "also_stop_off": ("alternateStop",)},
                 "preset-apply",
-                {"name": "guard", "alternateName": "  applied  ", "alternateStop": 1},
+                {"name": "guard", "alternateName": "  applied  ", "alternateStop": True},
                 "portskill.presets.preset_apply_result",
                 {"name": "applied", "also_stop_off": True},
             ),

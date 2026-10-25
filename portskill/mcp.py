@@ -7,7 +7,7 @@ import sys
 from typing import Any
 
 from . import __version__
-from .command_runtime import execute_command
+from .command_runtime import execute_command, validate_mcp_boolean_args
 from .command_specs import (
     ACTIVATE_COMMAND,
     ALLOCATE_COMMAND,
@@ -338,6 +338,8 @@ def call_tool(name: str, arguments: dict) -> dict:
 def _call_tool(name: str, arguments: dict) -> dict:
     """Return MCP tools/call result payload (result object, not full JSON-RPC)."""
     args = arguments or {}
+    # Typed booleans before any branch: "false" must never read as true.
+    validate_mcp_boolean_args(name, args)
     if name in HANDOFF_TOOL_NAMES:
         settings = _load_settings_from_registry()
         if not _tool_enabled(_mcp_tools_prefs(settings), name):

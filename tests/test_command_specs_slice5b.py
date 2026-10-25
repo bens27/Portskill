@@ -108,7 +108,7 @@ class Slice5BProjectionTests(unittest.TestCase):
         with mock.patch(
             "portskill.mcp.execute_command", return_value={"status": "ok"}
         ) as execute:
-            result = mcp._call_tool("tailscale_login", {"no_open": 1, "wait": "0"})
+            result = mcp._call_tool("tailscale_login", {"no_open": True, "wait": "0"})
         execute.assert_called_once_with(
             TAILSCALE_LOGIN_COMMAND, {"no_open": True, "wait": 0}
         )
@@ -135,7 +135,7 @@ class Slice5BUIBindingTests(unittest.TestCase):
                 {
                     "ports": [3001, "3002"],
                     "port": "3003",
-                    "all_missing": "false",
+                    "all_missing": True,
                     "notes": {"3001": "one"},
                     "note": " fallback ",
                     "tailnet": "funnel",
@@ -144,7 +144,7 @@ class Slice5BUIBindingTests(unittest.TestCase):
                 {
                     "ports": [3001, "3002"],
                     "port": "3003",
-                    "all_missing": "false",
+                    "all_missing": True,
                     "notes": {"3001": "one"},
                     "note": "fallback",
                     "tailnet": "none",
@@ -261,7 +261,9 @@ class Slice5BUIDispatchRegressionTests(unittest.TestCase):
             "serve": {"ports": {}},
         }
 
-    def test_all_missing_string_false_keeps_legacy_truthiness(self) -> None:
+    def test_all_missing_string_false_is_rejected_without_persistence(self) -> None:
+        # Typed booleans: the string "false" used to read as true and import
+        # every missing port. It is now refused before anything is written.
         from portskill import port_discovery
 
         for transport in ("direct", "http"):
@@ -269,11 +271,12 @@ class Slice5BUIDispatchRegressionTests(unittest.TestCase):
                 project = iso.root / "project"
                 project.mkdir()
                 iso.write_registry()
+                before = iso.registry_path.read_bytes()
                 with mock.patch.object(
                     port_discovery.discover_ports_mod,
                     "build_ports_discovery",
                     return_value=self._discovery(23101, 23102),
-                ):
+                ) as discovery:
                     status, payload = self._invoke(transport, {
                         "action": "discover-import",
                         "all_missing": "false",
@@ -281,11 +284,11 @@ class Slice5BUIDispatchRegressionTests(unittest.TestCase):
                         "project": str(project),
                     })
 
-                registry = json.loads(iso.registry_path.read_text())
-                ranges = registry["projects"][str(project.resolve())]["ranges"]
-                self.assertEqual(status, 200, payload)
-                self.assertEqual(payload["result"]["count_imported"], 2)
-                self.assertEqual([item["start"] for item in ranges], [23101, 23102])
+                self.assertEqual(status, 422, payload)
+                self.assertFalse(payload["ok"])
+                self.assertEqual(payload["result"]["reason"], "invalid_args")
+                discovery.assert_not_called()
+                self.assertEqual(iso.registry_path.read_bytes(), before)
 
     def test_all_missing_alias_stays_rejected_without_persistence(self) -> None:
         for transport in ("direct", "http"):

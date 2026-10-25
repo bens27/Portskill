@@ -198,7 +198,7 @@ class Slice3ProjectionTests(unittest.TestCase):
                 "action": "exit-house",
                 "preset": "  daily  ",
                 "alsoRelease": False,
-                "also_release": "",
+                "also_release": False,
             })
         self.assertEqual(code, 0)
         expected = {"preset": "daily", "also_release": False}
