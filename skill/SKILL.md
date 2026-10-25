@@ -104,8 +104,11 @@ and frees only ranges that are confirmed and still stale; others are listed in
 `no_longer_stale` (confirmed, in scope, no longer stale), `unknown_range` (no
 range has that id; `project` and `start` are null) or `not_in_scope` (the range
 belongs to a project outside `--project`). Nothing is freed for any of them.
-Without range ids, release frees every currently stale range. Freeing uses the normal
-stop teardown; a failed Tailscale teardown leaves the range reserved (see
+Without range ids, release frees every currently stale range. A range with a
+Serve/Funnel mapping is parked reserved while sweep removes the mapping (with
+the registry unlocked); meanwhile `start`/`restart` of it fail with
+`teardown_in_progress` (retry in a moment; the guard lapses after two minutes).
+A failed Tailscale teardown leaves the range reserved (see
 `failed`/`warnings`). `untracked_listener` is never swept: stop that process or
 restart the service. A live process with no listener: check
 `.portskill/start.log` or restart.

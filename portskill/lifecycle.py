@@ -15,6 +15,12 @@ from .registry_domain import (
     normalize_range_record,
 )
 from .service import script_is_placeholder
+from .teardown_marker import (  # noqa: F401 - re-exported for sweep
+    TEARDOWN_MARKER_KEY,
+    TEARDOWN_MARKER_TTL_SECONDS,
+    refuse_teardown_in_progress,
+    teardown_marker,
+)
 from .tailscale import probe_tailscale_status, tailscale_base_command
 
 def needs_tailnet(project, count_or_range):
@@ -290,6 +296,7 @@ def terminate_lifecycle_processes(item):
 
 
 def activate_item(item, project, range_id, tailnet_arg):
+    refuse_teardown_in_progress(item)
     recorded_mode = item.get("tailnet", {}).get("mode")
     mode = tailnet_arg if tailnet_arg is not None else recorded_mode
     if mode is None:
@@ -323,6 +330,15 @@ def mark_item_active(item, now=None):
 # releasing the range (stop without release, a restart's stop phase, or a
 # restart that could not re-apply it), so the next restart brings it back.
 RESTORE_PENDING_KEY = "restore_pending"
+
+
+def run_tailnet_teardown(mode, port):
+    """Run the Serve/Funnel `off` command; None on success, else the error dict."""
+    try:
+        run_tailnet(mode, port, off=True)
+    except DomainError as exc:
+        return exc.as_dict()
+    return None
 
 
 def _tailnet_record(item):
@@ -364,6 +380,7 @@ def release_item(item):
     item["released_at"] = utc_now()
     tailnet["configured_at"] = None
     tailnet.pop(RESTORE_PENDING_KEY, None)
+    tailnet.pop(TEARDOWN_MARKER_KEY, None)
 
 
 def range_has_live_process(item):

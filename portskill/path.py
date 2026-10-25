@@ -38,6 +38,7 @@ from .registry_domain import (
     project_path,
 )
 from .service import script_is_placeholder
+from .teardown_marker import refuse_teardown_in_progress, teardown_marker
 from .status import enrich_range as enrich_range_for_status, project_from_context
 from .tailscale import probe_tailscale_status
 from .registry_operations import (
@@ -496,7 +497,9 @@ def run_path(
                         changed.append(project)
                 elif phase == "tailnet" and reason == SKIP_TAILNET_ALREADY and item is not None:
                     # Still applied (e.g. the stop phase's `off` failed): nothing to restore.
-                    if _set_restore_pending(item, False):
+                    # Not while sweep is removing that mapping: the parked range must
+                    # keep restore_pending until sweep's second write settles it.
+                    if teardown_marker(item) is None and _set_restore_pending(item, False):
                         changed.append(project)
                 continue
 
@@ -523,6 +526,7 @@ def run_path(
             elif phase == "activate":
                 if item is None:
                     raise DomainError("not_found", "path activate needs an allocated range")
+                refuse_teardown_in_progress(item)
                 mark_item_active(item)
                 changed.append(project)
                 ran.append(_phase_entry(phase, detail={"range_id": item.get("id")}))

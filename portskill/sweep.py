@@ -10,7 +10,23 @@ recent. A range whose tracked process is alive is never stale and is not
 probed here (the scan runs under the registry lock), so sweep does not list
 it; ``status`` still reports its ``port_unbound`` hint.
 
-Release re-checks every candidate under the registry lock. ``range_ids``
+Release re-checks every candidate under the registry lock and runs no
+subprocess there (no stop script: a stale range has no live process; no
+Tailscale). A candidate without an applied Serve/Funnel mapping is released in
+that first write. One with a mapping is parked ``reserved`` (mapping recorded,
+``restore_pending`` set, so it is never handed out again) with a teardown
+marker that makes start/restart refuse it (``teardown_in_progress``; the
+marker expires after ``lifecycle.TEARDOWN_MARKER_TTL_SECONDS`` so a crash
+cannot wedge it). Each ``off`` command then runs with the lock released, after
+a short locked check that the range is still parked (re-stamping the marker
+when less than half its TTL is left). A second short locked write releases the
+range on success only if it is still parked (same token, ``reserved``,
+``restore_pending``, no process); otherwise it leaves it as it is and lists it
+under ``failed`` (``tailnet_teardown_failed``, or ``changed_during_teardown``
+when someone else changed it meanwhile; a range that changed before its
+``off`` is not torn down at all).
+
+``range_ids``
 narrows a release to the ranges the caller reviewed: a confirmed range that is
 no longer stale, or a stale range that was not confirmed, is reported under
 ``skipped`` instead of being freed, with a ``skip_reason``:
@@ -28,10 +44,12 @@ Without ``range_ids``, release frees every currently stale range.
 from __future__ import annotations
 
 import pathlib
+import time
+import uuid
 from typing import Any
 
-from .domain import DomainError
-from .lifecycle import park_item_for_exit
+from .domain import DomainError, utc_now
+from . import lifecycle
 from .registry import CorruptRegistryError, mutate_registry
 from .drift import range_drift
 from .registry_domain import is_remote_range, normalize_registry, project_path
@@ -146,6 +164,137 @@ def _confirmed_ids(raw: Any) -> set[str] | None:
     return set(raw)
 
 
+def _park_for_release(item: dict, project: str, row: dict) -> dict[str, Any] | None:
+    """Lock 1: park a stale range for release without running any subprocess.
+
+    A stale range has no live tracked process (checked under this lock by the
+    scan), so no stop script or kill is needed: only the dead pid is cleared.
+    Without an applied Serve/Funnel mapping the range is released at once and
+    None is returned. With one, the range is parked reserved (never handed out
+    again) with the mapping recorded and restore_pending set, which is the
+    state a failed teardown leaves, plus a teardown marker that makes
+    start/restart refuse it; the returned job runs `off` after the lock.
+    """
+    life = lifecycle.lifecycle(item)
+    life["pid"] = None
+    life["pgid"] = None
+    if not life.get("stopped_at"):
+        life["stopped_at"] = utc_now()
+    tailnet = lifecycle._tailnet_record(item)
+    mode = tailnet.get("mode")
+    if mode not in ("serve", "funnel") or not tailnet.get("configured_at"):
+        lifecycle.release_item(item)  # no mapping applied: teardown is a no-op
+        return None
+    token = uuid.uuid4().hex
+    item["state"] = "reserved"
+    tailnet[lifecycle.RESTORE_PENDING_KEY] = True
+    tailnet[lifecycle.TEARDOWN_MARKER_KEY] = {"token": token, "at": time.time()}
+    return {
+        "project": project,
+        "range_id": item.get("id"),
+        "mode": mode,
+        "port": tailnet.get("port") or item.get("start"),
+        "token": token,
+        "row": row,
+    }
+
+
+def _parked_item(registry: dict, job: dict) -> dict | None:
+    """The job's range if it is still exactly as lock 1 parked it, else None.
+
+    The token alone is not enough: once the marker has expired a start may
+    have re-activated the range (keeping the marker), so the range must also
+    still be reserved, restore_pending, with no tracked process.
+    """
+    entry = (registry.get("projects") or {}).get(job["project"])
+    if not isinstance(entry, dict):
+        return None
+    item = next(
+        (r for r in entry.get("ranges") or [] if isinstance(r, dict) and r.get("id") == job["range_id"]),
+        None,
+    )
+    tailnet = item.get("tailnet") if isinstance(item, dict) else None
+    if not isinstance(tailnet, dict):
+        return None
+    marker = tailnet.get(lifecycle.TEARDOWN_MARKER_KEY)
+    life = item.get("lifecycle") if isinstance(item.get("lifecycle"), dict) else {}
+    if (
+        not isinstance(marker, dict)
+        or marker.get("token") != job["token"]
+        or item.get("state") != "reserved"
+        or tailnet.get(lifecycle.RESTORE_PENDING_KEY) is not True
+        or life.get("pid")
+        or life.get("pgid")
+    ):
+        return None
+    return item
+
+
+def _changed_during_teardown(job: dict) -> dict[str, Any]:
+    return {
+        "reason": "changed_during_teardown",
+        "message": (
+            f"Range {job['range_id']} changed while sweep was removing its Tailscale "
+            f"{job['mode']} mapping for port {job['port']}; sweep left it as it is now. "
+            "Run sweep again to review it."
+        ),
+    }
+
+
+# Re-stamp a job's marker before its `off` once less than this much of the TTL
+# is left, so the marker outlives the command (run_tailnet times out at 20s)
+# however many mapped ranges came before it in this sweep.
+_RESTAMP_BELOW_SECONDS = lifecycle.TEARDOWN_MARKER_TTL_SECONDS / 2
+
+
+def _claim_teardown(registry: dict, job: dict):
+    """Short lock before one `off`: confirm the range is still parked and keep its marker fresh."""
+    item = _parked_item(registry, job)
+    if item is None:
+        return False, False, []
+    marker = item["tailnet"][lifecycle.TEARDOWN_MARKER_KEY]
+    at = marker.get("at")
+    fresh = lifecycle.teardown_marker(item) is not None
+    left = lifecycle.TEARDOWN_MARKER_TTL_SECONDS - (time.time() - at) if fresh else 0
+    if left >= _RESTAMP_BELOW_SECONDS:
+        return True, False, []  # read-only: no registry write
+    marker["at"] = time.time()
+    return True, True, [job["project"]]
+
+
+def _finish_release(registry: dict, job: dict) -> dict[str, Any] | None:
+    """Lock 2: release on a successful teardown; else keep the range parked.
+
+    Returns None when released, else the failure fields for the row (with
+    ``_changed`` when the registry was edited).
+    """
+    if job.get("changed"):
+        return _changed_during_teardown(job)
+    item = _parked_item(registry, job)
+    if item is None:
+        return _changed_during_teardown(job)
+    tailnet = item["tailnet"]
+    tailnet.pop(lifecycle.TEARDOWN_MARKER_KEY, None)
+    failure = job.get("failure")
+    if failure is None:
+        tailnet["configured_at"] = None
+        lifecycle.release_item(item)  # configured_at cleared: no second `off`
+        return None
+    # Same parked shape as a failed teardown in park_item_for_exit: reserved,
+    # mapping recorded (it may still be live), restore_pending set, never released.
+    why = failure.get("message") or failure.get("reason") or "tailscale command failed"
+    return {
+        "reason": "tailnet_teardown_failed",
+        "message": (
+            f"Stopped range {job['range_id']} but could not remove the Tailscale "
+            f"{job['mode']} mapping for port {job['port']} ({why}). The range stays reserved "
+            "with the mapping recorded; fix Tailscale, then stop or release it again."
+        ),
+        "error": failure,
+        "_changed": True,
+    }
+
+
 def sweep_result(options: dict) -> dict[str, Any]:
     raw_project = options.get("project")
     project = project_path(raw_project) if raw_project else None
@@ -171,24 +320,61 @@ def sweep_result(options: dict) -> dict[str, Any]:
                 )
             return payload, False, []
         # Candidates were recomputed under the registry lock (no TOCTOU with
-        # an earlier report); each goes through the normal exit teardown.
+        # an earlier report). Lock 1 decides and marks; no subprocess runs here.
         history = resolve_history_env_name(registry, options.get("environment"))
         ensure_baseline(registry, history)
         changed = []
         for proj, item, row in stale:
-            ok, detail = park_item_for_exit(item, proj, also_release=True)
-            if ok:
+            job = _park_for_release(item, proj, row)
+            if job is None:
                 payload["released"].append(row)
             else:
-                payload["failed"].append({**row, "reason": detail.get("reason"), "message": detail.get("message")})
+                pending.append(job)
             changed.append(proj)
         maybe_push_history(registry, "sweep", history)
-        if payload["failed"]:
-            payload["warnings"] = [
-                {"reason": f["reason"], "message": f["message"]} for f in payload["failed"]
-            ]
         return payload, True, sorted(set(changed))
 
+    pending: list[dict[str, Any]] = []
+    payload = _locked(mutate)
+    if not pending:
+        return payload
+    # Lock released: run the slow `tailscale ... off` commands, then record
+    # their outcome in a second short locked write.
+    for job in pending:
+        if not _locked(lambda registry, job=job: _claim_teardown(registry, job)):
+            job["changed"] = True  # changed since lock 1: do not remove its mapping
+            continue
+        try:
+            job["failure"] = lifecycle.run_tailnet_teardown(job["mode"], job["port"])
+        except Exception as exc:  # noqa: BLE001 - recorded, the range stays parked
+            job["failure"] = {"reason": "tailnet_command_failed", "message": str(exc)}
+
+    def finish(registry: dict):
+        history = resolve_history_env_name(registry, options.get("environment"))
+        ensure_baseline(registry, history)
+        changed = []
+        for job in pending:
+            outcome = _finish_release(registry, job)
+            if outcome is None:
+                payload["released"].append(job["row"])
+                changed.append(job["project"])
+            else:
+                if outcome.pop("_changed", False):
+                    changed.append(job["project"])
+                payload["failed"].append({**job["row"], **outcome})
+        if changed:
+            maybe_push_history(registry, "sweep", history)
+        return None, bool(changed), sorted(set(changed))
+
+    _locked(finish)
+    if payload["failed"]:
+        payload["warnings"] = [
+            {"reason": f["reason"], "message": f["message"]} for f in payload["failed"]
+        ]
+    return payload
+
+
+def _locked(mutate) -> Any:
     start, end = pool_bounds()
     try:
         return mutate_registry(

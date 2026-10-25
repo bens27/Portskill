@@ -9,6 +9,8 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any
 
+from .teardown_marker import teardown_in_progress_message, teardown_marker
+
 
 PLACEHOLDER_SENTINEL = "portskill: edit .portskill/"
 
@@ -78,6 +80,8 @@ def service_launch(item: dict[str, Any], command: str | None) -> tuple[list[str]
 
 def launch_service(item: dict[str, Any], project: str) -> ServiceLaunchOutcome:
     """Launch one configured service, update lifecycle metadata, and never emit or exit."""
+    if teardown_marker(item) is not None:
+        return ServiceLaunchOutcome(False, "teardown_in_progress", teardown_in_progress_message(item))
     existing_lifecycle = item.get("lifecycle")
     lifecycle = existing_lifecycle if isinstance(existing_lifecycle, dict) else {}
     command = _optional_string(item.get("command"))
