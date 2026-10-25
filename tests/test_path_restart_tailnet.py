@@ -250,6 +250,18 @@ class PathRestartTailnetTests(unittest.TestCase):
         # The stop phase marks the mapping pending; declining clears it after.
         self.assertNotIn("restore_pending", stored["tailnet"])
 
+    def test_start_none_on_active_served_range_tears_mapping_down(self) -> None:
+        before = self._start_served()
+        started = self._path("start", "--tailnet", "none")
+        self.assertEqual(started.returncode, 0, started.stderr or started.stdout)
+        port = before["start"]
+        self.assertEqual(self.ts.calls(), [f"serve --bg --https={port} localhost:{port} off"])
+        stored = self._registry_range(before["id"])
+        self.assertEqual(stored["state"], "active")
+        self.assertEqual(stored["tailnet"]["mode"], "none")
+        self.assertIsNone(stored["tailnet"]["configured_at"])
+        self.assertNotIn("restore_pending", stored["tailnet"])
+
     def test_restart_unapplied_recorded_mode_is_not_restored(self) -> None:
         # Login skipped at start: mode recorded, never configured.
         self.ts.set_state("NeedsLogin")

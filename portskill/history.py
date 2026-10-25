@@ -5,8 +5,8 @@ import copy
 
 from .domain import DomainError, utc_now
 from .lifecycle import (
+    park_item_for_exit,
     range_has_live_process,
-    release_item,
     run_stop_script_if_ready,
     terminate_lifecycle_processes,
 )
@@ -114,6 +114,7 @@ def restore_history(registry, env_name, index):
     current_refs = _cohort_range_refs(registry, key)
     current_by_id = {item.get("id"): (proj, item) for proj, item in current_refs if item.get("id")}
     changed_projects = set()
+    teardown_failures = []
 
     # Release ranges present now in cohort but not in snapshot
     for rid, (proj, item) in list(current_by_id.items()):
@@ -134,8 +135,40 @@ def restore_history(registry, env_name, index):
                     "process_still_running",
                     f"cannot restore: range {rid} still has a live process; stop it first",
                 )
-        release_item(item)
+        # Same teardown-then-release contract as stop: a failed teardown parks
+        # the range reserved with the mapping recorded (never released, never
+        # left active with a dead pid) and is committed below.
+        ok, detail = park_item_for_exit(item, proj, also_release=True)
+        if not ok and "range" not in detail:
+            raise DomainError(
+                detail.get("reason") or "release_failed",
+                detail.get("message"),
+                **{k: v for k, v in detail.items() if k not in ("reason", "message")},
+            )
         changed_projects.add(proj)
+        if not ok:
+            teardown_failures.append(
+                {"project": proj, **{k: v for k, v in detail.items() if k != "range"}}
+            )
+
+    if teardown_failures:
+        # Abort before applying the snapshot (cursor unchanged), but commit the
+        # parked ranges: the processes are already gone. Retrying the restore
+        # once Tailscale works tears the mappings down and finishes it.
+        count = len(teardown_failures)
+        return {
+            "status": "error",
+            "reason": "tailnet_teardown_failed",
+            "message": (
+                f"History restore stopped {count} range(s) but could not remove their "
+                "Tailscale mappings; they stay reserved with the mapping recorded and "
+                "the snapshot was not applied. Fix Tailscale, then restore again."
+            ),
+            "environment": key,
+            "index": int(index),
+            "cursor": entry.get("cursor"),
+            "failures": teardown_failures,
+        }, sorted(changed_projects)
 
     # Update existing or re-add missing from snapshot
     for rid, (project, snap_range) in desired.items():
@@ -280,6 +313,13 @@ def history_list_result(options: dict | None = None) -> dict:
     return mutate_registry_meta(read)
 
 
+def _raise_after_commit(payload: dict) -> dict:
+    """Report a restore that committed parked ranges but did not apply."""
+    if payload.get("status") == "error":
+        raise DomainError(payload.get("reason") or "history_restore_failed", payload.get("message"), payload=payload)
+    return payload
+
+
 def history_restore_result(options: dict | None = None) -> dict:
     options = options or {}
     if "index" not in options:
@@ -291,7 +331,7 @@ def history_restore_result(options: dict | None = None) -> dict:
         )
         return payload, True, changed
 
-    return mutate_registry_meta(mutate)
+    return _raise_after_commit(mutate_registry_meta(mutate))
 
 
 def history_reset_result(options: dict | None = None) -> dict:
@@ -301,7 +341,7 @@ def history_reset_result(options: dict | None = None) -> dict:
         payload, changed = reset_history(registry, options.get("environment"))
         return payload, True, changed
 
-    return mutate_registry_meta(mutate)
+    return _raise_after_commit(mutate_registry_meta(mutate))
 
 
 def history_clear_result(options: dict | None = None) -> dict:
