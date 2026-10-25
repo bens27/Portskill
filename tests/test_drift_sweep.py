@@ -563,7 +563,7 @@ class DriftSweepTests(unittest.TestCase):
         self.assertEqual(reasons, {
             "relistened": "no_longer_stale",
             "unconfirmed": "not_confirmed",
-            "gone": "no_longer_stale",
+            "gone": "unknown_range",
         })
         self.assertEqual(self._stored("confirmed")["state"], "released")
         self.assertEqual(self._stored("unconfirmed")["state"], "active")
@@ -645,6 +645,91 @@ class DriftSweepTests(unittest.TestCase):
         self.assertEqual([r["range_id"] for r in payload["released"]], ["r2"])
         self.assertEqual(self._stored("r1")["state"], "active")
         self.assertEqual(self._stored("r2")["state"], "released")
+
+    # -- confirmed ids that cannot be released: distinct skip reasons -------
+
+    def _write_two_projects(self) -> str:
+        """Scope: self.project holds a stale and a reserved range; another project a stale one."""
+        other = str((self.iso.root / "other").resolve())
+        os.mkdir(other)
+        self.ports = {"stale": _free_port(), "kept": _free_port(), "foreign": _free_port()}
+        self.iso.write_registry({"projects": {
+            self.project: {"ranges": [
+                self._range("stale", self.ports["stale"]),
+                self._range("kept", self.ports["kept"], state="reserved"),
+            ]},
+            other: {"ranges": [self._range("foreign", self.ports["foreign"])]},
+        }})
+        self._settle()
+        return other
+
+    def _sweep_cli(self, range_ids: list[str], project: str | None) -> dict:
+        argv = [sys.executable, "-B", "-m", "portskill.cli", "sweep", "--release"]
+        for range_id in range_ids:
+            argv += ["--range-id", range_id]
+        if project:
+            argv += ["--project", project]
+        proc = subprocess.run(
+            argv, capture_output=True, text=True, env=self.iso.subprocess_env(), cwd=self.project,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout)
+
+    def _sweep_mcp(self, range_ids: list[str], project: str | None) -> dict:
+        from portskill import mcp
+
+        args: dict = {"release": True, "range_ids": range_ids}
+        if project:
+            args["project"] = project
+        tool = mcp.call_tool("sweep", args)
+        self.assertFalse(tool["isError"], tool)
+        return tool["structuredContent"]
+
+    def _assert_skip(self, surface, range_id: str, project_filter: str | None,
+                     reason: str, owner: str | None, start: int | None) -> None:
+        before = self._bytes()
+
+        result = surface([range_id], project_filter)
+
+        self.assertEqual(result["released"], [])
+        rows = {row["range_id"]: row for row in result["skipped"]}
+        self.assertEqual(rows[range_id]["skip_reason"], reason)
+        self.assertEqual(rows[range_id]["project"], owner)
+        self.assertEqual(rows[range_id]["start"], start)
+        self.assertEqual(self._bytes(), before)
+        self.assertEqual(self._stored("stale")["state"], "active")
+        self.assertEqual(self._stored("kept")["state"], "reserved")
+
+    def _check_all_reasons(self, surface) -> None:
+        other = self._write_two_projects()
+        with self.subTest("unknown_range"):
+            self._assert_skip(surface, "ghost", None, "unknown_range", None, None)
+        with self.subTest("not_in_scope"):
+            self._assert_skip(surface, "foreign", self.project, "not_in_scope",
+                              other, self.ports["foreign"])
+            self.assertEqual(self._stored("foreign", other)["state"], "active")
+        with self.subTest("no_longer_stale"):
+            self._assert_skip(surface, "kept", self.project, "no_longer_stale",
+                              self.project, self.ports["kept"])
+        with self.subTest("no_longer_stale without a project filter"):
+            self._assert_skip(surface, "kept", None, "no_longer_stale",
+                              self.project, self.ports["kept"])
+
+    def test_cli_sweep_release_reports_distinct_skip_reasons(self) -> None:
+        self._check_all_reasons(self._sweep_cli)
+
+    def test_mcp_sweep_release_reports_distinct_skip_reasons(self) -> None:
+        self._check_all_reasons(self._sweep_mcp)
+
+    def test_not_confirmed_rows_keep_project_and_start(self) -> None:
+        self._write_two_projects()
+        result = self._sweep(release=True, range_ids=["ghost"], project=self.project)
+        rows = {row["range_id"]: row for row in result["skipped"]}
+        self.assertEqual(rows["stale"]["skip_reason"], "not_confirmed")
+        self.assertEqual(rows["stale"]["project"], self.project)
+        self.assertEqual(rows["stale"]["start"], self.ports["stale"])
+        self.assertNotIn("foreign", rows)
+        self.assertEqual(result["released"], [])
 
     def test_cli_sweep_defaults_to_report_only(self) -> None:
         self._write([self._range("r1", _free_port())])

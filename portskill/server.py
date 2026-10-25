@@ -3441,7 +3441,7 @@ def render_page(view: dict, tailscale: dict | None = None) -> str:
     }}
     if(action==='sweep'){{
       btn.disabled=true;
-      var sweepLine=function(r){{return (r.project||'')+' :'+(r.start==null?r.range_id:r.start)+' ('+(r.reasons||[]).join(', ')+')';}};
+      var sweepLine=function(r){{var where=r.start==null?String(r.range_id||'?'):':'+r.start,reasons=(r.reasons||[]).join(', ');return (r.project?r.project+' ':'')+where+(reasons?' ('+reasons+')':'');}};
       postAction({{action:'sweep'}}).then(function(result){{
         btn.disabled=false;
         if(!result.ok){{handleResult(result,btn);return;}}

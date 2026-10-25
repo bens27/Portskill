@@ -100,8 +100,11 @@ Run `sweep` (MCP `sweep`) to review drift; it is read-only. To free stale
 ranges, pass the reviewed ids: `sweep --release --range-id ID` (repeatable; MCP
 `release: true, range_ids: [...]`). Release re-checks under the registry lock
 and frees only ranges that are confirmed and still stale; others are listed in
-`skipped` with `skip_reason` `no_longer_stale` or `not_confirmed`. Without
-range ids, release frees every currently stale range. Freeing uses the normal
+`skipped` with a `skip_reason`: `not_confirmed` (stale but not in the ids),
+`no_longer_stale` (confirmed, in scope, no longer stale), `unknown_range` (no
+range has that id; `project` and `start` are null) or `not_in_scope` (the range
+belongs to a project outside `--project`). Nothing is freed for any of them.
+Without range ids, release frees every currently stale range. Freeing uses the normal
 stop teardown; a failed Tailscale teardown leaves the range reserved (see
 `failed`/`warnings`). `untracked_listener` is never swept: stop that process or
 restart the service. A live process with no listener: check

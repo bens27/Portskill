@@ -13,9 +13,17 @@ it; ``status`` still reports its ``port_unbound`` hint.
 Release re-checks every candidate under the registry lock. ``range_ids``
 narrows a release to the ranges the caller reviewed: a confirmed range that is
 no longer stale, or a stale range that was not confirmed, is reported under
-``skipped`` (``skip_reason`` ``no_longer_stale`` / ``not_confirmed``) instead
-of being freed. Without ``range_ids``, release frees every currently stale
-range.
+``skipped`` instead of being freed, with a ``skip_reason``:
+
+- ``not_confirmed``: stale, but not in ``range_ids``;
+- ``no_longer_stale``: confirmed and in scope, but no longer stale;
+- ``unknown_range``: confirmed, but no range has that id (``project`` and
+  ``start`` are then null);
+- ``not_in_scope``: confirmed, but the range belongs to a project outside the
+  ``project`` filter.
+
+Every skip row of an existing range carries its ``project`` and ``start``.
+Without ``range_ids``, release frees every currently stale range.
 """
 from __future__ import annotations
 
@@ -73,7 +81,36 @@ def _scan(registry: dict, project: str | None) -> tuple[list, list]:
     return stale, skipped
 
 
-def _apply_confirmation(stale: list, skipped: list, confirmed: set, payload: dict) -> list:
+def _find_range(registry: dict, range_id: str) -> tuple[str, dict] | None:
+    for proj, entry in (registry.get("projects") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        for item in entry.get("ranges") or []:
+            if isinstance(item, dict) and item.get("id") == range_id:
+                return proj, item
+    return None
+
+
+def _confirmed_skip_row(registry: dict, project: str | None, range_id: str) -> dict[str, Any]:
+    """Skip row for a confirmed id that is neither stale nor drifted in scope."""
+    found = _find_range(registry, range_id)
+    if found is None:
+        return {
+            "project": None,
+            "range_id": range_id,
+            "start": None,
+            "end": None,
+            "reasons": [],
+            "skip_reason": "unknown_range",
+        }
+    proj, item = found
+    out_of_scope = project is not None and proj != project
+    return {**_row(proj, item, {}), "skip_reason": "not_in_scope" if out_of_scope else "no_longer_stale"}
+
+
+def _apply_confirmation(
+    registry: dict, project: str | None, stale: list, skipped: list, confirmed: set, payload: dict
+) -> list:
     """Keep only stale ranges the caller confirmed; report the rest as skipped."""
     kept = []
     for proj, item, row in stale:
@@ -87,7 +124,7 @@ def _apply_confirmation(stale: list, skipped: list, confirmed: set, payload: dic
         if range_id in drifted:
             drifted[range_id]["skip_reason"] = "no_longer_stale"
         else:
-            payload["skipped"].append({"range_id": range_id, "skip_reason": "no_longer_stale"})
+            payload["skipped"].append(_confirmed_skip_row(registry, project, range_id))
     return kept
 
 
@@ -126,7 +163,7 @@ def sweep_result(options: dict) -> dict[str, Any]:
             "failed": [],
         }
         if release and confirmed is not None:
-            stale = _apply_confirmation(stale, skipped, confirmed, payload)
+            stale = _apply_confirmation(registry, project, stale, skipped, confirmed, payload)
         if not release or not stale:
             if stale and not release:
                 payload["hint"] = (
