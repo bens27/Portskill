@@ -10,6 +10,8 @@ from .domain import DomainError, pid_alive, pool_bounds_from_environment
 from .drift import drift_summary, range_drift
 from .registry import CorruptRegistryError, mutate_registry
 from .registry_domain import (
+    DEFAULT_LIFECYCLE_DIR,
+    LEGACY_LIFECYCLE_DIR,
     default_machines,
     get_machine,
     is_remote_range,
@@ -210,7 +212,7 @@ def status_result(
         return payload, False, []
 
     try:
-        return mutate_registry(
+        payload = mutate_registry(
             read,
             start=start,
             end=end,
@@ -220,6 +222,74 @@ def status_result(
         raise DomainError("corrupt_registry", str(exc)) from exc
     except (OSError, UnicodeError, TypeError, ValueError) as exc:
         raise DomainError("status_unavailable", str(exc)) from exc
+    # Mirror files are read after the registry lock is released.
+    warnings = mirror_warnings(payload.get("projects") or {})
+    if warnings:
+        payload["mirror_warnings"] = warnings
+    return payload
+
+
+LEGACY_MIRROR_HINT = (
+    "This .portskill.json still names the pre-rename .port-registry/ directory. "
+    "The registry already reads lifecycle paths that start with .port-registry/ "
+    "as .portskill/, and rewrites this mirror on the next change to the project "
+    "(allocate, start, stop, activate or release). Other paths holding "
+    ".port-registry (for example absolute ones) are not rewritten: update the "
+    "range's start/stop script to the replacement path."
+)
+
+
+def _legacy_path_replacement(value: str) -> str | None:
+    """``value`` with its ``.port-registry`` component renamed, or None."""
+    parts = value.split("/")
+    if LEGACY_LIFECYCLE_DIR not in parts:
+        return None
+    return "/".join(DEFAULT_LIFECYCLE_DIR if part == LEGACY_LIFECYCLE_DIR else part for part in parts)
+
+
+def legacy_mirror_paths(project: str) -> list[dict[str, Any]]:
+    """Lifecycle paths in ``<project>/.portskill.json`` that use ``.port-registry/``.
+
+    Read-only: a missing, unreadable or malformed mirror yields no findings,
+    since the registry, not the mirror, is authoritative.
+    """
+    try:
+        data = json.loads((pathlib.Path(project) / ".portskill.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError):
+        return []
+    ranges = data.get("ranges") if isinstance(data, dict) else None
+    found = []
+    for item in ranges if isinstance(ranges, list) else []:
+        lifecycle = item.get("lifecycle") if isinstance(item, dict) else None
+        if not isinstance(lifecycle, dict):
+            continue
+        for field in sorted(lifecycle):
+            value = lifecycle[field]
+            replacement = _legacy_path_replacement(value) if isinstance(value, str) else None
+            if replacement is not None:
+                found.append({
+                    "range_id": item.get("id"),
+                    "field": field,
+                    "value": value,
+                    "replacement": replacement,
+                })
+    return found
+
+
+def mirror_warnings(projects: dict) -> list[dict[str, Any]]:
+    """One ``legacy_lifecycle_paths`` warning per project mirror that needs it."""
+    warnings = []
+    for project in sorted(p for p in projects if isinstance(p, str) and p.startswith("/")):
+        paths = legacy_mirror_paths(project)
+        if paths:
+            warnings.append({
+                "project": project,
+                "code": "legacy_lifecycle_paths",
+                "mirror": str(pathlib.Path(project) / ".portskill.json"),
+                "paths": paths,
+                "hint": LEGACY_MIRROR_HINT,
+            })
+    return warnings
 
 
 def _search_payload(

@@ -16,10 +16,25 @@ python3 -m portskill --mcp-stdio  # stdio MCP
 python3 -m portskill.cli <subcommand> [flags]
 ```
 
-Installed commands are `portskill` (app) and `portskill-cli` (CLI). In a source
-checkout, run from its root; an installed sidecar also provides `portskill_cli.py`
-and `app.py` wrappers at its root. Use absolute wrapper paths when working in
-another project, and pass that project's path explicitly.
+A pip install puts `portskill` (app) and `portskill-cli` (CLI) on PATH. When
+`command -v portskill-cli` finds nothing, use the first that exists:
+
+1. The sidecar wrapper beside this skill: `python3 <sidecar>/portskill_cli.py`,
+   where `<sidecar>` is the directory holding the top-level `SKILL.md`, the parent
+   of this `skill/` directory. `scripts/install-skill.sh` installs it at
+   `${PORTSKILL_SKILL_DIR:-$HOME/.agents/skills/portskill}`; `~/.claude/skills/portskill`
+   links there. The wrapper runs from any directory.
+2. A source checkout: `<checkout>/scripts/cli.sh` (or
+   `python3 <checkout>/portskill_cli.py`), from any directory. The checkout
+   location varies by machine, for example `~/Development/Portskill`. To locate one,
+   look for a directory holding both `portskill/cli.py` and `scripts/cli.sh`.
+3. Fallback: `cd <checkout or sidecar> && python3 -m portskill.cli ...`, or run it
+   from anywhere with `PYTHONPATH=<checkout or sidecar>`. Without either, `-m`
+   fails with `No module named portskill`.
+
+These run the same CLI and read the same registry. Pass the target project as an
+absolute path, for example `--project "$(pwd)"`. `scripts/cli.sh` and option 3
+change directory first, so a relative `--project .` names the wrong project.
 
 The HTML UI and HTTP MCP share the same local listener. Open the printed URL or
 read `ui_url` / `mcp_url` from `~/.config/portskill/listen.json`; the port is
@@ -115,6 +130,19 @@ of that port defaults off. Stdio MCP does not use HTTP authentication.
 `~/.config/portskill/registry.json` is authoritative; `.portskill.json`
 is an optional project mirror. Use the tools to update state. Report corrupt
 registry/listen files without overwriting them.
+
+Migration from the pre-rename `port-registry` names: `~/.config/port-registry`,
+`<project>/.port-registry/` and `<project>/.port-registry.json` become
+`~/.config/portskill`, `.portskill/` and `.portskill.json`. They move on the first
+run and leave a symlink at the old name, so old script paths keep resolving. The
+registry reads lifecycle paths that start with `.port-registry/` as `.portskill/...`.
+A mirror written before the rename can still list the old paths. `status` then
+adds `mirror_warnings` (code `legacy_lifecycle_paths`), giving each stale path
+and its `replacement`. Status only reports; it never edits the mirror. The
+next change to that project (allocate, start, stop, activate or release)
+rewrites the paths that start with `.port-registry/`. Any other path holding
+`.port-registry` (for example an absolute one) stays as written: fix it by
+updating the range's start/stop script. Do not hand-edit `.portskill.json`.
 
 Read only the reference needed for the task:
 
