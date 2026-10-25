@@ -128,7 +128,7 @@ class Slice5BUIBindingTests(unittest.TestCase):
             ("tailscale-status", {"ignored": True}, {}),
             ("tailscale-login", {"wait": "bad"}, {"wait": 0, "no_open": True}),
             ("tailscale-logout", {"ignored": True}, {}),
-            ("serve-portskill", {"enabled": "off"}, {"state": "off"}),
+            ("serve-portskill", {"enabled": False}, {"state": "off"}),
             ("discover-ports", {"ignored": True}, {}),
             (
                 "discover-import",

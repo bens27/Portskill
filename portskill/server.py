@@ -362,6 +362,7 @@ def _bind_ui_mcp_user_command_delete(spec: CommandSpec, payload: dict) -> dict:
 
 def _bind_ui_mcp_tool_set(spec: CommandSpec, payload: dict) -> dict:
     del spec
+    require_boolean_values(payload, ("enabled",))
     enabled = parse_bool(payload.get("enabled"))
     tool_arg = f"{payload['name'].strip()}={'on' if enabled else 'off'}"
     return _settings_set_options(("--mcp-tool", tool_arg))
@@ -369,6 +370,7 @@ def _bind_ui_mcp_tool_set(spec: CommandSpec, payload: dict) -> dict:
 
 def _bind_ui_handoff_set_enabled(spec: CommandSpec, payload: dict) -> dict:
     del spec
+    require_boolean_values(payload, ("enabled",))
     return {"handoff_enabled": parse_bool(payload.get("enabled"))}
 
 
@@ -4466,7 +4468,10 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
             )
 
     if action == "serve-portskill":
-        serve_spec, serve_options = _ui_command_options(action, body)
+        try:
+            serve_spec, serve_options = _ui_command_options(action, body)
+        except DomainError as exc:
+            return _domain_exception_result(exc)
         enabled = serve_options["state"] == "on"
         if enabled:
             code, payload, stdout = _run_domain(
@@ -4553,8 +4558,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         name = body.get("name")
         if not isinstance(name, str) or not name.strip():
             return 400, {"ok": False, "message": "expected name"}
-        enabled = body.get("enabled")
-        if enabled is None:
+        if "enabled" not in body:
             return 400, {"ok": False, "message": "expected enabled bool"}
         code, payload, stdout = _run_domain(
             lambda: _execute_ui_command("mcp-tool-set", body)
@@ -4562,8 +4566,7 @@ def dispatch_ui_action(body: dict) -> tuple[int, dict]:
         return _cli_result(code, payload, stdout)
 
     if action == "handoff-set-enabled":
-        enabled = body.get("enabled")
-        if enabled is None:
+        if "enabled" not in body:
             return 400, {"ok": False, "message": "expected enabled bool"}
         return _domain_cli_result(
             lambda: _execute_ui_command("handoff-set-enabled", body)

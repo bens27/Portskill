@@ -186,12 +186,19 @@ def validate_mcp_boolean_args(tool_name: str, arguments: Any) -> None:
         require_boolean_values(arguments, names)
 
 
+# A UI field coerced from a wire boolean into a non-boolean domain value
+# (tailscale serve-portskill: enabled true/false -> state "on"/"off").
+_UI_BOOLEAN_WIRE_COERCIONS = frozenset({"parsed_boolean"})
+
+
 def ui_boolean_fields(spec: CommandSpec) -> tuple[str, ...]:
-    """Payload field names of the declared boolean UI params of ``spec``."""
+    """Payload field names of ``spec`` that must arrive as JSON booleans:
+    every kind=boolean UI param, plus any field read as a wire boolean."""
     return tuple(
         field
         for param in spec.params
-        if param.kind == "boolean" and param.ui is not None
+        if param.ui is not None
+        and (param.kind == "boolean" or param.ui.coercion in _UI_BOOLEAN_WIRE_COERCIONS)
         for field in param.ui.fields
     )
 

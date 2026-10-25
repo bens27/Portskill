@@ -233,5 +233,103 @@ class SweepAndStatusBooleanTests(unittest.TestCase):
                 self.assertFalse(mcp.call_tool("status", {"all": good}).get("isError"))
 
 
+
+ENABLED_BAD_VALUES = (1, 0, [], {}, None, "x", "false", "true")
+
+
+class UIEnabledFieldTests(unittest.TestCase):
+    """The UI 'enabled' toggles: serve-portskill, mcp-tool-set,
+    handoff-set-enabled. Only JSON true/false; nothing runs otherwise."""
+
+    def setUp(self) -> None:
+        self.iso = IsolatedConfig().__enter__()
+        self.addCleanup(self.iso.__exit__, None, None, None)
+        self.iso.write_registry()
+        # No test may reach a real tailscale binary.
+        from portskill import server, tailscale_commands
+
+        for target, attr, value in (
+            (server, "probe_portskill_serve_status", {}),
+            (tailscale_commands, "probe_tailscale_status", {"BackendState": "Running"}),
+        ):
+            patcher = mock.patch.object(target, attr, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _serve(self, value):
+        from portskill import server
+
+        logged_in = {"status": "ok", "logged_in": True}
+        with mock.patch.object(server, "execute_command", return_value=logged_in) as execute:
+            result = server.dispatch_ui_action({"action": "serve-portskill", "enabled": value})
+        return result, execute
+
+    def test_serve_portskill_rejects_non_boolean_without_running(self) -> None:
+        before = _tree_bytes(self.iso.root)
+        for bad in ENABLED_BAD_VALUES:
+            with self.subTest(value=bad):
+                (code, body), execute = self._serve(bad)
+                self.assertEqual(code, 2, body)
+                self.assertFalse(body["ok"])
+                self.assertEqual(body["result"]["reason"], "invalid_args")
+                execute.assert_not_called()
+        self.assertEqual(_tree_bytes(self.iso.root), before)
+
+    def test_serve_portskill_accepts_json_booleans(self) -> None:
+        from portskill.command_specs import TAILSCALE_SERVE_PORTSKILL_COMMAND
+
+        for value, state in ((True, "on"), (False, "off")):
+            with self.subTest(value=value):
+                (code, body), execute = self._serve(value)
+                self.assertEqual(code, 0, body)
+                self.assertIs(body["enabled"], value)
+                serve_calls = [
+                    call for call in execute.call_args_list
+                    if call.args[0] is TAILSCALE_SERVE_PORTSKILL_COMMAND
+                ]
+                self.assertEqual(len(serve_calls), 1)
+                self.assertEqual(serve_calls[0].args[1]["state"], state)
+
+    def test_settings_toggles_reject_non_boolean_without_writing(self) -> None:
+        from portskill import server
+
+        before = _tree_bytes(self.iso.root)
+        for action, extra in (
+            ("mcp-tool-set", {"name": "status"}),
+            ("handoff-set-enabled", {}),
+        ):
+            for bad in ENABLED_BAD_VALUES:
+                with self.subTest(action=action, value=bad):
+                    code, body = server.dispatch_ui_action(
+                        {"action": action, **extra, "enabled": bad}
+                    )
+                    self.assertEqual(code, 2, body)
+                    self.assertFalse(body["ok"])
+                    self.assertEqual(body["result"]["reason"], "invalid_args")
+            with self.subTest(action=action, value="absent"):
+                code, body = server.dispatch_ui_action({"action": action, **extra})
+                self.assertEqual(code, 400)
+                self.assertEqual(body["message"], "expected enabled bool")
+        self.assertEqual(_tree_bytes(self.iso.root), before)
+
+    def test_settings_toggles_accept_json_booleans(self) -> None:
+        from portskill import server
+        from portskill.registry import read_settings
+
+        for value in (False, True):
+            with self.subTest(action="mcp-tool-set", value=value):
+                code, body = server.dispatch_ui_action(
+                    {"action": "mcp-tool-set", "name": "status", "enabled": value}
+                )
+                self.assertEqual(code, 0, body)
+                self.assertIs(read_settings()["mcp_tools"]["status"], value)
+            with self.subTest(action="handoff-set-enabled", value=value):
+                code, body = server.dispatch_ui_action(
+                    {"action": "handoff-set-enabled", "enabled": value}
+                )
+                self.assertEqual(code, 0, body)
+                self.assertIs(read_settings()["handoff_enabled"], value)
+
+
 if __name__ == "__main__":
     unittest.main()
